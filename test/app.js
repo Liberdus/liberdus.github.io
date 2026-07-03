@@ -1,11 +1,12 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'r'
+const version = 's'
+const BOOT_SPLASH_HANDOFF_MS = 1000;
 let myVersion = '0';
 async function checkVersion() {
   // Use network-specific version key to avoid false update alerts when switching networks
   const versionKey = network?.netid ? `version_${network.netid}` : 'version';
-  myVersion = localStorage.getItem(versionKey) || '0';
+  myVersion = (localStorage.getItem(versionKey) || '0').trim();
   let newVersion;
   try {
     const response = await fetch(`version.html`, {cache: 'reload', headers: {
@@ -13,7 +14,7 @@ async function checkVersion() {
       Pragma: 'no-cache',
     }});
     if (!response.ok) throw new Error('Version check failed');
-    newVersion = await response.text();
+    newVersion = (await response.text()).trim();
   } catch (error) {
     console.error('Version check failed:', error);
     showToast('Version check failed. Your Internet connection may be down.', 0, 'error');
@@ -802,6 +803,9 @@ document.addEventListener('DOMContentLoaded', async () => {
   // Settings Modal
   settingsModal.load();
 
+  // Chat Settings Modal
+  chatSettingsModal.load();
+
   // Manage Contacts Modal
   manageContactsModal.load();
 
@@ -877,6 +881,9 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   document.addEventListener('visibilitychange', handleVisibilityChange); // Keep as document
 
+  // App-wide unload guard; handleBeforeUnload only acts when protected state exists.
+  window.addEventListener('beforeunload', handleBeforeUnload);
+
   // Add global keyboard listener for fullscreen toggling
   window.addEventListener('resize', () => setTimeout(handleKeyboardFullscreenToggle(), 300));
 
@@ -887,17 +894,23 @@ document.addEventListener('DOMContentLoaded', async () => {
 
 // Add unload handler to save myData
 function handleBeforeUnload(e) {
-  reactNativeApp.handleNativeAppSubscribe();
   if (menuModal.isSignoutExit){
     return;
   }
   // Check if backup is in progress
   if (backupAccountModal.isUploading) {
+    reactNativeApp.handleNativeAppSubscribe();
     e.preventDefault();
     e.returnValue = 'A backup is currently being uploaded to Google Drive. Leaving the page will interrupt the backup. Are you sure you want to leave?';
     return e.returnValue;
   }
+  if (createAccountModal.isCreatingAccount) {
+    e.preventDefault();
+    e.returnValue = true;
+    return e.returnValue;
+  }
   if (myData){
+    reactNativeApp.handleNativeAppSubscribe();
     e.preventDefault();
     saveState();    // This save might not work if the amount of data to save is large and user quickly clicks on Leave button
   }
@@ -1030,6 +1043,8 @@ class WelcomeScreen {
 
   load() {
     this.screen = document.getElementById('welcomeScreen');
+    this.bootSplash = document.getElementById('bootSplash');
+    assert(this.bootSplash, 'Boot splash is required');
     this.signInButton = document.getElementById('signInButton');
     this.createAccountButton = document.getElementById('createAccountButton');
     this.openWelcomeMenuButton = document.getElementById('openWelcomeMenu');
@@ -1071,6 +1086,109 @@ class WelcomeScreen {
     });
 
     this.orderButtons();
+    this.revealHydratedWelcome();
+  }
+
+  async revealHydratedWelcome() {
+    await this.waitForBootSplashImages();
+
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      this.showHydratedWelcome();
+      return;
+    }
+
+    this.bootSplash.classList.add('is-ready');
+    await this.waitForBootSplashPulse();
+    await this.animateBootSplashToWelcome();
+  }
+
+  async waitForBootSplashImages() {
+    const splashLogo = this.bootSplash.querySelector('.boot-splash-logo');
+    const welcomeLogo = this.logoLink.querySelector('img');
+    assert(splashLogo, 'Boot splash logo is required');
+    assert(welcomeLogo, 'Welcome logo is required');
+
+    await Promise.all([
+      this.waitForImage(splashLogo),
+      this.waitForImage(welcomeLogo),
+    ]);
+    await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+  }
+
+  async waitForImage(image) {
+    if (!image.complete) {
+      await new Promise((resolve) => image.addEventListener('load', resolve, { once: true }));
+    }
+    assert(image.naturalWidth > 0, 'Boot splash image is required');
+
+    if (image.decode) {
+      await image.decode();
+    }
+  }
+
+  waitForBootSplashPulse() {
+    const halo = this.bootSplash.querySelector('.boot-splash-halo');
+    assert(halo, 'Boot splash halo is required');
+    const [animation] = halo.getAnimations();
+    assert(animation, 'Boot splash halo animation is required');
+    assert(animation.effect, 'Boot splash halo animation effect is required');
+
+    const pulseDurationMs = animation.effect.getComputedTiming().duration;
+    assert(Number.isFinite(pulseDurationMs) && pulseDurationMs > 0, 'Boot splash halo duration is required');
+    return Promise.race([
+      animation.finished,
+      new Promise((resolve) => setTimeout(resolve, pulseDurationMs + 100)),
+    ]);
+  }
+
+  async animateBootSplashToWelcome() {
+    const splashLogo = this.bootSplash.querySelector('.boot-splash-logo');
+    const splashTitle = document.getElementById('bootSplashBrandTitle');
+    const welcomeLogo = this.logoLink.querySelector('img');
+    const welcomeTitle = document.getElementById('welcomeBrandTitle');
+    assert(splashLogo, 'Boot splash logo is required');
+    assert(splashTitle, 'Boot splash title is required');
+    assert(welcomeLogo, 'Welcome logo is required');
+    assert(welcomeTitle, 'Welcome title is required');
+
+    await new Promise((resolve) => requestAnimationFrame(resolve));
+    this.bootSplash.classList.add('is-handoff');
+
+    await Promise.all([
+      this.createBootSplashHandoffAnimation(splashLogo, welcomeLogo).finished,
+      this.createBootSplashHandoffAnimation(splashTitle, welcomeTitle).finished,
+    ]);
+    this.showHydratedWelcome();
+  }
+
+  createBootSplashHandoffAnimation(sourceElement, targetElement) {
+    const sourceRect = sourceElement.getBoundingClientRect();
+    const targetRect = targetElement.getBoundingClientRect();
+    assert(sourceRect.width && sourceRect.height, 'Boot splash handoff source must be measurable');
+    assert(targetRect.width && targetRect.height, 'Boot splash handoff target must be measurable');
+
+    const sourceCenterX = sourceRect.left + sourceRect.width / 2;
+    const sourceCenterY = sourceRect.top + sourceRect.height / 2;
+    const targetCenterX = targetRect.left + targetRect.width / 2;
+    const targetCenterY = targetRect.top + targetRect.height / 2;
+    const translateX = targetCenterX - sourceCenterX;
+    const translateY = targetCenterY - sourceCenterY;
+    const scale = targetRect.width / sourceRect.width;
+    const transform = 'translate3d(' + translateX + 'px, ' + translateY + 'px, 0) scale(' + scale + ')';
+
+    return sourceElement.animate([
+      { transform: 'translate3d(0, 0, 0) scale(1)' },
+      { transform },
+    ], {
+      duration: BOOT_SPLASH_HANDOFF_MS,
+      easing: 'cubic-bezier(0.22, 1, 0.36, 1)',
+      fill: 'forwards',
+    });
+  }
+
+  showHydratedWelcome() {
+    this.screen.classList.remove('is-booting');
+    this.bootSplash.classList.add('hidden');
 
     // Show Apple Safari backup reminder toast after welcome screen has rendered
     setTimeout(() => {
@@ -1080,6 +1198,8 @@ class WelcomeScreen {
   }
 
   open() {
+    this.screen.classList.remove('is-booting');
+    this.bootSplash.classList.add('hidden');
     this.screen.style.display = 'flex';
     // Show the navigation bar on the native app
     reactNativeApp.sendNavigationBarVisibility(true);
@@ -1641,6 +1761,10 @@ class ChatsScreen {
         }
       } else if (latestActivity.type === 'vm') {
         previewHTML = `<span><i>Voice message</i></span>`;
+      } else if (latestActivity.type === 'location') {
+        previewHTML = `<span><i>Shared location</i></span>`;
+      } else if (latestActivity.type === 'update_toll_required') {
+        previewHTML = truncateMessage(escapeHtml(getUpdateTollRequiredPreviewText(latestActivity, contact)), 50);
       } else if ((!latestActivity.message || String(latestActivity.message).trim() === '') && latestActivity.xattach) {
         previewHTML = `<span><i>Attachment</i></span>`;
       } else if (latestActivity.xattach && latestActivity.message && String(latestActivity.message).trim() !== '') {
@@ -2266,11 +2390,26 @@ class MenuModal {
       scanQRModal.stopCamera();
     }
 
-    // Remove event listeners for beforeunload and visibilitychange
-    window.removeEventListener('beforeunload', handleBeforeUnload);
+    // Save myData to localStorage if it exists
+    saveState();
+
+    // clear storage
+    clearMyData();
 
     // Lock the app
     unlockModal.lock();
+
+    if (isOnline) {
+      await reactNativeApp.handleNativeAppSubscribe();
+      await checkVersion();
+
+      // checkVersion() may update online status
+      if (isOnline) {
+        const newUrl = window.location.href.split('?')[0];
+        window.location.replace(newUrl);
+        return;
+      }
+    }
 
     // Close all modals
     menuModal.close();
@@ -2296,27 +2435,6 @@ class MenuModal {
 
     // Show welcome screen
     welcomeScreen.open();
-
-
-    // Save myData to localStorage if it exists
-    saveState();
-
-    // clear storage
-    clearMyData();
-
-    // Add offline fallback
-    if (!isOnline) {
-      return;
-    }
-
-    await reactNativeApp.handleNativeAppSubscribe();
-    await checkVersion();
-
-    // checkVersion() may update online status
-    if (isOnline) {
-      const newUrl = window.location.href.split('?')[0];
-      window.location.replace(newUrl);
-    }
   }
 }
 
@@ -2945,6 +3063,9 @@ class SettingsModal {
     this.contactsButton = document.getElementById('openManageContactsModal');
     this.contactsButton.addEventListener('click', () => manageContactsModal.open());
     
+    this.chatSettingsButton = document.getElementById('openChatSettingsModal');
+    this.chatSettingsButton.addEventListener('click', () => chatSettingsModal.open());
+
     this.profileButton = document.getElementById('openAccountForm');
     this.profileButton.addEventListener('click', () => myProfileModal.open());
     
@@ -2998,6 +3119,128 @@ class SettingsModal {
 }
 
 const settingsModal = new SettingsModal();
+
+class ChatSettingsModal {
+  constructor() {
+    this.storageKey = 'chat_font_size_px';
+    this.defaultFontSizePx = 16;
+    this.minFontSizePx = 12;
+    this.maxFontSizePx = 30;
+    this.savedFontSizePx = this.defaultFontSizePx;
+    this.draftFontSizePx = this.defaultFontSizePx;
+    this.warningShown = false;
+  }
+
+  load() {
+    this.modal = document.getElementById('chatSettingsModal');
+    this.closeButton = document.getElementById('closeChatSettingsModal');
+    this.preview = document.getElementById('chatSettingsFontPreview');
+    this.fontSizeSlider = document.getElementById('chatSettingsFontSizeSlider');
+    this.saveButton = document.getElementById('saveChatSettingsButton');
+
+    this.closeButton.addEventListener('click', () => this.handleClose());
+    this.fontSizeSlider.addEventListener('input', () => this.handleSliderInput());
+    this.saveButton.addEventListener('click', () => this.save());
+
+    this.savedFontSizePx = this.readSavedFontSize();
+    this.draftFontSizePx = this.savedFontSizePx;
+    this.setSliderValue(this.savedFontSizePx);
+    this.updatePreview();
+    this.applyChatFontSize();
+  }
+
+  open() {
+    this.draftFontSizePx = this.savedFontSizePx;
+    this.warningShown = false;
+    this.setSliderValue(this.draftFontSizePx);
+    this.updatePreview();
+    this.modal.classList.add('active');
+  }
+
+  handleSliderInput() {
+    this.draftFontSizePx = this.clampFontSize(Number(this.fontSizeSlider.value));
+    this.syncSliderPosition(this.draftFontSizePx);
+    this.warningShown = false;
+    this.updatePreview();
+  }
+
+  save() {
+    this.savedFontSizePx = this.draftFontSizePx;
+    localStorage.setItem(this.storageKey, String(this.savedFontSizePx));
+    this.applyChatFontSize();
+    this.warningShown = false;
+    this.close();
+  }
+
+  updatePreview() {
+    this.preview.style.setProperty('--chat-settings-preview-message-font-size', this.draftFontSizePx + 'px');
+    this.preview.style.setProperty('--chat-settings-preview-message-meta-font-size', this.metaFontSizePx(this.draftFontSizePx) + 'px');
+  }
+
+  setSliderValue(value) {
+    this.fontSizeSlider.value = String(value);
+    this.syncSliderPosition(value);
+  }
+
+  syncSliderPosition(value) {
+    const range = this.maxFontSizePx - this.minFontSizePx;
+    const position = range === 0 ? 0 : ((value - this.minFontSizePx) / range) * 100;
+    this.fontSizeSlider.style.setProperty('--chat-settings-slider-position', position + '%');
+  }
+
+  applyChatFontSize() {
+    document.documentElement.style.setProperty('--chat-message-font-size', this.savedFontSizePx + 'px');
+    document.documentElement.style.setProperty('--chat-message-detail-font-size', this.detailFontSizePx(this.savedFontSizePx) + 'px');
+    document.documentElement.style.setProperty('--chat-message-meta-font-size', this.metaFontSizePx(this.savedFontSizePx) + 'px');
+  }
+
+  readSavedFontSize() {
+    const storedValue = localStorage.getItem(this.storageKey);
+    if (storedValue === null) return this.defaultFontSizePx;
+    return this.clampFontSize(Number(storedValue));
+  }
+
+  clampFontSize(value) {
+    if (!Number.isFinite(value)) return this.defaultFontSizePx;
+    return Math.min(this.maxFontSizePx, Math.max(this.minFontSizePx, Math.round(value)));
+  }
+
+  detailFontSizePx(value) {
+    return Math.round(value * 0.875);
+  }
+
+  metaFontSizePx(value) {
+    return Math.round(value * 0.75);
+  }
+
+  hasUnsavedChanges() {
+    return this.draftFontSizePx !== this.savedFontSizePx;
+  }
+
+  handleClose() {
+    if (this.hasUnsavedChanges() && !this.warningShown) {
+      this.warningShown = true;
+      showToast('Press back again to discard changes.', 5000, 'warning');
+      return;
+    }
+
+    this.close();
+  }
+
+  close() {
+    this.modal.classList.remove('active');
+    this.draftFontSizePx = this.savedFontSizePx;
+    this.warningShown = false;
+    this.setSliderValue(this.savedFontSizePx);
+    this.updatePreview();
+  }
+
+  isActive() {
+    return this.modal.classList.contains('active');
+  }
+}
+
+const chatSettingsModal = new ChatSettingsModal();
 
 /**
  * Manage Contacts Modal
@@ -3576,326 +3819,485 @@ function showCloseFeeFailureWarningOnce(reason, action, alreadyShown = false) {
 }
 
 // Sign In Modal Management
+/** Action sheet copy and button visibility by sign-in error reason. */
+const SIGN_IN_ACTION_SHEETS = {
+  'not-found': {
+    message: 'This account is not on the network. You can recreate it from local data or remove it from this device.',
+    showRecreate: true,
+    showRemove: true,
+  },
+  taken: {
+    message: 'This username is taken on the network by a different address.',
+    showRecreate: false,
+    showRemove: true,
+  },
+  'network-error': {
+    message: 'Could not reach the network. Check your connection and try again.',
+    showRecreate: false,
+    showRemove: false,
+  },
+};
+const SIGN_IN_USERNAME_ORDER_KEY = 'signInUsernameOrder';
+const SIGN_IN_USERNAME_PROMOTION_RATIO = 0.5;
+
 class SignInModal {
   constructor() {
     this.preselectedUsername = null;
+    this.selectedUsername = null;
+    this.isSigningIn = false;
+    this.isCompletingSignIn = false;
+    this.signInLoadingToastId = null;
+    this.accountClickSeq = 0;
+  }
+
+  setSigningInBusy(isBusy) {
+    [this.actionRecreateButton, this.actionRemoveButton, this.resetRecentUsernamesButton]
+      .forEach((button) => {
+        if (button) button.disabled = isBusy;
+      });
+    this.accountList?.classList.toggle('is-disabled', isBusy);
+    this.isSigningIn = isBusy;
+
+    if (isBusy && !this.signInLoadingToastId) {
+      this.signInLoadingToastId = showToast('Signing in...', 0, 'loading');
+    } else if (!isBusy && this.signInLoadingToastId) {
+      hideToast(this.signInLoadingToastId);
+      this.signInLoadingToastId = null;
+    }
+  }
+
+  setCompletingSignIn(isCompleting) {
+    this.isCompletingSignIn = isCompleting;
+    if (this.backButton) this.backButton.disabled = isCompleting;
   }
 
   load () {
     this.modal = document.getElementById('signInModal');
-    this.usernameSelect = document.getElementById('username');
-    this.submitButton = document.querySelector('#signInForm button[type="submit"]');
-    this.removeButton = document.getElementById('removeAccountButton');
-    this.notFoundMessage = document.getElementById('usernameNotFound');
-    this.signInModalLastItem = document.getElementById('signInModalLastItem');
+    this.accountList = document.getElementById('signInAccountList');
+    this.resetRecentUsernamesButton = document.getElementById('resetSignInRecentUsernames');
     this.backButton = document.getElementById('closeSignInModal');
+    this.actionSheetOverlay = document.getElementById('signInActionSheetOverlay');
+    this.actionSheetTitle = document.getElementById('signInActionSheetTitle');
+    this.actionSheetMessage = document.getElementById('signInActionSheetMessage');
+    this.actionRecreateButton = document.getElementById('signInActionRecreate');
+    this.actionRemoveButton = document.getElementById('signInActionRemove');
+    this.closeActionSheetButton = document.getElementById('closeSignInActionSheet');
+    assert(
+      this.modal && this.accountList && this.resetRecentUsernamesButton && this.actionSheetOverlay,
+      'SignInModal DOM is incomplete'
+    );
 
-    // Sign in form submission (2s cooldown; both buttons disabled; revalidate restores state)
-    const signInRevalidate = () => {
-      this.removeButton.disabled = false;
-      if (this.isActive()) this.handleUsernameChange();
+    this.accountList.addEventListener('click', (event) => {
+      const item = event.target.closest('.sign-in-account-item');
+      if (!item || this.isSigningIn) return;
+      const username = item.dataset.username;
+      assert(username, 'Sign-in account item is missing username');
+      void this.handleAccountClick(username);
+    });
+
+    this.actionSheetOverlay.addEventListener('click', (event) => {
+      if (event.target === this.actionSheetOverlay) this.closeActionSheet();
+    });
+    this.closeActionSheetButton.addEventListener('click', () => this.closeActionSheet());
+    this.resetRecentUsernamesButton.addEventListener('click', () => this.handleResetRecentSignInUsernames());
+
+    const enableActionButtons = () => {
+      this.actionRecreateButton.disabled = false;
+      this.actionRemoveButton.disabled = false;
     };
-    document.getElementById('signInForm').addEventListener('submit', withButtonCooldown(
-      [this.submitButton, this.removeButton],
+    const runSheetAction = (action) => withButtonCooldown(
+      [this.actionRecreateButton, this.actionRemoveButton],
       BUTTON_COOLDOWN_MS,
-      signInRevalidate,
-      (event) => this.handleSignIn(event)
-    ));
+      enableActionButtons,
+      () => {
+        assert(this.selectedUsername, 'Sign-in action sheet requires selected account');
+        this.setSigningInBusy(true);
+        return Promise.resolve()
+          .then(() => action(this.selectedUsername))
+          .finally(() => this.setSigningInBusy(false));
+      }
+    );
+    this.actionRecreateButton.addEventListener('click', runSheetAction((username) => this.openRecreateFlow(username)));
+    this.actionRemoveButton.addEventListener('click', runSheetAction((username) => removeAccountModal.removeAccount(username)));
 
-    // Username selection change
-    this.usernameSelect.addEventListener('change', () => this.handleUsernameChange());
-
-    // Remove account button (2s cooldown; both buttons disabled)
-    this.removeButton.addEventListener('click', withButtonCooldown(
-      [this.removeButton, this.submitButton],
-      BUTTON_COOLDOWN_MS,
-      signInRevalidate,
-      () => this.handleRemoveAccount()
-    ));
-
-    // Back button
-    this.backButton.addEventListener('click', () => this.close());
+    this.backButton.addEventListener('click', () => {
+      if (this.isCompletingSignIn) return;
+      if (this.actionSheetOverlay.classList.contains('active')) {
+        this.closeActionSheet();
+        return;
+      }
+      this.close();
+    });
   }
 
-  // Centralized UI state helpers for availability results
-  setUiForMine() {
-    this.submitButton.disabled = false;
-    this.submitButton.textContent = 'Sign In';
-    this.submitButton.style.display = 'inline';
-    this.removeButton.style.display = 'none';
-    this.notFoundMessage.style.display = 'none';
-  }
-
-  setUiDisabledSignIn() {
-    this.submitButton.disabled = true;
-    this.submitButton.textContent = 'Sign In';
-    this.submitButton.style.display = 'inline';
-    this.removeButton.style.display = 'none';
-    this.notFoundMessage.style.display = 'none';
-  }
-
-  setUiForTaken() {
-    this.submitButton.style.display = 'none';
-    this.removeButton.style.display = 'inline';
-    this.notFoundMessage.textContent = 'taken';
-    this.notFoundMessage.style.display = 'inline';
-  }
-
-  setUiForAvailableNotFound() {
-    this.submitButton.disabled = false;
-    this.submitButton.textContent = 'Recreate';
-    this.submitButton.style.display = 'inline';
-    this.removeButton.style.display = 'inline';
-    this.notFoundMessage.textContent = 'not found';
-    this.notFoundMessage.style.display = 'inline';
-  }
-
-  setUiForNetworkError() {
-    this.submitButton.disabled = true;
-    this.submitButton.textContent = 'Sign In';
-    this.submitButton.style.display = 'none';
-    this.removeButton.style.display = 'none';
-    this.notFoundMessage.textContent = 'network error';
-    this.notFoundMessage.style.display = 'inline';
-    showToast('The gateway server is down, please try again later.', 5000, 'warning');
-  }
-
-  // When auto-selecting after account creation, the network may not have propagated
-  // the alias yet. In that case we suppress the
-  // transient "not found" and allow local sign-in using stored state.
-  applyAutoSelectNotFoundOverride() {
-    this.notFoundMessage.textContent = '';
-    this.notFoundMessage.style.display = 'none';
-    this.submitButton.style.display = 'inline';
-    this.submitButton.disabled = false;
-    this.submitButton.textContent = 'Sign In';
-    this.removeButton.style.display = 'none';
+  /** Hide the account error action sheet. */
+  closeActionSheet() {
+    this.actionSheetOverlay.classList.remove('active');
+    this.actionSheetOverlay.setAttribute('aria-hidden', 'true');
   }
 
   /**
-   * Get the available usernames for the current network
-   * @returns {string[]} - An array of available usernames
+   * Show the bottom action sheet for a sign-in edge case.
+   * @param {string} username
+   * @param {'not-found'|'taken'|'network-error'} reason
+   */
+  openActionSheet(username, reason) {
+    const sheet = SIGN_IN_ACTION_SHEETS[reason];
+    assert(sheet, `Unknown sign-in action sheet: ${reason}`);
+
+    this.selectedUsername = username;
+    this.actionSheetTitle.textContent = username;
+    this.actionSheetMessage.textContent = sheet.message;
+    this.actionRecreateButton.hidden = !sheet.showRecreate;
+    this.actionRemoveButton.hidden = !sheet.showRemove;
+    this.actionSheetOverlay.classList.add('active');
+    this.actionSheetOverlay.setAttribute('aria-hidden', 'false');
+
+    if (reason === 'network-error') {
+      showToast('The gateway server is down, please try again later.', 5000, 'warning');
+    }
+  }
+
+  /**
+   * Open Create Account with the selected username and stored private key prefilled.
+   * @param {string} username
+   */
+  openRecreateFlow(username) {
+    const { netid } = network;
+    const accountData = loadState(`${username}_${netid}`);
+    assert(accountData?.account?.keys?.secret, `Missing private key for ${username}`);
+    const privateKey = accountData.account.keys.secret;
+
+    createAccountModal.usernameInput.value = username;
+    createAccountModal.privateKeyInput.value = privateKey;
+    this.close();
+    createAccountModal.open();
+    createAccountModal.usernameInput.dispatchEvent(new Event('input'));
+  }
+
+  /**
+   * Get the available usernames for the current network.
+   * @returns {{ usernames: string[], netidAccounts: Object }}
    */
   getSignInUsernames() {
     const { netid } = network;
     const accounts = parse(localStorage.getItem('accounts') || '{"netids":{}}');
     const netidAccounts = accounts.netids[netid];
-    if (!netidAccounts || !netidAccounts.usernames) return [];
-    return { usernames: Object.keys(netidAccounts.usernames), netidAccounts };
+    const usernames = netidAccounts?.usernames ? Object.keys(netidAccounts.usernames) : [];
+    return { usernames, netidAccounts: netidAccounts || { usernames: {} } };
   }
 
   /**
-   * Update the username select dropdown with notification indicators and sort by notification status
-   * @param {string} [selectedUsername] - Optionally preserve a selected username
-   * @returns {Object} Object containing usernames array and account information
+   * Split current usernames into the same account groups shown in the sign-in list.
+   * @param {string[]} usernames Current network usernames in registry order.
+   * @param {string} netid Active network id.
+   * @returns {{ usernameGroups: { public: string[], private: string[] }, isPrivateMap: Object }}
    */
-  updateUsernameSelect(selectedUsername = null) {
-    const signInData = signInModal.getSignInUsernames() || {};
-    const usernames = Array.isArray(signInData.usernames) ? signInData.usernames : [];
-    const netidAccounts = signInData.netidAccounts || { usernames: {} };
-    const { netid } = network;
-
-    // Get the notified addresses and sort usernames to prioritize them
-    const notifiedAddresses = reactNativeApp.isReactNativeWebView ? reactNativeApp.getNotificationAddresses() : [];
-    let sortedUsernames = [...usernames];
-    const notifiedUsernameSet = new Set();
-    
-    // if there are notified addresses, partition the usernames (stable) so notified come first
-    if (notifiedAddresses.length > 0) {
-      const normalizedNotifiedSet = new Set(notifiedAddresses.map(addr => normalizeAddress(addr)));
-      const notifiedUsernames = [];
-      const otherUsernames = [];
-      for (const username of sortedUsernames) {
-        const address = netidAccounts?.usernames?.[username]?.address;
-        const isNotified = address && normalizedNotifiedSet.has(normalizeAddress(address));
-        if (isNotified) {
-          notifiedUsernames.push(username);
-          notifiedUsernameSet.add(username);
-        } else {
-          otherUsernames.push(username);
-        }
-      }
-      sortedUsernames = [...notifiedUsernames, ...otherUsernames];
-    }
-
-    // Populate select with sorted usernames.
-    // Build a map of privacy flags to avoid multiple loadState calls and
-    // render options via a small helper to reduce duplication.
+  getSignInUsernameGroups(usernames, netid) {
+    const usernameGroups = { public: [], private: [] };
     const isPrivateMap = Object.create(null);
-    for (const username of sortedUsernames) {
-      let isPrivateAccount = false;
-      try {
-        const localState = loadState(`${username}_${netid}`);
-        isPrivateAccount = localState?.account?.private === true;
-      } catch (e) {
-        isPrivateAccount = false;
-      }
-      isPrivateMap[username] = isPrivateAccount;
+
+    for (const username of usernames) {
+      const localState = loadState(`${username}_${netid}`);
+      const isPrivate = localState?.account?.private === true;
+      const usernameType = isPrivate ? 'private' : 'public';
+      isPrivateMap[username] = isPrivate;
+      usernameGroups[usernameType].push(username);
     }
 
-    // Keep notified accounts (any privacy) at the very top, in the order
-    // they appear in sortedUsernames. Then render remaining public accounts,
-    // and finally remaining private accounts grouped under a disabled label.
-    const notifiedTop = sortedUsernames.filter(u => notifiedUsernameSet.has(u));
-    const remaining = sortedUsernames.filter(u => !notifiedUsernameSet.has(u));
-    const publicRemaining = remaining.filter(u => !isPrivateMap[u]);
-    const privateRemaining = remaining.filter(u => isPrivateMap[u]);
-
-    const renderOption = (username) => {
-      const isNotifiedAccount = notifiedUsernameSet.has(username);
-      const dotIndicator = isNotifiedAccount ? ' 🔔' : '';
-      const optionColor = isPrivateMap[username] ? 'var(--danger-color)' : 'var(--text-color)';
-      const displayName = isPrivateMap[username] ? `- ${username}` : username;
-      return `<option value="${username}" style="color: ${optionColor};">${displayName}${dotIndicator}</option>`;
-    };
-
-    let html = `<option value="" disabled selected hidden>Select an account</option>`;
-
-    if (notifiedTop.length > 0) {
-      html += notifiedTop.map(renderOption).join('');
-    }
-
-    if (publicRemaining.length > 0) {
-      html += publicRemaining.map(renderOption).join('');
-    }
-
-    // Private accounts grouped with a disabled label (avoids optgroup indentation)
-    if (privateRemaining.length > 0) {
-      html += `<option value="" disabled style="font-weight:600; color:var(--danger-color);">Private accounts</option>`;
-      html += privateRemaining.map(renderOption).join('');
-    }
-
-    this.usernameSelect.innerHTML = html;
-
-    // Restore the previously selected username if it exists
-    if (selectedUsername && usernames.includes(selectedUsername)) {
-      this.usernameSelect.value = selectedUsername;
-    }
-
-    // Update selected styling (so chosen private account shows red when the dropdown is closed)
-    this.updateSelectedAccountPrivateIndicator(netid);
-
-    return { usernames, netidAccounts, sortedUsernames };
+    return { usernameGroups, isPrivateMap };
   }
 
-  updateSelectedAccountPrivateIndicator(netid) {
-    const username = this.usernameSelect.value;
-    if (!username) {
-      this.usernameSelect.classList.remove('is-private');
+  /**
+   * Normalize stored sign-in usernames against the supplied valid username set.
+   * @param {string[]} storedUsernames Stored username values.
+   * @param {Set<string>} availableUsernameSet Usernames that should remain in the order.
+   * @returns {string[]} Clean username list.
+   */
+  normalizeSignInUsernameList(storedUsernames, availableUsernameSet) {
+    if (!Array.isArray(storedUsernames)) {
+      return [];
+    }
+
+    const normalizedUsernames = [];
+    const seen = new Set();
+    for (const username of storedUsernames) {
+      if (typeof username !== 'string' || !username) continue;
+      if (seen.has(username) || !availableUsernameSet.has(username)) continue;
+      seen.add(username);
+      normalizedUsernames.push(username);
+    }
+
+    return normalizedUsernames;
+  }
+
+  /**
+   * Build one visible sign-in group from saved order plus current registry order.
+   * @param {string[]} usernames Current group usernames in registry order.
+   * @param {string[]} storedUsernames Stored order for the same group.
+   * @returns {string[]} Usernames ordered by sign-in preference.
+   */
+  getOrderedSignInUsernames(usernames, storedUsernames) {
+    const availableUsernameSet = new Set(usernames);
+    const orderedUsernames = this.normalizeSignInUsernameList(storedUsernames, availableUsernameSet);
+    const orderedUsernameSet = new Set(orderedUsernames);
+
+    return [
+      ...usernames.filter((username) => !orderedUsernameSet.has(username)),
+      ...orderedUsernames,
+    ];
+  }
+
+  /**
+   * Get public and private sign-in ordering for the active network.
+   * @param {{ public: string[], private: string[] }} usernameGroups Current usernames split by type.
+   * @param {Object} netidAccounts Current network account registry.
+   * @returns {{ public: string[], private: string[] }} Ordered usernames split by type.
+   */
+  getSignInUsernameOrder(usernameGroups, netidAccounts) {
+    const storedOrder = netidAccounts[SIGN_IN_USERNAME_ORDER_KEY] || {};
+
+    return {
+      public: this.getOrderedSignInUsernames(usernameGroups.public, storedOrder.public),
+      private: this.getOrderedSignInUsernames(usernameGroups.private, storedOrder.private),
+    };
+  }
+
+  /**
+   * Move the selected username halfway closer to the front, matching emoji picker promotion.
+   * @param {string[]} signInUsernames Current sign-in username order.
+   * @param {string} selectedUsername Username selected for sign-in.
+   * @returns {string[]} Updated sign-in username order.
+   */
+  promoteSignInUsername(signInUsernames, selectedUsername) {
+    const currentIndex = signInUsernames.indexOf(selectedUsername);
+    assert(currentIndex !== -1, `Sign-in order missing ${selectedUsername}`);
+
+    const promotionDistance = Math.max(
+      1,
+      Math.ceil((currentIndex + 1) * SIGN_IN_USERNAME_PROMOTION_RATIO)
+    );
+    const targetIndex = Math.max(0, currentIndex - promotionDistance);
+    const promotedUsernames = signInUsernames.filter((username) => username !== selectedUsername);
+
+    promotedUsernames.splice(targetIndex, 0, selectedUsername);
+    return promotedUsernames;
+  }
+
+  /**
+   * Persist a valid sign-in selection to the active network's username order.
+   * @param {string} username Username selected for sign-in.
+   * @returns {void}
+   */
+  recordRecentSignInUsername(username) {
+    try {
+      const { netid } = network;
+      const accounts = parse(localStorage.getItem('accounts') || '{"netids":{}}');
+      const netidAccounts = accounts.netids[netid];
+      if (!netidAccounts?.usernames?.[username]) {
+        return;
+      }
+
+      const usernames = Object.keys(netidAccounts.usernames);
+      const { usernameGroups } = this.getSignInUsernameGroups(usernames, netid);
+      const usernameOrder = this.getSignInUsernameOrder(usernameGroups, netidAccounts);
+      const usernameType = usernameGroups.private.includes(username) ? 'private' : 'public';
+      usernameOrder[usernameType] = this.promoteSignInUsername(usernameOrder[usernameType], username);
+
+      netidAccounts[SIGN_IN_USERNAME_ORDER_KEY] = usernameOrder;
+      localStorage.setItem('accounts', stringify(accounts));
+    } catch (error) {
+      console.warn('Failed to update sign-in order:', error);
+    }
+  }
+
+  /**
+   * Check whether the active network has a custom sign-in username order.
+   * @returns {boolean} True when sign-in order is stored.
+   */
+  hasRecentSignInUsernameOverrides() {
+    const { netidAccounts } = this.getSignInUsernames();
+    return Object.prototype.hasOwnProperty.call(netidAccounts, SIGN_IN_USERNAME_ORDER_KEY);
+  }
+
+  /**
+   * Update reset button visibility from the active network account registry.
+   * @returns {void}
+   */
+  updateRecentSignInResetButtonVisibility() {
+    this.resetRecentUsernamesButton.hidden = !this.hasRecentSignInUsernameOverrides();
+  }
+
+  /**
+   * Reset the active network sign-in username order back to registry order.
+   * @returns {void}
+   */
+  handleResetRecentSignInUsernames() {
+    const { netid } = network;
+    const accounts = parse(localStorage.getItem('accounts') || '{"netids":{}}');
+    const netidAccounts = accounts.netids[netid];
+    assert(netidAccounts, 'Active network account registry is missing');
+
+    if (!this.hasRecentSignInUsernameOverrides()) {
       return;
     }
 
-    let isPrivateAccount = false;
-    try {
-      const localState = loadState(`${username}_${netid}`);
-      isPrivateAccount = localState?.account?.private === true;
-    } catch (e) {
-      isPrivateAccount = false;
+    const confirmed = confirm('Reset sign-in account order?');
+    if (!confirmed) {
+      return;
     }
-    this.usernameSelect.classList.toggle('is-private', isPrivateAccount);
+
+    delete netidAccounts[SIGN_IN_USERNAME_ORDER_KEY];
+    localStorage.setItem('accounts', stringify(accounts));
+    this.renderAccountList();
+    showToast('Sign-in order reset', 2000, 'success');
   }
 
-  async open(preselectedUsername_) {
-    this.preselectedUsername = preselectedUsername_;
+  /**
+   * Render the account list with notification indicators and sort by notification status.
+   * @returns {string[]} Usernames for the current network (registry order, not display order)
+   */
+  renderAccountList() {
+    const { usernames, netidAccounts } = this.getSignInUsernames();
+    const { netid } = network;
+    const { usernameGroups, isPrivateMap } = this.getSignInUsernameGroups(usernames, netid);
+    const usernameOrder = this.getSignInUsernameOrder(usernameGroups, netidAccounts);
+    const notifiedAddresses = reactNativeApp.isReactNativeWebView ? reactNativeApp.getNotificationAddresses() : [];
+    const normalizedNotifiedSet = new Set();
+    for (const address of notifiedAddresses) {
+      try {
+        normalizedNotifiedSet.add(normalizeAddress(address));
+      } catch (error) {
+        console.warn('Skipping invalid notification address:', error);
+      }
+    }
+    const notifiedUsernameSet = new Set();
+    const notifiedTop = [];
+    const publicRemaining = [];
+    const privateRemaining = [];
 
-    // Update username select and get usernames BEFORE opening modal
-    const { usernames } = this.updateUsernameSelect();
+    const placeUsername = (username, remainingUsernames) => {
+      if (normalizedNotifiedSet.size > 0) {
+        const address = netidAccounts.usernames[username]?.address;
+        try {
+          if (address && normalizedNotifiedSet.has(normalizeAddress(address))) {
+            notifiedTop.push(username);
+            notifiedUsernameSet.add(username);
+            return;
+          }
+        } catch (error) {
+          console.warn(`Skipping invalid sign-in account address for ${username}:`, error);
+        }
+      }
+      remainingUsernames.push(username);
+    };
 
-    // Wait for browser to process DOM changes before starting modal transition
+    usernameOrder.public.forEach((username) => placeUsername(username, publicRemaining));
+    usernameOrder.private.forEach((username) => placeUsername(username, privateRemaining));
+
+    const renderListItem = (username) => {
+      const isPrivateAccount = isPrivateMap[username];
+      const displayName = isPrivateAccount ? `- ${username}` : username;
+      const privateClass = isPrivateAccount ? ' is-private' : '';
+      const notificationBadge = notifiedUsernameSet.has(username)
+        ? '<span class="sign-in-account-badge" aria-label="Has notifications">🔔</span>'
+        : '';
+      return `
+        <li class="sign-in-account-item${privateClass}" data-username="${username}">
+          <div class="sign-in-account-card">
+            <span class="sign-in-account-name">${escapeHtml(displayName)}</span>
+            ${notificationBadge}
+          </div>
+        </li>
+      `;
+    };
+
+    const sections = [
+      ...notifiedTop.map(renderListItem),
+      ...publicRemaining.map(renderListItem),
+    ];
+    if (privateRemaining.length > 0) {
+      sections.push('<li class="sign-in-account-section" role="presentation">Private accounts</li>');
+      sections.push(...privateRemaining.map(renderListItem));
+    }
+    this.accountList.innerHTML = sections.join('');
+    this.updateRecentSignInResetButtonVisibility();
+
+    return usernames;
+  }
+
+  async open(preselectedUsername) {
+    this.preselectedUsername = preselectedUsername;
+    this.selectedUsername = null;
+    this.setCompletingSignIn(false);
+    this.setSigningInBusy(false);
+    this.closeActionSheet();
+
+    // Render account list before opening modal.
+    const usernames = this.renderAccountList();
+
+    // Wait for browser to process DOM changes before starting modal transition.
     requestAnimationFrame(async () => {
       this.modal.classList.add('active');
 
-      // If no accounts exist, close modal and open Create Account modal
+      // No accounts on this device — open Create Account instead.
       if (usernames.length === 0) {
         this.close();
         createAccountModal.open();
         return;
       }
 
-      // If a username should be auto-selected (either preselect or only one account), do it
-      if ((preselectedUsername_ && usernames.includes(preselectedUsername_))) {
-        this.usernameSelect.value = this.preselectedUsername;
-        await this.handleUsernameChange();
-        // happens when autoselect parameter is given since new account was just created and network may not have propagated account
-        if (this.notFoundMessage.textContent === 'not found') {
-          this.applyAutoSelectNotFoundOverride();
-          this.handleSignIn();
+      // Auto-select after account creation; network may not have propagated yet.
+      if (preselectedUsername && usernames.includes(preselectedUsername)) {
+        const availability = await this.handleAccountClick(preselectedUsername);
+        if (availability === 'available') {
+          this.setSigningInBusy(true);
+          this.setCompletingSignIn(true);
+          try {
+            await this.handleSignIn();
+          } finally {
+            this.setCompletingSignIn(false);
+            this.setSigningInBusy(false);
+          }
         }
         return;
       }
 
-      // If only one account exists, select it and trigger change event
       if (usernames.length === 1) {
-        this.usernameSelect.value = usernames[0];
-        this.usernameSelect.dispatchEvent(new Event('change'));
+        await this.handleAccountClick(usernames[0]);
         return;
       }
-
-      // Multiple accounts exist, show modal with select dropdown
-      this.setUiDisabledSignIn();
-
-      // set timeout to focus on the last item so shift+tab and tab prevention works
-      setTimeout(() => {
-        this.signInModalLastItem.focus();
-      }, 325);
     });
   }
 
   close() {
-    // clear signInModal input fields
-    this.usernameSelect.value = '';
-    this.setUiDisabledSignIn();
-    
-    this.modal.classList.remove('active');
+    this.accountClickSeq++;
+    this.selectedUsername = null;
+    this.setCompletingSignIn(false);
+    this.setSigningInBusy(false);
     this.preselectedUsername = null;
+    this.closeActionSheet();
+    this.accountList.innerHTML = '';
+    this.modal.classList.remove('active');
   }
 
-  async handleSignIn(event) {
-    if (event) {
-      event.preventDefault();
-    }
+  async handleSignIn() {
+    const username = this.selectedUsername;
+    assert(username, 'Sign-in requires selected account');
 
     history.pushState({state:1}, "", ".")
     window.addEventListener('popstate', handleBrowserBackButton);
-    
     enterFullscreen();
-    
-    const username = this.usernameSelect.value;
 
-    // Get network ID from network.js
     const { netid } = network;
-
-    // Get existing accounts
     const existingAccounts = parse(localStorage.getItem('accounts') || '{"netids":{}}');
+    assert(existingAccounts.netids[netid]?.usernames?.[username], `Account registry missing ${username}`);
 
-    // Check if username exists
-    if (!existingAccounts.netids[netid]?.usernames?.[username]) {
-      console.error('Account not found');
-      return;
-    }
-
-    // Check if the button text is 'Recreate'
-    if (this.submitButton.textContent === 'Recreate') {
-//      const myData = parse(localStorage.getItem(`${username}_${netid}`));
-      const myData = loadState(`${username}_${netid}`);
-      const privateKey = myData.account.keys.secret;
-      createAccountModal.usernameInput.value = username;
-
-      createAccountModal.privateKeyInput.value = privateKey;
-      this.close();
-      createAccountModal.open();
-      // Dispatch a change event to trigger the availability check
-      createAccountModal.usernameInput.dispatchEvent(new Event('input'));
-      return;
-    }
-
-    myData = loadState(`${username}_${netid}`)
-    if (!myData) {
-      console.warn('Account data not found');
-      return;
-    }
+    myData = loadState(`${username}_${netid}`);
+    assert(myData, `Account data missing for ${username}`);
     myAccount = myData.account;
     logsModal.log(`SignIn as ${username}_${netid}`)
+    this.recordRecentSignInUsername(username);
 
     // One-time migration: convert legacy friend status to connection
     if (migrateFriendStatusToConnection(myData)) {
@@ -3931,10 +4333,6 @@ class SignInModal {
     if (!getSystemNoticeIntervalId) {
       getSystemNoticeIntervalId = setInterval(getSystemNotice, 15000);
     }
-
-    // Register events that will saveState if the browser is closed without proper signOut
-    // Add beforeunload handler to save myData; don't use unload event, it is getting depricated
-    window.addEventListener('beforeunload', handleBeforeUnload);
 
     reactNativeApp.handleNativeAppUnsubscribe();
     reactNativeApp.sendNavigationBarVisibility(false);
@@ -3972,81 +4370,76 @@ class SignInModal {
     callsModal.startPeriodicCallsRefresh();
   }
 
-  async handleUsernameChange() {
-    // Get existing accounts
+  /**
+   * Check username availability and sign in, or show the action sheet for edge cases.
+   * @param {string} username
+   * @returns {Promise<string|null>} Availability result from checkUsernameAvailability
+   */
+  async handleAccountClick(username) {
+    const clickSeq = ++this.accountClickSeq;
+    this.closeActionSheet();
+
     const { netid } = network;
-    const existingAccounts = parse(localStorage.getItem('accounts') || '{"netids":{}}');
-    const netidAccounts = existingAccounts.netids[netid];
-    const usernames = netidAccounts?.usernames ? Object.keys(netidAccounts.usernames) : [];
-    // Enable submit button when an account is selected
-    const username = this.usernameSelect.value;
-    if (!username) {
-      this.submitButton.disabled = true;
-      this.notFoundMessage.style.display = 'none';
-      return;
+    const netidAccounts = parse(localStorage.getItem('accounts') || '{"netids":{}}').netids[netid];
+    if (!netidAccounts?.usernames?.[username]) {
+      this.selectedUsername = null;
+      return null;
     }
 
-    // Update selected styling
-    this.updateSelectedAccountPrivateIndicator(netid);
-    //        const address = netidAccounts.usernames[username].keys.address;
-    const address = netidAccounts.usernames[username].address;
-    let availability = await checkUsernameAvailability(username, address);
-    // Retry logic: if availability reported as 'available' but we have local account data
-    // (meaning the account previously existed locally), we suspect propagation delay.
-    if (availability === 'available' && netidAccounts?.usernames?.[username]) {
-      const localStateKey = `${username}_${netid}`;
-      const hasLocalState = !!localStorage.getItem(localStateKey);
-      if (hasLocalState) {
-        const maxAttempts = 3; // total attempts including initial (so 2 more re-tries)
-        const delayMs = 200;
-        let attempt = 1;
-        while (attempt < maxAttempts && availability === 'available') {
-          attempt++;
-          logsModal.log(`[SignInModal] Retry ${attempt}/${maxAttempts} username availability for '${username}' because local data exists but network returned 'available'.`);
-          try {
-            await new Promise(res => setTimeout(res, delayMs));
-            availability = await checkUsernameAvailability(username, address);
-          } catch (err) {
-            break; // break on explicit error; will treat as network error below if availability not set
-          }
+    this.setSigningInBusy(true);
+
+    try {
+      this.selectedUsername = username;
+      const address = netidAccounts.usernames[username].address;
+      let availability = await checkUsernameAvailability(username, address);
+      // Retry when network says 'available' but local account data still exists (propagation delay).
+      if (availability === 'available' && localStorage.getItem(`${username}_${netid}`)) {
+        for (let attempt = 2; attempt <= 3 && availability === 'available'; attempt++) {
+          logsModal.log(`[SignInModal] Retry ${attempt}/3 username availability for '${username}' because local data exists but network returned 'available'.`);
+          await new Promise((resolve) => setTimeout(resolve, 200));
+          availability = await checkUsernameAvailability(username, address);
         }
         if (availability === 'available') {
-          logsModal.log(`[SignInModal] After ${maxAttempts} attempts username '${username}' still reported as available. Assuming account deleted on network; offering recreate/delete options.`);
-        } else {
-          logsModal.log(`[SignInModal] Availability resolved to '${availability}' after retries for '${username}'.`);
+          logsModal.log(`[SignInModal] After 3 attempts username '${username}' still reported as available.`);
         }
       }
-    }
-    //console.log('usernames.length', usernames.length);
-    //console.log('availability', availability);
+      // Ignore stale results if the user tapped a different account or closed the modal while we were waiting.
+      if (clickSeq !== this.accountClickSeq || !this.isActive()) return null;
 
-    // If this username was pre-selected and is available, auto-sign-in
-    if (this.preselectedUsername && username === this.preselectedUsername && availability === 'mine') {
-      this.handleSignIn();
-      this.preselectedUsername = null;
-      return;
-    }
-    if (usernames.length === 1 && availability === 'mine') {
-      this.handleSignIn();
-      return;
-    } else if (availability === 'mine') {
-      this.setUiForMine();
-    } else if (availability === 'taken') {
-      this.setUiForTaken();
-    } else if (availability === 'available') {
-      this.setUiForAvailableNotFound();
-    } else {
-      this.setUiForNetworkError();
-    }
-  }
+      switch (availability) {
+        case 'mine':
+          this.setCompletingSignIn(true);
+          await this.handleSignIn();
+          this.preselectedUsername = null;
+          break;
+        case 'taken':
+          this.openActionSheet(username, 'taken');
+          break;
+        case 'available':
+          // Post-creation preselect may sign in locally without showing the sheet.
+          if (this.preselectedUsername !== username) this.openActionSheet(username, 'not-found');
+          break;
+        case 'error':
+        case 'error2':
+          this.openActionSheet(username, 'network-error');
+          break;
+        default:
+          assert(false, `Unknown username availability: ${availability}`);
+      }
 
-  async handleRemoveAccount() {
-    const username = this.usernameSelect.value;
-    if (!username) {
-      showToast('Please select an account to remove', 2000, 'warning');
-      return;
+      return availability;
+    } catch (error) {
+      if (clickSeq === this.accountClickSeq && this.isActive()) {
+        console.error('[SignInModal] Account sign-in check failed:', error);
+        showToast('Unable to sign in right now. Please try again.', 5000, 'error');
+      }
+      return null;
+    } finally {
+      if (clickSeq === this.accountClickSeq) {
+        this.setCompletingSignIn(false);
+        this.setSigningInBusy(false);
+      }
     }
-    removeAccountModal.removeAccount(username);
   }
 
   isActive() {
@@ -4054,19 +4447,12 @@ class SignInModal {
   }
 
   /**
-   * Update the display to reflect new notifications while the modal is open
-   * This is called when new notifications arrive while the modal is open
+   * Update the display to reflect new notifications while the modal is open.
+   * This is called when new notifications arrive while the modal is open.
    */
   updateNotificationDisplay() {
-    // Only update if the modal is actually active
     if (!this.isActive()) return;
-    
-    // Get the currently selected username so we can keep it selected after the update
-    const selectedUsername = this.usernameSelect.value;
-    
-    // Update the dropdown with sorted usernames and notification indicators
-    // This will also preserve the selected username if it still exists
-    this.updateUsernameSelect(selectedUsername);
+    this.renderAccountList();
   }
 }
 
@@ -4495,6 +4881,14 @@ class ContactInfoModal {
 // Create a singleton instance
 const contactInfoModal = new ContactInfoModal();
 
+const FRIEND_STATUS_PENDING_STALE_MS = 60 * 1000;
+const VALID_FRIEND_STATUSES = new Set([0, 1, 2]);
+
+function isValidFriendStatus(status) {
+  const statusNumber = Number(status);
+  return Number.isInteger(statusNumber) && VALID_FRIEND_STATUSES.has(statusNumber);
+}
+
 /**
  * Friend Modal
  * Frontend: 0 = blocked, 1 = Other, 2 = Connection
@@ -4535,15 +4929,88 @@ class FriendModal {
     this.modal.querySelector('.back-button').addEventListener('click', () => this.close());
   }
 
+  /**
+   * Checks if a contact already has a friend status update waiting to settle.
+   * @param {string} address
+   * @returns {boolean}
+   */
+  hasPendingFriendStatusUpdate(address) {
+    if (!address) return false;
+    const normalizedAddress = normalizeAddress(address);
+    const contact = myData.contacts?.[normalizedAddress];
+    const hasPendingTx = (myData.pending || []).some((pendingTx) =>
+      pendingTx?.type === 'update_toll_required'
+      && pendingTx.to
+      && normalizeAddress(pendingTx.to) === normalizedAddress
+    );
+    if (hasPendingTx) {
+      return true;
+    }
+
+    if (contact) {
+      const currentFriendStatus = Number(contact.friend);
+      const previousFriendStatus = Number(contact.friendOld);
+      const hasKnownFriendStatus =
+        isValidFriendStatus(currentFriendStatus) || isValidFriendStatus(previousFriendStatus);
+      if (hasKnownFriendStatus && currentFriendStatus !== previousFriendStatus) {
+        if (!this.recoverStaleFriendStatusUpdate(contact)) {
+          return true;
+        }
+      }
+    }
+
+    return false;
+  }
+
+  /**
+   * Restores stale local pending friend state so users are not blocked forever.
+   * @param {Object} contact
+   * @returns {boolean}
+   */
+  recoverStaleFriendStatusUpdate(contact) {
+    if (!contact) {
+      return false;
+    }
+
+    const currentFriendStatus = Number(contact.friend);
+    const previousFriendStatus = Number(contact.friendOld);
+
+    if (currentFriendStatus === previousFriendStatus) {
+      return false;
+    }
+
+    if (!isValidFriendStatus(previousFriendStatus)) {
+      if (!isValidFriendStatus(currentFriendStatus)) {
+        return false;
+      }
+      contact.friendOld = currentFriendStatus;
+      return true;
+    }
+
+    if (this.lastChangeTimeStamp >= (Date.now() - FRIEND_STATUS_PENDING_STALE_MS)) {
+      return false;
+    }
+
+    contact.friend = previousFriendStatus;
+    updateRevertedFriendStatusButtons(contact.address, contact);
+    return true;
+  }
+
   // Open the friend modal
   async open() {
-    const contact = myData.contacts[this.currentContactAddress];
+    const contactAddress = this.currentContactAddress ? normalizeAddress(this.currentContactAddress) : '';
+    if (!contactAddress) return;
+    const contact = myData.contacts[contactAddress];
     if (!contact) return;
+    if (this.hasPendingFriendStatusUpdate(contactAddress)) {
+      showToast('You have a pending transaction to update the friend status. Come back to this page later.', 0, 'warning');
+      return;
+    }
 
     // Query network for current toll required status
     try {
       const myAddr = longAddress(myAccount.keys.address);
-      const contactAddr = longAddress(this.currentContactAddress);
+      const contactAddr = longAddress(contactAddress);
       const sortedAddresses = [myAddr, contactAddr].sort();
       const chatId = hashBytes(sortedAddresses.join(''));
       const myIndex = sortedAddresses.indexOf(myAddr);
@@ -4615,7 +5082,7 @@ class FriendModal {
     this.warningShown = false;
   }
 
-  async postUpdateTollRequired(address, friend) {
+  async postUpdateTollRequired(address, friend, previousFriendStatus) {
     const feeBalanceStatus = await getFeeBalanceStatus();
     if (!feeBalanceStatus.success) {
       showFeeBalanceFailureToast(feeBalanceStatus.reason);
@@ -4625,6 +5092,7 @@ class FriendModal {
     // 0 = blocked, 1 = Other, 2 = Connection
     // required = 1 if toll required, 0 if not and 2 to block other party
     const requiredNum = friend === 2 ? 0 : friend === 1 ? 1 : friend === 0 ? 2 : 1;
+    const previousRequiredNum = previousFriendStatus === 2 ? 0 : previousFriendStatus === 1 ? 1 : previousFriendStatus === 0 ? 2 : 1;
     const fromAddr = longAddress(myAccount.keys.address);
     const toAddr = longAddress(address);
     const chatId_ = hashBytes([fromAddr, toAddr].sort().join(''));
@@ -4634,6 +5102,7 @@ class FriendModal {
       to: toAddr,
       chatId: chatId_,
       required: requiredNum,
+      previousRequired: previousRequiredNum,
       type: 'update_toll_required',
       timestamp: getTransactionTimestamp(),
       networkId: network.netid,
@@ -4649,7 +5118,10 @@ class FriendModal {
       }
       return { result: { success: false, reason }, toastAlreadyShown: true };
     }
-    return res;
+    return {
+      ...res,
+      updateTollRequiredTx: tx
+    };
   }
 
   /**
@@ -4663,6 +5135,7 @@ class FriendModal {
     const contact = myData.contacts[this.currentContactAddress];
     const selectedStatus = this.friendForm.querySelector('input[name="friendStatus"]:checked')?.value;
     const prevFriendStatus = Number(contact?.friend);
+    let updateTollRequiredResponse = null;
 
     if (selectedStatus == null || Number(selectedStatus) === contact.friend) {
       console.log('No change in friend status or no status selected.');
@@ -4674,7 +5147,7 @@ class FriendModal {
     } else {
       try {
         // send transaction to update chat toll
-        const res = await this.postUpdateTollRequired(this.currentContactAddress, Number(selectedStatus));
+        const res = await this.postUpdateTollRequired(this.currentContactAddress, Number(selectedStatus), prevFriendStatus);
         if (res?.result?.success !== true) {
           console.log(
             `[handleFriendSubmit] update_toll_required transaction failed: ${res?.result?.reason}. Did not update contact status.`
@@ -4685,6 +5158,7 @@ class FriendModal {
           }
           return;
         }
+        updateTollRequiredResponse = res;
       } catch (error) {
         console.error('Error sending transaction to update chat toll:', error);
         showToast('Failed to update friend status. Please try again.', 0, 'error');
@@ -4701,6 +5175,22 @@ class FriendModal {
     }
     // Update friend status based on selected value
     contact.friend = Number(selectedStatus);
+    let didInsertOptimisticStatus = false;
+    if (updateTollRequiredResponse) {
+      assert(
+        updateTollRequiredResponse.updateTollRequiredTx && updateTollRequiredResponse.txid,
+        'Missing update_toll_required transaction after inject success'
+      );
+      const statusHistoryItem = buildUpdateTollRequiredHistoryItem(
+        updateTollRequiredResponse.updateTollRequiredTx,
+        updateTollRequiredResponse.txid,
+        normalizeAddress(myAccount.keys.address)
+      );
+      didInsertOptimisticStatus = insertUpdateTollRequiredHistoryItem(contact, statusHistoryItem);
+      if (didInsertOptimisticStatus) {
+        syncChatLatestActivityTimestamp(this.currentContactAddress, contact);
+      }
+    }
     if (contact.friend === 0 && prevFriendStatus !== 0) {
       await this.clearContactAvatar(contact);
     }
@@ -4725,9 +5215,12 @@ class FriendModal {
 
     // Update the contact list
     await contactsScreen.updateContactsList();
+    if (didInsertOptimisticStatus && chatModal.isActive() && chatModal.address === this.currentContactAddress) {
+      chatModal.appendChatModal();
+    }
     // Only refresh chats list if the change enters or exits "blocked"
     const nextFriendStatus = Number(selectedStatus);
-    if (prevFriendStatus === 0 || nextFriendStatus === 0) {
+    if (didInsertOptimisticStatus || prevFriendStatus === 0 || nextFriendStatus === 0) {
       await chatsScreen.updateChatList();
     }
 
@@ -4799,13 +5292,13 @@ class FriendModal {
 
     // If there's already a pending tx (friend != friendOld) keep disabled
     if (contact.friend !== contact.friendOld) {
-      const SIXTY_SECONDS = 60 * 1000;
       // if the last change was more than 60 seconds ago, reset the friend status so user does not get stuck
-      if (this.lastChangeTimeStamp < (Date.now() - SIXTY_SECONDS)) {
-        contact.friend = contact.friendOld
+      if (this.recoverStaleFriendStatusUpdate(contact)) {
+        const radio = this.friendForm.querySelector(`input[value="${contact.friend}"]`);
+        if (radio) radio.checked = true;
       } else {
         this.submitButton.disabled = true;
-        showToast('You have a pending transaction to update the friend status. Come back to this page later.', 0, 'error');
+        showToast('You have a pending transaction to update the friend status. Come back to this page later.', 0, 'warning');
         return;
       }
     }
@@ -6386,8 +6879,16 @@ function getReactionTargetPreviewText(message) {
     return getDeletedPlaceholderText(message);
   }
 
+  if (message.type === 'update_toll_required') {
+    return 'status change';
+  }
+
   if (message.type === 'call') {
     return 'call';
+  }
+
+  if (message.type === 'location') {
+    return 'location';
   }
 
   const messageText = typeof message.message === 'string' ? message.message.trim() : '';
@@ -6408,6 +6909,196 @@ function getReactionTargetPreviewText(message) {
   }
 
   return '[message]';
+}
+
+function isValidRequiredValue(required) {
+  if (required === null || typeof required === 'undefined') {
+    return false;
+  }
+  if (typeof required === 'string' && required.trim() === '') {
+    return false;
+  }
+  const requiredNum = Number(required);
+  return Number.isInteger(requiredNum) && [0, 1, 2].includes(requiredNum);
+}
+
+function requiredToFriendStatus(required) {
+  const requiredNum = Number(required);
+  return requiredNum === 0 ? 2 : requiredNum === 2 ? 0 : 1;
+}
+
+function getRequiredStatusLabel(required) {
+  const requiredNum = Number(required);
+  if (requiredNum === 0) return 'Connection';
+  if (requiredNum === 2) return 'Blocked';
+  return 'Tolled';
+}
+
+function getUpdateTollRequiredPreviewText(item, contact) {
+  const statusLabel = getRequiredStatusLabel(item.required);
+  const contactName = getContactDisplayName(contact);
+  return item.my
+    ? `You changed ${contactName}'s status to ${statusLabel}`
+    : `${contactName} changed your status to ${statusLabel}`;
+}
+
+function buildUpdateTollRequiredHistoryItem(tx, txid, currentUserAddress) {
+  const required = Number(tx.required);
+  const item = {
+    type: 'update_toll_required',
+    txid,
+    timestamp: Number(tx.timestamp) || 0,
+    my: normalizeAddress(tx.from) === currentUserAddress,
+    from: normalizeAddress(tx.from),
+    to: normalizeAddress(tx.to),
+    required
+  };
+
+  if (isValidRequiredValue(tx.previousRequired)) {
+    item.previousRequired = Number(tx.previousRequired);
+  }
+
+  return item;
+}
+
+function isNewerUpdateTollRequiredHistoryItem(candidate, current) {
+  if (!current) return true;
+  if (candidate.timestamp !== current.timestamp) {
+    return candidate.timestamp > current.timestamp;
+  }
+  return candidate.txid > current.txid;
+}
+
+function applyUpdateTollRequiredState(contact, historyItem, options = {}) {
+  if (historyItem.my) {
+    const { preservePendingFriend = false } = options;
+    contact.tollRequiredToReceive = historyItem.required;
+    if (preservePendingFriend && contact.friend !== contact.friendOld) {
+      return;
+    }
+    const friendStatus = requiredToFriendStatus(historyItem.required);
+    contact.friend = friendStatus;
+    contact.friendOld = friendStatus;
+    return;
+  }
+
+  contact.tollRequiredToSend = historyItem.required;
+}
+
+function insertUpdateTollRequiredHistoryItem(contact, historyItem) {
+  contact.messages ??= [];
+
+  if (contact.messages.some((message) => message.txid === historyItem.txid)) {
+    return false;
+  }
+
+  insertSorted(contact.messages, historyItem, 'timestamp');
+  return true;
+}
+
+function removeUpdateTollRequiredHistoryItem(contactAddress, txid) {
+  const contact = myData.contacts?.[contactAddress];
+  if (!contact?.messages || !txid) {
+    return false;
+  }
+
+  const previousLength = contact.messages.length;
+  contact.messages = contact.messages.filter((message) =>
+    !(message.type === 'update_toll_required' && message.txid === txid)
+  );
+
+  if (contact.messages.length === previousLength) {
+    return false;
+  }
+
+  syncChatLatestActivityTimestamp(contactAddress, contact);
+  return true;
+}
+
+function updateRevertedFriendStatusButtons(contactAddress, contact) {
+  if (!contact) {
+    return;
+  }
+
+  if (chatModal.isActive() && chatModal.address === contactAddress) {
+    friendModal.updateFriendButton(contact, 'addFriendButtonChat');
+  }
+
+  if (contactInfoModal.isActive() && contactInfoModal.currentContactAddress === contactAddress) {
+    friendModal.updateFriendButton(contact, 'addFriendButtonContactInfo');
+  }
+}
+
+function revertPendingUpdateTollRequired(pendingTxInfo) {
+  const contactAddress = pendingTxInfo.to;
+  const contact = myData.contacts?.[contactAddress];
+  const currentFriendStatus = Number(contact?.friend);
+  const previousFriendStatus = Number(contact?.friendOld);
+  const didRemoveStatusHistory = removeUpdateTollRequiredHistoryItem(contactAddress, pendingTxInfo.txid);
+
+  if (contact) {
+    contact.friend = contact.friendOld;
+  }
+
+  updateRevertedFriendStatusButtons(contactAddress, contact);
+
+  return {
+    currentFriendStatus,
+    previousFriendStatus,
+    didRemoveStatusHistory
+  };
+}
+
+function syncPendingUpdateTollRequiredSuccess(pendingTxInfo, receiptTx) {
+  const receiptHasStatusTx = receiptTx?.type === 'update_toll_required'
+    && isValidRequiredValue(receiptTx.required)
+    && receiptTx.from
+    && receiptTx.to;
+  const tx = receiptHasStatusTx
+    ? receiptTx
+    : pendingTxInfo.updateTollRequiredTx;
+
+  if (!tx || !isValidRequiredValue(tx.required)) {
+    const contact = myData.contacts?.[pendingTxInfo.to];
+    if (contact) {
+      contact.friendOld = contact.friend;
+    }
+    return;
+  }
+
+  const currentUserAddress = normalizeAddress(myAccount.keys.address);
+  const txFrom = normalizeAddress(tx.from);
+  const txTo = normalizeAddress(tx.to);
+  const contactAddress = txFrom === currentUserAddress ? txTo : txFrom;
+
+  if (!contactAddress || contactAddress === currentUserAddress) {
+    return;
+  }
+
+  if (!myData.contacts[contactAddress]) {
+    createNewContact(contactAddress, undefined, 1, false);
+  }
+
+  const contact = myData.contacts[contactAddress];
+  contact.messages ??= [];
+
+  const statusHistoryItem = buildUpdateTollRequiredHistoryItem(tx, pendingTxInfo.txid, currentUserAddress);
+  const didInsertStatusHistory = insertUpdateTollRequiredHistoryItem(contact, statusHistoryItem);
+  applyUpdateTollRequiredState(contact, statusHistoryItem);
+
+  if (didInsertStatusHistory) {
+    syncChatLatestActivityTimestamp(contactAddress, contact);
+  }
+
+  if (chatModal.isActive() && chatModal.address === contactAddress) {
+    chatModal.blockedByRecipient = Number(contact.tollRequiredToSend) === 2;
+    chatModal.updateTollAmountUI(contactAddress);
+    chatModal.appendChatModal();
+  }
+
+  if (chatsScreen.isActive()) {
+    chatsScreen.updateChatList();
+  }
 }
 
 /**
@@ -6522,6 +7213,8 @@ function hasPendingEditForTarget(contactAddress, targetTxid) {
     pendingTx.editPending.targetTxid === targetTxid
   );
 }
+
+const DELETE_FOR_ALL_ACTION_GUARD_MS = 10000;
 
 /**
  * Restores local state captured before an optimistic message edit.
@@ -6767,6 +7460,10 @@ async function processChats(chats, keys) {
       const pendingReactionControls = [];
       let didApplyPendingReaction = false;
       let didChangeReactionPreview = false;
+      let didApplyStatusChange = false;
+      let needsStatusChatRefresh = false;
+      let myStatusUpdate = null;
+      let contactStatusUpdate = null;
       const touchedReactionTargetTxids = new Set();
 
       // This check determines if we're currently chatting with the sender
@@ -6792,6 +7489,58 @@ async function processChats(chats, keys) {
             useTxTimestamp = true;
           }
         }
+
+        if (tx.type === 'update_toll_required') {
+          if (!isValidRequiredValue(tx.required)) {
+            console.warn('Ignoring update_toll_required with unknown required value', tx);
+            continue;
+          }
+          if (tx.previousRequired !== undefined && !isValidRequiredValue(tx.previousRequired)) {
+            console.warn('Ignoring update_toll_required with unknown previousRequired value', tx);
+            continue;
+          }
+          if (tx.chatId && tx.chatId !== chats[sender]) {
+            console.warn('Ignoring update_toll_required with mismatched chatId', tx);
+            continue;
+          }
+
+          const txFrom = normalizeAddress(tx.from);
+          const txTo = normalizeAddress(tx.to);
+          if (txFrom !== currentUserAddress && txTo !== currentUserAddress) {
+            continue;
+          }
+
+          const statusContactAddress = txFrom === currentUserAddress ? txTo : txFrom;
+          if (!statusContactAddress || statusContactAddress === currentUserAddress) {
+            continue;
+          }
+          if (!myData.contacts[statusContactAddress]) {
+            createNewContact(statusContactAddress, undefined, 1, false);
+          }
+
+          const statusContact = myData.contacts[statusContactAddress];
+          const statusHistoryItem = buildUpdateTollRequiredHistoryItem(tx, txidHex, currentUserAddress);
+          const didInsertStatusHistory = insertUpdateTollRequiredHistoryItem(statusContact, statusHistoryItem);
+          if (didInsertStatusHistory) {
+            if (statusHistoryItem.my && isNewerUpdateTollRequiredHistoryItem(statusHistoryItem, myStatusUpdate)) {
+              myStatusUpdate = statusHistoryItem;
+            } else if (!statusHistoryItem.my && isNewerUpdateTollRequiredHistoryItem(statusHistoryItem, contactStatusUpdate)) {
+              contactStatusUpdate = statusHistoryItem;
+            }
+          }
+
+          if (didInsertStatusHistory) {
+            syncChatLatestActivityTimestamp(statusContactAddress, statusContact);
+            didApplyStatusChange = true;
+          }
+
+          if (chatModal.isActive() && chatModal.address === statusContactAddress) {
+            needsStatusChatRefresh = true;
+          }
+
+          continue;
+        }
+
         if (tx.type == 'message') {
           // Handle messages without xmessage (same as transfer handling)
           // Ensure payload is always an object, even if xmessage is null/undefined
@@ -7013,6 +7762,26 @@ async function processChats(chats, keys) {
                   if (typeof parsedMessage.replyOwnerIsMine !== 'undefined') {
                     payload.replyOwnerIsMine = parsedMessage.replyOwnerIsMine;
                   }
+                } else if (parsedMessage.type === 'location') {
+                  const latitude = Number(parsedMessage.latitude);
+                  const longitude = Number(parsedMessage.longitude);
+                  const accuracy = Number(parsedMessage.accuracy);
+                  if (
+                    !Number.isFinite(latitude) ||
+                    !Number.isFinite(longitude) ||
+                    latitude < -90 ||
+                    latitude > 90 ||
+                    longitude < -180 ||
+                    longitude > 180
+                  ) {
+                    console.warn('Ignoring invalid location message', parsedMessage);
+                    continue;
+                  }
+                  payload.message = '';
+                  payload.type = 'location';
+                  payload.latitude = latitude;
+                  payload.longitude = longitude;
+                  payload.accuracy = Number.isFinite(accuracy) && accuracy >= 0 ? accuracy : null;
                 } else if (parsedMessage.type === 'message') {
                   const hasReactionFields =
                     typeof parsedMessage.reactId !== 'undefined' ||
@@ -7350,6 +8119,31 @@ async function processChats(chats, keys) {
         }
       }
 
+      if (myStatusUpdate || contactStatusUpdate) {
+        const previousFriend = contact.friend;
+
+        if (myStatusUpdate) {
+          applyUpdateTollRequiredState(contact, myStatusUpdate, { preservePendingFriend: true });
+        }
+
+        if (contactStatusUpdate) {
+          applyUpdateTollRequiredState(contact, contactStatusUpdate);
+        }
+
+        if (chatModal.isActive() && chatModal.address === from) {
+          chatModal.blockedByRecipient = Number(contact.tollRequiredToSend) === 2;
+          chatModal.updateTollAmountUI(from);
+
+          if (myStatusUpdate && contact.friend !== previousFriend) {
+            friendModal.updateFriendButton(contact, 'addFriendButtonChat');
+          }
+        }
+      }
+
+      if (needsStatusChatRefresh && chatModal.isActive()) {
+        chatModal.appendChatModal();
+      }
+
       if (pendingReactionControls.length > 0) {
         pendingReactionControls.sort((left, right) => {
           return left.timestamp - right.timestamp || left.order - right.order;
@@ -7426,6 +8220,10 @@ async function processChats(chats, keys) {
       }
 
       if (didChangeReactionPreview && chatsScreen.isActive() && !inActiveChatWithSender) {
+        chatsScreen.updateChatList();
+      }
+
+      if (didApplyStatusChange && chatsScreen.isActive()) {
         chatsScreen.updateChatList();
       }
 
@@ -7584,7 +8382,9 @@ The main difference between a chat message and an asset transfer is
         * However, this does not gaurantee that the recipient has not already downloaded the message and may read it later
 `;
 
-async function postAssetTransfer(to, amount, memo, keys) {
+async function postAssetTransfer(to, amount, memo, keys, assetIndex) {
+  assert(Number.isInteger(assetIndex) && assetIndex >= 0, 'Transfer assetIndex must be a non-negative integer');
+
   const toAddr = longAddress(to);
   const fromAddr = longAddress(keys.address);
   await getNetworkParams();
@@ -7605,6 +8405,13 @@ async function postAssetTransfer(to, amount, memo, keys) {
 
   const txid = await signObj(tx, keys);
   const res = await injectTx(tx, txid);
+  if (res?.result?.success) {
+    const pendingTx = myData.pending.find((pendingTx) => pendingTx.txid === txid);
+    assert(pendingTx, 'Accepted transfer missing pending entry');
+    pendingTx.amount = tx.amount;
+    pendingTx.fee = tx.fee;
+    pendingTx.assetIndex = assetIndex;
+  }
   return res;
 }
 
@@ -7877,6 +8684,9 @@ async function injectTx(tx, txid) {
         pendingTxData.address = tx.from; // User's address (longAddress form)
       } else if (tx.type === 'update_toll_required' || tx.type === 'reclaim_toll') {
         pendingTxData.to = normalizeAddress(tx.to);
+        if (tx.type === 'update_toll_required') {
+          pendingTxData.updateTollRequiredTx = tx;
+        }
       } else if (tx.type === 'read') {
         pendingTxData.oldContactTimestamp = tx.oldContactTimestamp;
       } else if (tx.type === 'message' || tx.type === 'transfer') {
@@ -9552,6 +10362,9 @@ function showToast(message, duration = 2000, type = 'default', isHTML = false, o
   if (dedupeEnabled) {
     const existingToast = document.querySelector(`[data-deduplicate-key="${deduplicateKey}"]`);
     if (existingToast) {
+      if (typeof options?.onHidden === 'function') {
+        existingToast.addEventListener('toast:hidden', options.onHidden, { once: true });
+      }
       // Toast with this key already exists, don't create another one
       return existingToast.id;
     }
@@ -9559,6 +10372,12 @@ function showToast(message, duration = 2000, type = 'default', isHTML = false, o
   
   const toast = document.createElement('div');
   toast.className = `toast ${type}`;
+  if (options?.className) {
+    toast.classList.add(...String(options.className).split(/\s+/).filter(Boolean));
+  }
+  if (typeof options?.onHidden === 'function') {
+    toast.addEventListener('toast:hidden', options.onHidden, { once: true });
+  }
   
   if (isHTML) {
     toast.innerHTML = message;
@@ -9621,6 +10440,7 @@ function hideToast(toastId) {
     const toastContainer = document.getElementById('toastContainer');
     if (toast.parentNode === toastContainer) {
       toastContainer.removeChild(toast);
+      toast.dispatchEvent(new Event('toast:hidden'));
     }
   }, 300); // Match transition duration
 }
@@ -9740,7 +10560,7 @@ function markConnectivityDependentElements() {
     '#confirmCallSchedule',
 
     // Message context menu (disable all except 'Delete for me' and 'Copy' and 'Join')
-    '.message-context-menu .context-menu-option:not([data-action="delete"]):not([data-action="copy"]):not([data-action="join"])',
+    '.message-context-menu .context-menu-option:not([data-action="delete"]):not([data-action="copy"]):not([data-action="join"]):not([data-action="location"])',
 
     // bridgeModal
     '#bridgeForm button[type="submit"]',
@@ -10135,6 +10955,18 @@ class RemoveAccountModal {
     this.modal.classList.remove('active');
   }
 
+  removeSignInUsernameOrder(netidAccounts, username) {
+    const usernameOrder = netidAccounts[SIGN_IN_USERNAME_ORDER_KEY];
+    if (!usernameOrder) return;
+
+    usernameOrder.public = usernameOrder.public.filter((storedUsername) => storedUsername !== username);
+    usernameOrder.private = usernameOrder.private.filter((storedUsername) => storedUsername !== username);
+
+    if (usernameOrder.public.length === 0 && usernameOrder.private.length === 0) {
+      delete netidAccounts[SIGN_IN_USERNAME_ORDER_KEY];
+    }
+  }
+
   submit(username = myAccount.username) {
     // called when the form is submitted
     // Get network ID from network.js
@@ -10144,8 +10976,10 @@ class RemoveAccountModal {
     const existingAccounts = parse(localStorage.getItem('accounts') || '{"netids":{}}');
 
     // Remove the account from the accounts object
-    if (existingAccounts.netids[netid] && existingAccounts.netids[netid].usernames) {
-      delete existingAccounts.netids[netid].usernames[username];
+    const netidAccounts = existingAccounts.netids[netid];
+    if (netidAccounts && netidAccounts.usernames) {
+      delete netidAccounts.usernames[username];
+      this.removeSignInUsernameOrder(netidAccounts, username);
       localStorage.setItem('accounts', stringify(existingAccounts));
     }
     // Remove the account data from localStorage
@@ -10176,8 +11010,10 @@ class RemoveAccountModal {
     const existingAccounts = parse(localStorage.getItem('accounts') || '{"netids":{}}');
 
     // Remove the account from the accounts object
-    if (existingAccounts.netids[netid] && existingAccounts.netids[netid].usernames) {
-      delete existingAccounts.netids[netid].usernames[username];
+    const netidAccounts = existingAccounts.netids[netid];
+    if (netidAccounts && netidAccounts.usernames) {
+      delete netidAccounts.usernames[username];
+      this.removeSignInUsernameOrder(netidAccounts, username);
       localStorage.setItem('accounts', stringify(existingAccounts));
     }
     // Remove the account data from localStorage
@@ -10317,14 +11153,12 @@ class RemoveAccountsModal {
       let state = null;
       try {
         state = loadState(storageKey);
-        
-        // If loadState returned null, it could be decryption failure
-        if (!state) {
-          console.warn('Failed to load orphaned account', storageKey, '- likely decryption failure');
-        }
       } catch (e) {
         console.warn('Error loading orphaned account', storageKey, e);
-        result.push({ username, netid, contactsCount: -1, messagesCount: -1, orphan: true });
+        continue;
+      }
+
+      if (state?.account?.username !== username || state?.account?.netid !== netid) {
         continue;
       }
       
@@ -10420,6 +11254,7 @@ class RemoveAccountsModal {
       // remove from registry if present
       if (accountsObj.netids[netid] && accountsObj.netids[netid].usernames && accountsObj.netids[netid].usernames[username]) {
         delete accountsObj.netids[netid].usernames[username];
+        removeAccountModal.removeSignInUsernameOrder(accountsObj.netids[netid], username);
       }
     });
     localStorage.setItem('accounts', stringify(accountsObj));
@@ -11814,32 +12649,11 @@ class RestoreAccountModal {
       }
     }
 
-    // Ensure we have local accounts registry
-    const existingAccounts = parse(localStorage.getItem('accounts') || '{"netids":{}}');
-
-    // Merge accounts registry first
-    const backupAccountsRegistry = parse(backupData.accounts || '{"netids":{}}');
-    Object.keys(backupAccountsRegistry.netids || {}).forEach(netid => {
-      if (!existingAccounts.netids[netid]) existingAccounts.netids[netid] = { usernames: {} };
-      const usernames = backupAccountsRegistry.netids[netid].usernames || {};
-      Object.keys(usernames).forEach(username => {
-        if (overwrite || !existingAccounts.netids[netid].usernames[username]) {
-          existingAccounts.netids[netid].usernames[username] = usernames[username];
-        }
-      });
-    });
-    localStorage.setItem('accounts', stringify(existingAccounts));
-
-
-    // Iterate over keys in backupData and copy account entries
-    let restoredCount = 0;
-    for (const key of Object.keys(backupData)) {
-      const parts = key.split('_');
-      if (parts.length !== 2) continue;
-      const username = parts[0];
-      const netid = parts[1];
-      // basic netid check
-      if (netid.length !== 64 || !/^[a-f0-9]+$/.test(netid)) continue;
+    // Iterate over account payloads and copy account entries.
+    const restoredAccountKeys = new Set();
+    const backupAccountsRegistry = this.parseBackupAccountsRegistry(backupData);
+    const backupAccountEntries = this.getBackupAccountEntries(backupData, backupAccountsRegistry);
+    for (const { key, username, netid, registryAccount } of backupAccountEntries) {
 
       const localKey = `${username}_${netid}`;
       const exists = localStorage.getItem(localKey) !== null;
@@ -11854,7 +12668,7 @@ class RestoreAccountModal {
 
       if (locksMatch) {
         localStorage.setItem(localKey, value);
-        restoredCount++;
+        restoredAccountKeys.add(localKey);
         decryptedAccount = this.tryDecryptWithLocalLock(value);
       } else {
         // Need to decrypt with backupEncKey if available
@@ -11892,11 +12706,13 @@ class RestoreAccountModal {
         }
 
         localStorage.setItem(localKey, finalValue);
-        restoredCount++;
+        restoredAccountKeys.add(localKey);
       }
 
       if (decryptedAccount) {
         this.updateAccountRegistryAddress(netid, username, decryptedAccount);
+      } else if (registryAccount?.address) {
+        this.updateAccountRegistryFromBackup(netid, username, registryAccount);
       }
     }
 
@@ -11918,7 +12734,7 @@ class RestoreAccountModal {
       }
     }
 
-    return restoredCount;
+    return restoredAccountKeys.size;
   }
 
   async handleSubmit(event) {
@@ -11995,16 +12811,31 @@ class RestoreAccountModal {
       if (restoredCount === false) {
         return; // merge failed — keep modal open and do not proceed to reset/close
       }
-      showToast(`${restoredCount} account${restoredCount === 1 ? '' : 's'} restored`, 3000, 'success');
-      
-      // handleNativeAppSubscription()
-
-      // Reset form and close modal after delay
-      setTimeout(() => {
+      clearMyData(); // Prevent stale signed-in state from saving over restored localStorage before refresh.
+      let successToastId;
+      const refreshAfterRestoreToast = () => {
+        document.removeEventListener('click', handleRestoreOutsideClick, true);
         this.close();
-        clearMyData(); // since we already saved to localStore, we want to make sure beforeunload calling saveState does not also save
         window.location.reload(); // need to go through Sign In to make sure imported account exists on network
-      }, 2000);
+      };
+      function handleRestoreOutsideClick(event) {
+        const successToast = document.getElementById(successToastId);
+        if (successToast?.contains(event.target)) return;
+        event.preventDefault();
+        event.stopPropagation();
+        event.stopImmediatePropagation();
+        hideToast(successToastId);
+      }
+      successToastId = showToast(
+        `${restoredCount} account${restoredCount === 1 ? '' : 's'} restored`,
+        0,
+        'success',
+        false,
+        { onHidden: refreshAfterRestoreToast }
+      );
+      setTimeout(() => document.addEventListener('click', handleRestoreOutsideClick, true), 0);
+
+      // handleNativeAppSubscription()
     } catch (error) {
       showToast(error.message || 'Import failed. Please check file and password.', 0, 'error');
     }
@@ -12053,6 +12884,71 @@ class RestoreAccountModal {
     cleanup(this.newStringSelect);
   }
 
+  parseBackupAccountsRegistry(backupData) {
+    try {
+      if (!backupData?.accounts) return { netids: {} };
+      const registry = typeof backupData.accounts === 'string'
+        ? parse(backupData.accounts)
+        : backupData.accounts;
+      return registry && typeof registry === 'object' ? registry : { netids: {} };
+    } catch (e) {
+      return { netids: {} };
+    }
+  }
+
+  parseBackupAccountKey(key) {
+    const parts = key.split('_');
+    if (parts.length !== 2) return null;
+
+    const [username, netid] = parts;
+    if (!username || netid.length !== 64 || !/^[a-f0-9]+$/.test(netid)) {
+      return null;
+    }
+
+    return { username, netid };
+  }
+
+  getBackupAccountEntries(backupData, backupAccountsRegistry) {
+    const registryNetids = backupAccountsRegistry?.netids || {};
+    const entries = [];
+    const queuedKeys = new Set();
+
+    Object.keys(registryNetids).forEach(netid => {
+      const usernames = registryNetids[netid]?.usernames || {};
+      Object.keys(usernames).forEach(username => {
+        const key = `${username}_${netid}`;
+        if (!Object.prototype.hasOwnProperty.call(backupData, key)) return;
+        const parsedKey = this.parseBackupAccountKey(key);
+        if (!parsedKey) return;
+
+        queuedKeys.add(key);
+        entries.push({
+          key,
+          username,
+          netid,
+          registryAccount: usernames[username]
+        });
+      });
+    });
+
+    Object.keys(backupData).forEach(key => {
+      if (queuedKeys.has(key)) return;
+
+      const parsedKey = this.parseBackupAccountKey(key);
+      if (!parsedKey) return;
+
+      queuedKeys.add(key);
+      entries.push({
+        key,
+        username: parsedKey.username,
+        netid: parsedKey.netid,
+        registryAccount: registryNetids[parsedKey.netid]?.usernames?.[parsedKey.username]
+      });
+    });
+
+    return entries;
+  }
+
   extractAddress(maybeJson) {
     try {
       const obj = typeof maybeJson === 'string' ? parse(maybeJson) : maybeJson;
@@ -12069,6 +12965,13 @@ class RestoreAccountModal {
     const accountsObj = parse(localStorage.getItem('accounts') || '{"netids":{}}');
     if (!accountsObj.netids[netid]) accountsObj.netids[netid] = { usernames: {} };
     accountsObj.netids[netid].usernames[username] = { address };
+    localStorage.setItem('accounts', stringify(accountsObj));
+  }
+
+  updateAccountRegistryFromBackup(netid, username, registryAccount) {
+    const accountsObj = parse(localStorage.getItem('accounts') || '{"netids":{}}');
+    if (!accountsObj.netids[netid]) accountsObj.netids[netid] = { usernames: {} };
+    accountsObj.netids[netid].usernames[username] = registryAccount;
     localStorage.setItem('accounts', stringify(accountsObj));
   }
 
@@ -13648,6 +14551,14 @@ class StakeValidatorModal {
     this.resetForm();
   }
 
+  /**
+   * Check if the stake modal is active
+   * @returns {boolean}
+   */
+  isActive() {
+    return this.modal?.classList.contains('active') || false;
+  }
+
   async handleSubmit(event) {
     event.preventDefault();
 
@@ -13919,6 +14830,27 @@ const CHAT_REACTION_SHEET_CLOSE_DRAG_PX = 120;
 const CHAT_INITIAL_RENDER_COUNT = 100;
 const CHAT_OLDER_RENDER_BATCH_SIZE = 200;
 const CHAT_THUMBNAIL_ATTACHMENT_SELECTOR = '[data-image-attachment="true"], [data-video-attachment="true"]';
+const LOCATION_GEO_OPTIONS = {
+  enableHighAccuracy: true,
+  timeout: 15000,
+  maximumAge: 0
+};
+const LOCATION_PERMISSION_DENIED_MESSAGE = 'Location permission was denied. Enable location access in your browser or device settings, then try again.';
+/**
+ * Format a voice timer value with tenths-of-a-second precision.
+ * @param {number|string} seconds - Duration or playback position in seconds.
+ * @returns {string} Timer formatted as mm:ss.t.
+ */
+function formatVoiceTimer(seconds) {
+  const duration = Number(seconds);
+  if (!Number.isFinite(duration) || duration <= 0) return '00:00.0';
+
+  const totalTenths = Math.round(duration * 10);
+  const mins = Math.floor(totalTenths / 600);
+  const secs = Math.floor((totalTenths % 600) / 10);
+  const tenths = totalTenths % 10;
+  return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}.${tenths}`;
+}
 const CHAT_REACTION_SHEET_TAB_ICONS = {
   recent: '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 3v6h6"/><path d="M12 7v5l3 2"/></svg>',
   smileys: '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M8 14s1.5 2 4 2 4-2 4-2"/><line x1="9" x2="9.01" y1="9" y2="9"/><line x1="15" x2="15.01" y1="9" y2="9"/></svg>',
@@ -13947,6 +14879,9 @@ class ChatModal {
 
     // file attachments
     this.fileAttachments = [];
+    this.pendingLocation = null;
+    this.locationRequestInProgress = false;
+    this.locationSendInProgress = false;
     // context menu properties
     this.currentContextMessage = null;
 
@@ -13983,6 +14918,8 @@ class ChatModal {
     // Drag and drop state
     this.dragCounter = 0;
     this.dropOverlay = null;
+
+    this.recentDeleteForAllGuardsByTxid = new Map();
 
     this.chatRenderedOldestIndex = CHAT_INITIAL_RENDER_COUNT - 1;
   }
@@ -14474,6 +15411,13 @@ class ChatModal {
     this.filesOpt = this.attachmentOptionsContextMenu?.querySelector('.context-menu-option[data-action="files"]');
     this.cameraFileOpt = this.attachmentOptionsContextMenu?.querySelector('.context-menu-option[data-action="camera-file"]');
     this.contactsOpt = this.attachmentOptionsContextMenu?.querySelector('.context-menu-option[data-action="contacts"]');
+    this.locationOpt = this.attachmentOptionsContextMenu?.querySelector('.context-menu-option[data-action="location"]');
+    this.locationSharePanel = document.getElementById('locationSharePanel');
+    this.locationShareCoordinates = document.getElementById('locationShareCoordinates');
+    this.locationShareAccuracy = document.getElementById('locationShareAccuracy');
+    this.locationShareMapLink = document.getElementById('locationShareMapLink');
+    this.cancelLocationShareButton = document.getElementById('cancelLocationShareButton');
+    this.sendLocationShareButton = document.getElementById('sendLocationShareButton');
     
     this.currentImageAttachmentRow = null;
     
@@ -14485,6 +15429,12 @@ class ChatModal {
       if (!phoneAnchor) return;
       const messageEl = phoneAnchor.closest('.message');
       if (!messageEl) return;
+      if (this.isMessageInDeleteForAllGuard(messageEl)) {
+        e.preventDefault();
+        e.stopPropagation();
+        showToast('This call is being deleted.', 2000, 'warning');
+        return false;
+      }
       if (this.gateScheduledCall(messageEl)) {
         e.preventDefault();
         e.stopPropagation();
@@ -14505,10 +15455,10 @@ class ChatModal {
         void this.handleReactionPickerClick(reactionButton);
         return;
       }
-      if (e.target.closest('.context-menu-option')) {
-        const action = e.target.closest('.context-menu-option').dataset.action;
-        this.handleContextMenuAction(action);
-      }
+      const option = e.target.closest('.context-menu-option');
+      if (!option || option.getAttribute('aria-disabled') === 'true') return;
+      const action = option.dataset.action;
+      this.handleContextMenuAction(action);
     });
     // Add image attachment context menu option listeners
     if (this.imageAttachmentContextMenu) {
@@ -14521,7 +15471,7 @@ class ChatModal {
           return;
         }
         const option = e.target.closest('.context-menu-option');
-        if (!option) return;
+        if (!option || option.getAttribute('aria-disabled') === 'true') return;
         const action = option.dataset.action;
         this.handleImageAttachmentContextMenuAction(action);
       });
@@ -14578,11 +15528,19 @@ class ChatModal {
         this.closeHeaderContextMenu();
       }
     });
+    this.locationSharePanel?.addEventListener('click', (e) => this.handleLocationUiOutsideClick(e));
     this.sendButton.addEventListener('click', withButtonCooldown(
       this.sendButton,
       BUTTON_COOLDOWN_MS,
       () => this.revalidateSendButtonState(),
       () => this.handleSendMessage()
+    ));
+    this.cancelLocationShareButton?.addEventListener('click', () => this.clearPendingLocation());
+    this.sendLocationShareButton?.addEventListener('click', withButtonCooldown(
+      this.sendLocationShareButton,
+      BUTTON_COOLDOWN_MS,
+      () => this.setLocationPanelBusy(this.locationRequestInProgress),
+      () => this.sendPendingLocation()
     ));
     this.cancelEditButton.addEventListener('click', () => this.cancelEdit());
     this.closeButton.addEventListener('click', this.close.bind(this));
@@ -14810,11 +15768,12 @@ class ChatModal {
 
       const newTime = Number(seekEl.value || 0);
 
-      const totalSeconds = Math.floor(Number(seekEl.max) || Number(voiceMessageElement.dataset.duration) || 0);
+      const totalSeconds = this.getPositiveDurationSeconds(seekEl.max) ||
+        this.getPositiveDurationSeconds(voiceMessageElement.dataset.duration);
       // updates the on-screen "current / total" label
       if (timeDisplayElement) {
-        const currentTime = this.formatDuration(newTime);
-        const totalTime = this.formatDuration(totalSeconds);
+        const currentTime = this.formatVoiceProgressTime(newTime, totalSeconds);
+        const totalTime = formatVoiceTimer(totalSeconds);
         timeDisplayElement.textContent = `${currentTime} / ${totalTime}`;
       }
       // ensures playback starts at the chosen position when audio is ready
@@ -14845,8 +15804,10 @@ class ChatModal {
     const timeDisplay = voiceMessageElement.querySelector('.voice-message-time-display');
     if (seekEl) seekEl.value = 0;
     if (timeDisplay && voiceMessageElement.dataset.duration) {
-      const duration = this.formatDuration(Number(voiceMessageElement.dataset.duration) || 0);
-      timeDisplay.textContent = `0:00 / ${duration}`;
+      const totalSeconds = this.getPositiveDurationSeconds(voiceMessageElement.dataset.duration);
+      const currentTime = this.formatVoiceProgressTime(0, totalSeconds);
+      const duration = formatVoiceTimer(totalSeconds);
+      timeDisplay.textContent = `${currentTime} / ${duration}`;
     }
   }
 
@@ -15066,6 +16027,7 @@ class ChatModal {
     this.messageInput.value = '';
     this.messageInput.style.height = '48px';
     this.messageByteCounter.style.display = 'none';
+    this.clearPendingLocation();
     this.toggleSendButtonVisibility();
     // clear any edit state and hide cancel button
     const editInputInit = document.getElementById('editOfTxId');
@@ -15248,6 +16210,7 @@ class ChatModal {
     this.closeReactionSheet();
     const closingAddress = this.address;
     this.hideAttachmentLoadingToastsForContact(closingAddress);
+    this.clearPendingLocation();
 
     // Ensure scroll is unlocked when closing
     this.unlockBackgroundScroll();
@@ -15344,6 +16307,10 @@ class ChatModal {
 
     // Find the last relevant message
     const lastChatMessage = contact.messages.find((message) => {
+      if (message.type === 'update_toll_required') {
+        return false;
+      }
+
       // Skip payment-only messages
       if (message.amount) {
         return false;
@@ -15928,6 +16895,399 @@ class ChatModal {
   }
 
   /**
+   * Starts the browser geolocation flow and stages a location message for confirmation.
+   * @returns {Promise<void>}
+   */
+  async handleShareLocationAction() {
+    if (this.isEditingMessage()) {
+      showToast('Finish editing before sharing location.', 3000, 'info');
+      return;
+    }
+
+    if (this.blockedByRecipient || myData.contacts[this.address]?.tollRequiredToSend == 2) {
+      showToast('You are blocked by this user', 0, 'error');
+      return;
+    }
+
+    if (!navigator.geolocation) {
+      showToast('Location is not available on this device.', 0, 'warning');
+      return;
+    }
+
+    const permissionState = await this.getLocationPermissionState();
+    if (permissionState === 'denied') {
+      this.showLocationPermissionDeniedToast();
+      return;
+    }
+
+    await this.requestPendingLocation();
+  }
+
+  /**
+   * Reads the browser geolocation permission state when supported.
+   * @returns {Promise<'granted'|'prompt'|'denied'|'unknown'>}
+   */
+  async getLocationPermissionState() {
+    try {
+      if (!navigator.permissions?.query) return 'unknown';
+      const result = await navigator.permissions.query({ name: 'geolocation' });
+      return result?.state || 'unknown';
+    } catch (_) {
+      return 'unknown';
+    }
+  }
+
+  /**
+   * Treat clicks outside the visible location UI as cancellation.
+   * @param {Event} e
+   * @returns {void}
+   */
+  handleLocationUiOutsideClick(e) {
+    if (e.target !== this.locationSharePanel) return;
+
+    e.preventDefault();
+    e.stopPropagation();
+    this.clearPendingLocation();
+  }
+
+  /**
+   * Shows the location permission denied warning.
+   * @returns {void}
+   */
+  showLocationPermissionDeniedToast() {
+    showToast(LOCATION_PERMISSION_DENIED_MESSAGE, 0, 'warning');
+  }
+
+  /**
+   * Requests the current browser location.
+   * @returns {Promise<GeolocationPosition>}
+   */
+  requestCurrentLocation() {
+    return new Promise((resolve, reject) => {
+      if (!navigator.geolocation) {
+        const error = new Error('Geolocation is not available');
+        error.code = 'UNAVAILABLE';
+        reject(error);
+        return;
+      }
+
+      navigator.geolocation.getCurrentPosition(resolve, reject, LOCATION_GEO_OPTIONS);
+    });
+  }
+
+  /**
+   * Converts a geolocation error into a short user-facing toast.
+   * @param {GeolocationPositionError|Error} error
+   * @returns {void}
+   */
+  showLocationError(error) {
+    if (error?.code === 1) {
+      this.showLocationPermissionDeniedToast();
+      return;
+    }
+
+    if (error?.code === 'UNAVAILABLE' || error?.code === 2) {
+      showToast('Location is not available on this device.', 0, 'error');
+      return;
+    }
+
+    if (error?.code === 3) {
+      showToast('Location request timed out. Try again when your position is ready.', 0, 'error');
+      return;
+    }
+
+    showToast('Could not get your current location. Check location permissions and try again.', 0, 'error');
+  }
+
+  /**
+   * Requests the current location and updates the pending confirmation panel.
+   * @returns {Promise<void>}
+   */
+  async requestPendingLocation() {
+    if (this.locationRequestInProgress) return;
+
+    this.locationRequestInProgress = true;
+    this.setLocationPanelBusy(true);
+
+    try {
+      const position = await this.requestCurrentLocation();
+      this.showPendingLocation(position);
+    } catch (error) {
+      console.warn('Location request failed:', error);
+      this.clearPendingLocation();
+      this.showLocationError(error);
+    } finally {
+      this.locationRequestInProgress = false;
+      this.setLocationPanelBusy(false);
+    }
+  }
+
+  /**
+   * Stores and displays a pending location before it is sent.
+   * @param {GeolocationPosition} position
+   * @param {string} [retryTxId]
+   * @returns {void}
+   */
+  showPendingLocation(position, retryTxId = '') {
+    const latitude = Number(position?.coords?.latitude);
+    const longitude = Number(position?.coords?.longitude);
+    const accuracy = Number(position?.coords?.accuracy);
+
+    if (!this.isValidLocation(latitude, longitude)) {
+      this.clearPendingLocation();
+      showToast('Received an invalid location. Please try again.', 0, 'error');
+      return;
+    }
+
+    this.pendingLocation = {
+      latitude,
+      longitude,
+      accuracy: Number.isFinite(accuracy) && accuracy >= 0 ? accuracy : null,
+      retryTxId,
+      retryAddress: retryTxId ? this.address : null
+    };
+    this.renderLocationSharePanel();
+  }
+
+  /**
+   * Updates disabled/loading state for the staged location panel.
+   * @param {boolean} busy
+   * @returns {void}
+   */
+  setLocationPanelBusy(busy) {
+    if (this.sendLocationShareButton) {
+      this.sendLocationShareButton.disabled = !!busy || this.locationSendInProgress || !this.pendingLocation;
+      this.sendLocationShareButton.textContent = this.locationSendInProgress ? 'Sending...' : 'Send';
+    }
+  }
+
+  /**
+   * Renders the staged location confirmation panel.
+   * @returns {void}
+   */
+  renderLocationSharePanel() {
+    if (!this.locationSharePanel || !this.pendingLocation) return;
+
+    if (this.locationShareCoordinates) {
+      this.locationShareCoordinates.textContent = this.formatLocationCoordinates(
+        this.pendingLocation.latitude,
+        this.pendingLocation.longitude
+      );
+    }
+    if (this.locationShareAccuracy) {
+      const accuracyText = this.formatLocationAccuracy(this.pendingLocation.accuracy);
+      this.locationShareAccuracy.textContent = accuracyText;
+      this.locationShareAccuracy.style.display = accuracyText ? '' : 'none';
+    }
+    if (this.locationShareMapLink) {
+      this.locationShareMapLink.href = this.getLocationMapUrl(
+        this.pendingLocation.latitude,
+        this.pendingLocation.longitude
+      );
+    }
+    this.locationSharePanel.style.display = 'flex';
+    this.setLocationPanelBusy(this.locationRequestInProgress);
+  }
+
+  /**
+   * Clears the staged location without touching typed message drafts.
+   * @returns {void}
+   */
+  clearPendingLocation() {
+    const retryTxId = this.pendingLocation?.retryTxId || '';
+    const retryAddress = this.pendingLocation?.retryAddress || this.address;
+    this.pendingLocation = null;
+    if (retryTxId) {
+      if (this.retryOfTxId?.value === retryTxId) {
+        this.retryOfTxId.value = '';
+      }
+      const contact = retryAddress ? myData.contacts[retryAddress] : null;
+      if (contact?.draftRetryTxid === retryTxId) {
+        this.clearRetryState(contact);
+      }
+    }
+    if (this.locationSharePanel) {
+      this.locationSharePanel.style.display = 'none';
+    }
+    if (this.locationShareCoordinates) this.locationShareCoordinates.textContent = '';
+    if (this.locationShareAccuracy) this.locationShareAccuracy.textContent = '';
+    if (this.locationShareMapLink) this.locationShareMapLink.removeAttribute('href');
+    this.setLocationPanelBusy(false);
+  }
+
+  /**
+   * Sends the currently staged location.
+   * @returns {Promise<void>}
+   */
+  async sendPendingLocation() {
+    if (this.locationSendInProgress) {
+      showToast('Location is already sending.', 2000, 'info');
+      return;
+    }
+
+    if (!this.pendingLocation) {
+      showToast('Choose Share Location again before sending.', 3000, 'error');
+      return;
+    }
+
+    await this.sendLocationMessage(this.pendingLocation);
+  }
+
+  /**
+   * Sends a standalone encrypted location chat message.
+   * @param {{latitude: number, longitude: number, accuracy: number|null, retryTxId?: string}} location
+   * @returns {Promise<void>}
+   */
+  async sendLocationMessage(location) {
+    if (!isOnline) {
+      showToast('You are offline. Please check your internet connection.', 3000, 'error');
+      return;
+    }
+
+    if (myData.contacts[this.address]?.tollRequiredToSend == 2) {
+      showToast('You are blocked by this user', 0, 'error');
+      return;
+    }
+
+    const latitude = Number(location.latitude);
+    const longitude = Number(location.longitude);
+    const accuracy = Number(location.accuracy);
+    if (!this.isValidLocation(latitude, longitude)) {
+      showToast('Location is invalid. Please refresh and try again.', 0, 'error');
+      return;
+    }
+
+    const currentAddress = this.address;
+    if (!currentAddress) {
+      showToast('Open a chat before sending location.', 3000, 'error');
+      return;
+    }
+    if (currentAddress === myAccount.address) {
+      showToast('You cannot send a location to yourself.', 3000, 'error');
+      return;
+    }
+    const retryTxId = location.retryTxId || this.retryOfTxId?.value || '';
+
+    const keys = myAccount.keys;
+    if (!keys) {
+      showToast('Keys not found for sender address', 0, 'error');
+      return;
+    }
+
+    this.locationSendInProgress = true;
+    this.setLocationPanelBusy(true);
+    showToast('Sending location...', 2000, 'info');
+
+    let txid = '';
+    try {
+      const tollInLib =
+        myData.contacts[currentAddress].tollRequiredToSend == 0
+          ? 0n
+          : getEffectiveTollLibWei(this.toll);
+      const sufficientBalance = await validateBalance(tollInLib);
+      if (!sufficientBalance) {
+        const msg = `Insufficient balance for fee${tollInLib > 0n ? ' and toll' : ''}. Go to the wallet to add more LIB.`;
+        showToast(msg, 0, 'error');
+        return;
+      }
+
+      let chatCryptoContext;
+      try {
+        chatCryptoContext = await this.prepareEncryptedChatContext(currentAddress, keys);
+      } catch (error) {
+        if (error?.code === 'CHAT_CRYPTO_PREPARATION') {
+          console.warn(error.message);
+          showToast(error.message || 'Could not prepare encrypted chat. Please try again.', 0, 'error');
+          return;
+        }
+        throw error;
+      }
+
+      const messageObj = {
+        type: 'location',
+        latitude,
+        longitude,
+        accuracy: Number.isFinite(accuracy) && accuracy >= 0 ? accuracy : null
+      };
+
+      const { payload, chatMessageObj, txid: builtTxid } = await this.buildEncryptedStructuredChatTx(
+        currentAddress,
+        messageObj,
+        tollInLib,
+        keys,
+        chatCryptoContext
+      );
+      txid = builtTxid;
+
+      const contact = myData.contacts[currentAddress];
+      if (retryTxId) {
+        removeFailedTx(retryTxId, currentAddress);
+        if (this.retryOfTxId?.value === retryTxId) {
+          this.retryOfTxId.value = '';
+        }
+        if (contact?.draftRetryTxid === retryTxId) {
+          this.clearRetryState(contact);
+        }
+      }
+
+      const newMessage = {
+        message: '',
+        type: 'location',
+        latitude: messageObj.latitude,
+        longitude: messageObj.longitude,
+        accuracy: messageObj.accuracy,
+        timestamp: payload.sent_timestamp,
+        sent_timestamp: payload.sent_timestamp,
+        my: true,
+        txid,
+        status: 'sent'
+      };
+
+      insertSorted(contact.messages, newMessage, 'timestamp');
+
+      const chatIndex = myData.chats.findIndex((chat) => chat.address === currentAddress);
+      if (chatIndex !== -1) {
+        myData.chats.splice(chatIndex, 1);
+      }
+      insertSorted(myData.chats, {
+        address: currentAddress,
+        timestamp: newMessage.sent_timestamp,
+        txid
+      }, 'timestamp');
+
+      this.clearPendingLocation();
+      this.appendChatModal();
+      this.messagesList.parentElement.scrollTop = this.messagesList.parentElement.scrollHeight;
+      saveState();
+      chatsScreen.updateChatList();
+
+      const response = await injectTx(chatMessageObj, txid);
+      if (!response || !response.result || !response.result.success) {
+        console.error('location message failed to send', response);
+        const reason = response?.result?.reason;
+        if (reason && isRecipientTollStateFailure(reason)) {
+          await this.refreshRecipientTollState(currentAddress);
+        }
+        updateTransactionStatus(txid, currentAddress, 'failed', 'message');
+        this.appendChatModal();
+        saveState();
+        return;
+      }
+    } catch (error) {
+      console.error('Location message error:', error);
+      showToast('Failed to send location. Please try again.', 0, 'error');
+      if (txid) {
+        updateTransactionStatus(txid, currentAddress, 'failed', 'message');
+        this.appendChatModal();
+        saveState();
+      }
+    } finally {
+      this.locationSendInProgress = false;
+      this.setLocationPanelBusy(false);
+    }
+  }
+
+  /**
    * Cancel editing mode without sending: clears hidden edit txid and restores UI state
    */
   cancelEdit() {
@@ -16091,6 +17451,65 @@ class ChatModal {
     };
   }
 
+  /**
+   * Checks latitude and longitude bounds.
+   * @param {number} latitude
+   * @param {number} longitude
+   * @returns {boolean}
+   */
+  isValidLocation(latitude, longitude) {
+    return Number.isFinite(latitude)
+      && Number.isFinite(longitude)
+      && latitude >= -90
+      && latitude <= 90
+      && longitude >= -180
+      && longitude <= 180;
+  }
+
+  /**
+   * Formats one coordinate for display.
+   * @param {number} value
+   * @returns {string}
+   */
+  formatLocationCoordinate(value) {
+    const coordinate = Number(value);
+    return Number.isFinite(coordinate) ? coordinate.toFixed(6) : '';
+  }
+
+  /**
+   * Formats latitude and longitude for display.
+   * @param {number} latitude
+   * @param {number} longitude
+   * @returns {string}
+   */
+  formatLocationCoordinates(latitude, longitude) {
+    return `${this.formatLocationCoordinate(latitude)}, ${this.formatLocationCoordinate(longitude)}`;
+  }
+
+  /**
+   * Formats location accuracy for display.
+   * @param {number|null} accuracy
+   * @returns {string}
+   */
+  formatLocationAccuracy(accuracy) {
+    const meters = Number(accuracy);
+    if (!Number.isFinite(meters) || meters < 0) return '';
+    return `Accuracy: ~${Math.round(meters)} m`;
+  }
+
+  /**
+   * Builds a maps URL for a shared location.
+   * @param {number} latitude
+   * @param {number} longitude
+   * @returns {string}
+   */
+  getLocationMapUrl(latitude, longitude) {
+    const lat = this.formatLocationCoordinate(latitude);
+    const lng = this.formatLocationCoordinate(longitude);
+    const query = encodeURIComponent(`${lat},${lng}`);
+    return `https://maps.google.com/?q=${query}`;
+  }
+
   renderChatMessageHTML(item, { contact, lastReadTs }) {
     const timeString = formatTime(item.timestamp);
     // Use a consistent timestamp attribute for potential future use (e.g., message jumping)
@@ -16098,6 +17517,15 @@ class ChatModal {
     // Add txid attribute if available
     const txidAttribute = item.txid ? `data-txid="${item.txid}"` : '';
     const statusAttribute = item.status ? `data-status="${item.status}"` : '';
+
+    if (item.type === 'update_toll_required') {
+      const statusText = escapeHtml(getUpdateTollRequiredPreviewText(item, contact));
+      return `
+          <div class="update-toll-required-divider" ${timestampAttribute} ${txidAttribute} role="status">
+            <span class="update-toll-required-text">${statusText}</span>
+          </div>
+        `;
+    }
 
     // Check if it's a payment based on the presence of the amount property (BigInt)
     if (typeof item.amount === 'bigint') {
@@ -16190,10 +17618,10 @@ class ChatModal {
                     ${hasThumbnail ? '<div class="attachment-preview-hint">Click for options</div>' : ''}
                   </div>
                   <div style="min-width:0;">
-                    <span class="attachment-label" style="font-weight:500;color:#222;font-size:0.7em;display:block;word-wrap:break-word;">
+                    <span class="attachment-label" style="font-weight:500;color:#222;display:block;word-wrap:break-word;">
                       ${fileName}
                     </span><br>
-                    <span style="font-size: 0.93em; color: #888;">${fileType}${fileType && fileSize ? ' · ' : ''}${fileSize}</span>
+                    <span class="attachment-meta" style="color: #888;">${fileType}${fileType && fileSize ? ' · ' : ''}${fileSize}</span>
                   </div>
                 </div>
               `;
@@ -16243,10 +17671,12 @@ class ChatModal {
       }
       case 'vm': {
         // Check for voice message
-        const duration = this.formatDuration(item.duration);
+        const durationSeconds = this.getPositiveDurationSeconds(item.duration);
+        const currentTime = this.formatVoiceProgressTime(0, durationSeconds);
+        const duration = formatVoiceTimer(durationSeconds);
         // Use audio encryption keys for playback, fall back to message encryption keys if not available
         messageTextHTML = `
-              <div class="voice-message" data-url="${item.url || ''}" data-name="voice-message" data-type="audio/webm" data-duration="${item.duration || 0}">
+              <div class="voice-message" data-url="${item.url || ''}" data-name="voice-message" data-type="audio/webm" data-duration="${durationSeconds}">
                 <div class="voice-message-controls">
                   <div class="voice-message-top-row">
                     <button class="voice-message-play-button" aria-label="Play voice message">
@@ -16255,14 +17685,36 @@ class ChatModal {
                       </svg>
                     </button>
                     <div class="voice-message-text">Voice message</div>
-                    <div class="voice-message-time-display">0:00 / ${duration}</div>
+                    <div class="voice-message-time-display">${currentTime} / ${duration}</div>
                   </div>
                   <div class="voice-message-bottom-row">
-                    <input type="range" class="voice-message-seek" min="0" max="${item.duration || 0}" value="0" step="1" aria-label="Seek voice message">
+                    <input type="range" class="voice-message-seek" min="0" max="${durationSeconds}" value="0" step="0.01" aria-label="Seek voice message">
                     <button class="voice-message-speed-button" aria-label="Toggle playback speed" data-speed="1">1x</button>
                   </div>
                 </div>
               </div>`;
+        break;
+      }
+      case 'location': {
+        const latitude = Number(item.latitude);
+        const longitude = Number(item.longitude);
+        if (this.isValidLocation(latitude, longitude)) {
+          const coordinates = this.formatLocationCoordinates(latitude, longitude);
+          const accuracy = this.formatLocationAccuracy(item.accuracy);
+          const mapUrl = this.getLocationMapUrl(latitude, longitude);
+          messageTextHTML = `
+              <div class="location-message">
+                <a class="location-message-summary" href="${mapUrl}" target="_blank" rel="noopener noreferrer">
+                  <span class="location-message-icon" aria-hidden="true"></span>
+                  <span class="location-message-body">
+                    <span class="location-message-title">Shared location</span>
+                    <span class="location-message-coordinates">${escapeHtml(coordinates)}</span>
+                    ${accuracy ? `<span class="location-message-accuracy">${escapeHtml(accuracy)}</span>` : ''}
+                    <span class="location-message-link">Open in Google Maps</span>
+                  </span>
+                </a>
+              </div>`;
+        }
         break;
       }
       default:
@@ -16368,6 +17820,7 @@ class ChatModal {
 
     // Replace the list once to avoid one DOM mutation per message.
     this.messagesList.innerHTML = range.html;
+    this.syncAllRenderedReactionChips();
     const shouldKeepBottomAnchored = !skipAutoScroll && !highlightNewMessage;
 
     // --- 4.5. Load thumbnails for image attachments (async, non-blocking) ---
@@ -16390,7 +17843,6 @@ class ChatModal {
         if (!skipAutoScroll) {
           this.ensureScrollableChatRenderWindow();
         }
-        this.syncAllRenderedReactionChips();
       });
     });
 
@@ -16872,23 +18324,6 @@ class ChatModal {
             this.revalidateSendButtonState();
 
             this.addAttachmentButton.disabled = this.isEditingMessage() || this.blockedByRecipient;
-            if (activeChatMatchesUpload) {
-              showToast(
-                `Attached "${file.name}" to ${uploadContactName}`,
-                3000,
-                'success',
-                false,
-                { dedupe: false }
-              );
-            } else {
-              showToast(
-                `Uploaded "${file.name}" for ${uploadContactName}; saved to that draft`,
-                3000,
-                'success',
-                false,
-                { dedupe: false }
-              );
-            }
             refreshChatsScreenIfActive();
             resolve(); // Successfully completed upload
           } catch (fetchError) {
@@ -17682,6 +19117,7 @@ class ChatModal {
 
     // Do not open context menu when clicking on reply quote
     if (e.target.closest('.reply-quote')) return;
+    if (e.target.closest('.location-message-summary')) return;
 
     // Ensure only one context menu is open at a time
     this.closeAllContextMenus();
@@ -17704,6 +19140,7 @@ class ChatModal {
     // If this is a call message, show call-specific options and hide copy
     const isCall = !!messageEl.querySelector('.call-message');
     const isVoice = !!messageEl.querySelector('.voice-message');
+    const isLocation = !!messageEl.querySelector('.location-message');
     const copyOption = this.contextMenu.querySelector('[data-action="copy"]');
     const joinOption = this.contextMenu.querySelector('[data-action="join"]');
     const inviteOption = this.contextMenu.querySelector('[data-action="call-invite"]');
@@ -17737,6 +19174,7 @@ class ChatModal {
       if (editResendOption) editResendOption.style.display = 'none';
       if (deleteOption) deleteOption.style.display = 'none';
 
+      this.syncDeleteContextMenuDisabledState(this.contextMenu, messageEl, messageRecord);
       this.positionContextMenu(this.contextMenu, messageEl);
       this.contextMenu.style.display = 'block';
       return;
@@ -17750,7 +19188,7 @@ class ChatModal {
       if (deleteForAllOption) deleteForAllOption.style.display = 'none';
     }
     if (isCall) {
-      if (copyOption) copyOption.style.display = 'none';
+      if (copyOption) copyOption.style.display = 'flex';
       // Determine if join is allowed (not future, not expired > 2h)
       const callTimeAttr = Number(messageEl.getAttribute('data-call-time') || 0);
       const msgTs = Number(messageEl.dataset.messageTimestamp || 0);
@@ -17768,6 +19206,13 @@ class ChatModal {
       if (inviteOption) inviteOption.style.display = 'none';
       if (joinOption) joinOption.style.display = 'none';
       if (replyOption) replyOption.style.display = 'flex';
+      if (editOption) editOption.style.display = 'none';
+    } else if (isLocation) {
+      if (copyOption) copyOption.style.display = 'flex';
+      if (inviteOption) inviteOption.style.display = 'none';
+      if (joinOption) joinOption.style.display = 'none';
+      if (replyOption) replyOption.style.display = 'flex';
+      if (editResendOption) editResendOption.style.display = 'none';
       if (editOption) editOption.style.display = 'none';
     } else {
       if (copyOption) copyOption.style.display = 'flex';
@@ -17799,6 +19244,7 @@ class ChatModal {
       if (editOption) editOption.style.display = 'none';
     }
     
+    this.syncDeleteContextMenuDisabledState(this.contextMenu, messageEl, messageRecord);
     this.positionContextMenu(this.contextMenu, messageEl);
     this.contextMenu.style.display = 'block';
   }
@@ -18157,6 +19603,7 @@ class ChatModal {
     if (existingContainer) {
       existingContainer.remove();
     }
+    messageEl.classList.remove('has-reactions');
 
     const messageRecord = this.getMessageRecordFromElement(messageEl);
     if (messageRecord && isDeleted(messageRecord)) {
@@ -18166,6 +19613,7 @@ class ChatModal {
     const reactionHtml = this.buildReactionChipsHTML(reactionsForTarget);
     if (!reactionHtml) return;
 
+    messageEl.classList.add('has-reactions');
     messageEl.insertAdjacentHTML('beforeend', reactionHtml);
   }
 
@@ -18226,7 +19674,7 @@ class ChatModal {
   }
 
   /**
-   * Applies active-state styling to the quick reaction tray based on stored reaction state.
+   * Applies active and disabled state to a reaction tray based on stored message state.
    * @param {HTMLElement | null} reactionTray
    * @param {HTMLElement | null} messageEl
    */
@@ -18234,6 +19682,7 @@ class ChatModal {
     if (!reactionTray) return;
 
     const activeEmoji = this.getCurrentUserReactionForMessage(messageEl);
+    const isDisabled = this.isMessageInDeleteForAllGuard(messageEl);
     const reactionButtons = reactionTray.querySelectorAll('.message-context-reaction-button');
     reactionButtons.forEach((button) => {
       const isMorePickerTrigger = button.dataset.reactionPickerTrigger === 'true';
@@ -18243,6 +19692,8 @@ class ChatModal {
       const isActive = !isMorePickerTrigger && !!activeEmoji && buttonEmoji === activeEmoji;
 
       button.classList.toggle('active', isActive);
+      button.disabled = isDisabled;
+      button.setAttribute('aria-disabled', isDisabled ? 'true' : 'false');
       button.setAttribute('aria-pressed', isActive ? 'true' : 'false');
     });
   }
@@ -18339,6 +19790,56 @@ class ChatModal {
     return true;
   }
 
+  hasRecentDeleteForAllForTarget(targetTxid) {
+    return !!targetTxid && this.recentDeleteForAllGuardsByTxid.has(targetTxid);
+  }
+
+  isMessageInDeleteForAllGuard(messageEl, messageRecord = null) {
+    const message = messageRecord || this.getMessageRecordFromElement(messageEl);
+    return this.hasRecentDeleteForAllForTarget(message?.txid || messageEl?.dataset?.txid);
+  }
+
+  markRecentDeleteForAllForTarget(targetTxid) {
+    assert(targetTxid, 'Delete-for-all target txid is required');
+
+    const existingGuard = this.recentDeleteForAllGuardsByTxid.get(targetTxid);
+    clearTimeout(existingGuard?.timeoutId);
+
+    const guard = { targetTxid };
+    guard.timeoutId = setTimeout(() => {
+      if (this.recentDeleteForAllGuardsByTxid.get(targetTxid) !== guard) {
+        return;
+      }
+
+      this.recentDeleteForAllGuardsByTxid.delete(targetTxid);
+    }, DELETE_FOR_ALL_ACTION_GUARD_MS);
+    this.recentDeleteForAllGuardsByTxid.set(targetTxid, guard);
+    return guard;
+  }
+
+  clearRecentDeleteForAllGuard(guard) {
+    if (this.recentDeleteForAllGuardsByTxid.get(guard.targetTxid) !== guard) {
+      return;
+    }
+
+    clearTimeout(guard.timeoutId);
+    this.recentDeleteForAllGuardsByTxid.delete(guard.targetTxid);
+  }
+
+  syncDeleteContextMenuDisabledState(menu, messageEl, messageRecord = null) {
+    const message = messageRecord || this.getMessageRecordFromElement(messageEl);
+    const isDeleteGuardDisabled = this.isMessageInDeleteForAllGuard(messageEl, message);
+    const guardedActions = '[data-action="delete"], [data-action="delete-for-all"], ' +
+      '[data-action="copy"], [data-action="reply"], [data-action="join"], [data-action="call-invite"], ' +
+      '[data-action="edit"]';
+    menu?.querySelectorAll(guardedActions).forEach((option) => {
+      const isOfflineDisabled =
+        option.classList.contains('offline-disabled') ||
+        (option.dataset.requiresConnection === 'true' && !isOnline);
+      option.setAttribute('aria-disabled', (isDeleteGuardDisabled || isOfflineDisabled) ? 'true' : 'false');
+    });
+  }
+
   /**
    * Removes cached thumbnails for any image attachments in an xattach array.
    * Safe to call even if thumbnails don't exist.
@@ -18406,9 +19907,14 @@ class ChatModal {
       if (this.filesOpt) this.filesOpt.style.display = 'none';
       if (this.cameraFileOpt) this.cameraFileOpt.style.display = '';
       if (this.contactsOpt) this.contactsOpt.style.display = '';
+      if (this.locationOpt) this.locationOpt.style.display = '';
     } else {
       // Non-iOS: Hide "Camera/File", show others
       if (this.cameraFileOpt) this.cameraFileOpt.style.display = 'none';
+      if (this.cameraOpt) this.cameraOpt.style.display = '';
+      if (this.filesOpt) this.filesOpt.style.display = '';
+      if (this.contactsOpt) this.contactsOpt.style.display = '';
+      if (this.locationOpt) this.locationOpt.style.display = '';
       
       // Desktop: only show "Camera" + "Files" (hide "Photo Library")
       // Heuristic: devices with a fine pointer + hover are typically desktop/laptop.
@@ -18418,6 +19924,13 @@ class ChatModal {
       } catch (_) {
         // ignore
       }
+    }
+
+    if (this.locationOpt) {
+      this.locationOpt.classList.remove('offline-disabled');
+      this.locationOpt.removeAttribute('disabled');
+      this.locationOpt.removeAttribute('data-requires-connection');
+      this.locationOpt.setAttribute('aria-disabled', 'false');
     }
     
     // Show menu first to get its dimensions
@@ -18499,6 +20012,9 @@ class ChatModal {
         break;
       case 'contacts':
         shareContactsModal.open(chatModal.address);
+        break;
+      case 'location':
+        void this.handleShareLocationAction();
         break;
     }
   }
@@ -18897,6 +20413,7 @@ class ChatModal {
     );
     this.syncReactionPickerActiveState(this.imageAttachmentContextMenuReactions, messageEl);
 
+    this.syncDeleteContextMenuDisabledState(this.imageAttachmentContextMenu, messageEl);
     this.positionContextMenu(this.imageAttachmentContextMenu, attachmentRow);
     this.imageAttachmentContextMenu.style.display = 'block';
   }
@@ -19133,6 +20650,11 @@ class ChatModal {
   async handleReactionPickerSelection(reactionButton, messageEl, closeMenu) {
     if (!reactionButton) return;
     if (!messageEl) return;
+    if (this.isMessageInDeleteForAllGuard(messageEl)) {
+      closeMenu();
+      showToast('This message is being deleted.', 2000, 'warning');
+      return;
+    }
 
     if (reactionButton.dataset.reactionPickerTrigger === 'true') {
       closeMenu();
@@ -19649,6 +21171,31 @@ class ChatModal {
   }
 
 
+  getShareableCallUrl(messageEl) {
+    const messageRecord = this.getMessageRecordFromElement(messageEl);
+    const recordUrl = messageRecord?.type === 'call' && typeof messageRecord.message === 'string'
+      ? messageRecord.message.trim()
+      : '';
+    const anchorHref = messageEl.querySelector('.call-message a')?.href?.trim() || '';
+    const callUrl = recordUrl || anchorHref.split('#')[0];
+    if (!callUrl) return '';
+
+    const urlToCopy = callUrl.includes('#') ? callUrl : `${callUrl}${callUrlParams}`;
+    return this.removeCallDisplayNameParam(urlToCopy);
+  }
+
+  removeCallDisplayNameParam(callUrl) {
+    const [baseUrl, hash = ''] = callUrl.split('#');
+    if (!hash) return callUrl;
+
+    const filteredHash = hash
+      .split('&')
+      .filter((param) => !param.startsWith('userInfo.displayName='))
+      .join('&');
+
+    return filteredHash ? `${baseUrl}#${filteredHash}` : baseUrl;
+  }
+
     /**
    * Copies message content to clipboard
    * @param {HTMLElement} messageEl - The message element
@@ -19659,6 +21206,40 @@ class ChatModal {
     }
 
     const isPayment = messageEl.classList.contains('payment-info');
+    const callMessage = messageEl.querySelector('.call-message');
+    if (callMessage) {
+      const callUrl = this.getShareableCallUrl(messageEl);
+      if (!callUrl) {
+        return showToast('Call link not found', 2000, 'error');
+      }
+
+      try {
+        await navigator.clipboard.writeText(callUrl);
+        showToast('Call URL copied to clipboard', 2000, 'success');
+      } catch (err) {
+        console.error('Failed to copy:', err);
+        showToast('Failed to copy call URL', 0, 'error');
+      }
+      return;
+    }
+
+    const locationLink = messageEl.querySelector('.location-message-summary');
+    if (locationLink) {
+      const mapUrl = locationLink.getAttribute('href')?.trim();
+      if (!mapUrl) {
+        return showToast('No location URL to copy', 2000, 'info');
+      }
+
+      try {
+        await navigator.clipboard.writeText(mapUrl);
+        showToast('Location URL copied to clipboard', 2000, 'success');
+      } catch (err) {
+        console.error('Failed to copy:', err);
+        showToast('Failed to copy location URL', 0, 'error');
+      }
+      return;
+    }
+
     const selector = isPayment ? '.payment-memo' : '.message-content';
     const contentType = isPayment ? 'Memo' : 'Message';
     const contentEl = messageEl.querySelector(selector);
@@ -19686,6 +21267,11 @@ class ChatModal {
    * @param {HTMLElement} messageEl
    */
   handleJoinCall(messageEl) {
+    if (this.isMessageInDeleteForAllGuard(messageEl)) {
+      this.closeContextMenu();
+      return showToast('This call is being deleted.', 2000, 'warning');
+    }
+
     const callUrl = messageEl.querySelector('.call-message a')?.href;
     if (!callUrl) return showToast('Call link not found', 2000, 'error');
     // Gate future scheduled calls (context menu path)
@@ -19780,18 +21366,20 @@ class ChatModal {
   async deleteMessageForAll(messageEl) {
     const { txid, messageTimestamp: timestamp } = messageEl.dataset;
     
-    if (!timestamp || !confirm('Delete this message for all participants?')) return;
+    if (!timestamp && !txid) return;
     
     try {
       // Get the message object from contact.messages
       const contact = myData.contacts[this.address];
-      const messageIndex = contact?.messages?.findIndex(msg => 
-        msg.timestamp == timestamp || msg.txid === txid
-      );
-      
-      if (messageIndex === -1) return;
-      
-      const message = contact.messages[messageIndex];
+      if (!contact) return;
+
+      const message = this.getMessageRecordFromElement(messageEl);
+      if (!message) return;
+
+      const targetTxid = message.txid;
+      if (!targetTxid) {
+        return showToast('Cannot delete message: missing message id', 0, 'error');
+      }
       
       if (isDeletedForAll(message)) {
         return showToast('Message already deleted for everyone', 2000, 'info');
@@ -19802,17 +21390,24 @@ class ChatModal {
         return showToast('You can only delete your own messages for all', 0, 'error');
       }
 
+      if (this.hasRecentDeleteForAllForTarget(targetTxid)) return;
+
+      if (!confirm('Delete this message for all participants?')) return;
+      const deleteForAllGuard = this.markRecentDeleteForAllForTarget(targetTxid);
+
       // Create and send a "delete" message
       const keys = myAccount.keys;
       if (!keys) {
+        this.clearRecentDeleteForAllGuard(deleteForAllGuard);
         showToast('Keys not found', 0, 'error');
         return;
       }
 
-      const tollInLib = myData.contacts[this.address].tollRequiredToSend == 0 ? 0n : getEffectiveTollLibWei(this.toll);
+      const tollInLib = contact.tollRequiredToSend == 0 ? 0n : getEffectiveTollLibWei(this.toll);
 
       const sufficientBalance = await validateBalance(tollInLib);
       if (!sufficientBalance) {
+        this.clearRecentDeleteForAllGuard(deleteForAllGuard);
         const msg = `Insufficient balance for fee${tollInLib > 0n ? ' and toll' : ''}. Go to the wallet to add more LIB.`;
         showToast(msg, 0, 'error');
         return;
@@ -19820,9 +21415,10 @@ class ChatModal {
 
       // Ensure recipient keys are available
       const ok = await ensureContactKeys(this.address);
-      const recipientPubKey = myData.contacts[this.address]?.public;
-      const pqRecPubKey = myData.contacts[this.address]?.pqPublic;
+      const recipientPubKey = contact.public;
+      const pqRecPubKey = contact.pqPublic;
       if (!ok || !recipientPubKey || !pqRecPubKey) {
+        this.clearRecentDeleteForAllGuard(deleteForAllGuard);
         console.warn(`No public/PQ key found for recipient ${this.address}`);
         showToast('Failed to get recipient key', 0, 'error');
         return;
@@ -19834,7 +21430,7 @@ class ChatModal {
       // Create delete message payload
       const deleteObj = {
         type: 'delete',
-        txid: txid  // ID of the message to delete
+        txid: targetTxid  // ID of the message to delete
       };
 
       // Encrypt the message
@@ -20333,14 +21929,25 @@ class ChatModal {
   // ========== Voice Message Methods ==========
 
   /**
-   * Format duration from seconds to mm:ss
-   * @param {number} seconds - Duration in seconds
-   * @returns {string} Formatted duration
+   * Normalize a duration-like value to a positive finite number of seconds.
+   * @param {number|string} seconds - Duration value to normalize.
+   * @returns {number} Positive duration in seconds, or 0 when invalid.
    */
-  formatDuration(seconds) {
-    const mins = Math.floor(seconds / 60);
-    const secs = seconds % 60;
-    return `${mins}:${secs.toString().padStart(2, '0')}`;
+  getPositiveDurationSeconds(seconds) {
+    const duration = Number(seconds);
+    return Number.isFinite(duration) && duration > 0 ? duration : 0;
+  }
+
+  /**
+   * Format the current voice playback position, capped by total duration when known.
+   * @param {number|string} seconds - Current playback or seek position in seconds.
+   * @param {number|string} totalSeconds - Total voice message duration in seconds.
+   * @returns {string} Current playback time formatted as mm:ss.t.
+   */
+  formatVoiceProgressTime(seconds, totalSeconds) {
+    const current = Math.max(0, Number(seconds) || 0);
+    const total = this.getPositiveDurationSeconds(totalSeconds);
+    return formatVoiceTimer(total ? Math.min(current, total) : current);
   }
 
   /**
@@ -20616,19 +22223,32 @@ class ChatModal {
       }
       const seekEl = voiceMessageElement.querySelector('.voice-message-seek');
       const timeDisplayElement = voiceMessageElement.querySelector('.voice-message-time-display');
-      // Use stored duration from message object
-      const totalDurationSeconds = (Number.isFinite(message.duration) && message.duration > 0)
-        ? Math.floor(message.duration)
-        : 0;
-      
+      let totalDurationSeconds = this.getPositiveDurationSeconds(message.duration);
+      const updateDurationUi = () => {
+        if (seekEl) seekEl.max = totalDurationSeconds || 0;
+        voiceMessageElement.dataset.duration = String(totalDurationSeconds || 0);
+        if (!timeDisplayElement) return;
+
+        const current = audio?.currentTime || Number(seekEl?.value || 0);
+        const currentTime = this.formatVoiceProgressTime(current, totalDurationSeconds);
+        const totalTime = formatVoiceTimer(totalDurationSeconds);
+        timeDisplayElement.textContent = `${currentTime} / ${totalTime}`;
+      };
+
       // Set max immediately so slider is seekable before playback
-      if (seekEl) seekEl.max = totalDurationSeconds || 0;
+      updateDurationUi();
       
       // Handle pending seeks (if user moved slider before clicking play)
       audio.addEventListener('loadedmetadata', () => {
+        const metadataDuration = this.getPositiveDurationSeconds(audio.duration);
+        if (metadataDuration && Math.abs(metadataDuration - totalDurationSeconds) > 0.05) {
+          totalDurationSeconds = metadataDuration;
+          updateDurationUi();
+        }
+
         if (voiceMessageElement.pendingSeekTime !== undefined) {
           const pst = voiceMessageElement.pendingSeekTime;
-          if (pst >= 0 && pst < totalDurationSeconds) {
+          if (pst >= 0 && (!totalDurationSeconds || pst < totalDurationSeconds)) {
             try { audio.currentTime = pst; } catch (e) { /* ignore */ }
           }
           delete voiceMessageElement.pendingSeekTime;
@@ -20645,11 +22265,11 @@ class ChatModal {
       audio.ontimeupdate = () => {
         if (!voiceMessageElement.isScrubbing) {
           if (seekEl) {
-            seekEl.value = Math.floor(audio.currentTime);
+            seekEl.value = audio.currentTime;
           }
           if (timeDisplayElement) {
-            const currentTime = this.formatDuration(Math.floor(audio.currentTime));
-            const totalTime = this.formatDuration(totalDurationSeconds);
+            const currentTime = this.formatVoiceProgressTime(audio.currentTime, totalDurationSeconds);
+            const totalTime = formatVoiceTimer(totalDurationSeconds);
             timeDisplayElement.textContent = `${currentTime} / ${totalTime}`;
           }
         }
@@ -20883,6 +22503,12 @@ class CallInviteModal {
     return this.getComparableCallUrl(anchorHref);
   }
 
+  cancelInviteIfSourceCallInDeleteForAllGuard() {
+    if (!chatModal.isMessageInDeleteForAllGuard(this.messageEl)) return false;
+    showToast('Call invite canceled because the call is being deleted.', 2500, 'warning');
+    return true;
+  }
+
   /**
    * Checks whether a contact already has this call URL in their call messages.
    * @param {Object} contact
@@ -20995,6 +22621,10 @@ class CallInviteModal {
    */
   async open(messageEl) {
     this.messageEl = messageEl;
+    if (chatModal.isMessageInDeleteForAllGuard(this.messageEl)) {
+      showToast('This call is being deleted.', 2000, 'warning');
+      return;
+    }
 
     this.contactsList.innerHTML = '';
     this.emptyState.style.display = 'none';
@@ -21061,6 +22691,11 @@ class CallInviteModal {
   }
 
   async sendInvites() {
+    if (this.cancelInviteIfSourceCallInDeleteForAllGuard()) {
+      this.close();
+      return;
+    }
+
     const selectedBoxes = Array.from(this.contactsList.querySelectorAll('.call-invite-checkbox:checked'));
     const addresses = selectedBoxes.map(cb => cb.value).slice(0,10);
     // get call link from original message up to the first # so we don't duplicate callUrlParams
@@ -21088,6 +22723,8 @@ class CallInviteModal {
         }
       };
       for (const addr of addresses) {
+        if (this.cancelInviteIfSourceCallInDeleteForAllGuard()) break;
+
         const keys = myAccount.keys;
         if (!keys) {
           addFailure('keysMissing');
@@ -21153,6 +22790,9 @@ class CallInviteModal {
           messageObj.callType = true
         }
         await signObj(messageObj, keys);
+
+        if (this.cancelInviteIfSourceCallInDeleteForAllGuard()) break;
+
         const txid = getTxid(messageObj);
 
         // Create new message object for local display immediately
@@ -23442,10 +25082,14 @@ class FailedMessageMenu {
   handleMenuAction(e) {
     const option = e.target.closest('.context-menu-option');
     if (!option || !this.currentMessageEl) return;
+
+    e.preventDefault();
+    e.stopPropagation();
     
     const action = option.dataset.action;
     const messageEl = this.currentMessageEl;
     this.hide();
+    chatModal.clearPendingLocation();
 
     switch (action) {
       case 'retry':
@@ -23512,6 +25156,28 @@ class FailedMessageMenu {
         console.error('Voice message retry failed:', err);
         showToast(err?.message || 'Failed to retry voice message', 0, 'error');
       }
+      return;
+    }
+
+    if (message?.type === 'location') {
+      const latitude = Number(message.latitude);
+      const longitude = Number(message.longitude);
+      const accuracy = Number(message.accuracy);
+
+      if (!txid || !chatModal.isValidLocation(latitude, longitude)) {
+        console.error('Error preparing location retry: Location data missing or invalid.');
+        showToast('Could not retry this location message.', 0, 'error');
+        return;
+      }
+
+      chatModal.retryOfTxId.value = txid;
+      chatModal.showPendingLocation({
+        coords: {
+          latitude,
+          longitude,
+          accuracy: Number.isFinite(accuracy) && accuracy >= 0 ? accuracy : null
+        }
+      }, txid);
       return;
     }
 
@@ -23706,7 +25372,7 @@ class VoiceRecordingModal {
     this.recordingControls.style.display = 'none';
     this.recordedControls.style.display = 'none';
     this.listeningControls.style.display = 'none';
-    this.recordingTimer.textContent = '00:00';
+    this.recordingTimer.textContent = formatVoiceTimer(0);
     this.recordingIndicator.classList.remove('recording');
     this.voiceMessageSendStarted = false;
   }
@@ -23771,7 +25437,13 @@ class VoiceRecordingModal {
       
     } catch (error) {
       console.error('Error starting voice recording:', error);
-      showToast('Could not access microphone. Please check permissions.', 0, 'error');
+      showToast(
+        'Microphone permission was denied. Enable microphone access in your browser or device settings, then try again.',
+        0,
+        'warning',
+        false,
+        { className: 'toast-left-aligned' }
+      );
     }
   }
 
@@ -23785,7 +25457,8 @@ class VoiceRecordingModal {
       this.recordingStopTime = Date.now();
       // Calculate actual recording duration (excluding processing time)
       if (this.recordingStartTime) {
-        this.actualDuration = Math.floor((this.recordingStopTime - this.recordingStartTime) / 1000);
+        this.actualDuration = (this.recordingStopTime - this.recordingStartTime) / 1000;
+        this.recordingTimer.textContent = formatVoiceTimer(this.actualDuration);
       }
       this.stopRecordingTimer();
       this.recordingIndicator.classList.remove('recording');
@@ -23797,17 +25470,20 @@ class VoiceRecordingModal {
    * @returns {void}
    */
   startRecordingTimer() {
-    this.recordingInterval = setInterval(() => {
+    const updateTimer = () => {
       const elapsed = Date.now() - this.recordingStartTime;
-      const seconds = Math.floor(elapsed / 1000);
-      this.recordingTimer.textContent = this.formatDuration(seconds);
+      const seconds = elapsed / 1000;
+      this.recordingTimer.textContent = formatVoiceTimer(seconds);
       
       // Stop recording after 5 minutes
       if (elapsed >= 5 * 60 * 1000) {
         this.stopVoiceRecording();
         showToast('Maximum recording time reached (5 minutes)', 3000, 'warning');
       }
-    }, 1000);
+    };
+
+    updateTimer();
+    this.recordingInterval = setInterval(updateTimer, 100);
   }
 
   /**
@@ -23871,7 +25547,7 @@ class VoiceRecordingModal {
       
       // Start playback timer
       this.playbackStartTime = Date.now();
-      this.recordingTimer.textContent = '00:00'; // Reset to 0:00 when starting
+      this.recordingTimer.textContent = formatVoiceTimer(0);
       this.startPlaybackTimer();
       
       const audioUrl = URL.createObjectURL(this.recordedBlob);
@@ -23880,6 +25556,7 @@ class VoiceRecordingModal {
       
       audio.onended = () => {
         URL.revokeObjectURL(audioUrl);
+        this.recordingTimer.textContent = formatVoiceTimer(this.actualDuration || audio.duration || audio.currentTime || 0);
         // Disable buttons before returning
         this.pauseResumeButton.disabled = true;
         this.stopListeningButton.disabled = true;
@@ -23910,12 +25587,17 @@ class VoiceRecordingModal {
    * @returns {void}
    */
   startPlaybackTimer() {
-    this.recordingInterval = setInterval(() => {
+    const updateTimer = () => {
       const elapsed = Date.now() - this.playbackStartTime;
-      const seconds = Math.floor(elapsed / 1000);
+      const seconds = this.currentAudio
+        ? this.currentAudio.currentTime
+        : elapsed / 1000;
       
-      this.recordingTimer.textContent = this.formatDuration(seconds);
-    }, 1000);
+      this.recordingTimer.textContent = formatVoiceTimer(seconds);
+    };
+
+    updateTimer();
+    this.recordingInterval = setInterval(updateTimer, 100);
   }
 
   /**
@@ -23955,7 +25637,7 @@ class VoiceRecordingModal {
     this.stopRecordingTimer();
     
     // Reset timer to show duration immediately
-    this.recordingTimer.textContent = this.formatDuration(this.actualDuration || 0);
+    this.recordingTimer.textContent = formatVoiceTimer(this.actualDuration || 0);
     
     // Hide listening controls and show recorded controls
     this.listeningControls.style.display = 'none';
@@ -24057,17 +25739,6 @@ class VoiceRecordingModal {
     } finally {
       hideToast(loadingToastId);
     }
-  }
-
-  /**
-   * Format duration from seconds to mm:ss
-   * @param {number} seconds - Duration in seconds
-   * @returns {string} Formatted duration
-   */
-  formatDuration(seconds) {
-    const mins = Math.floor(seconds / 60);
-    const secs = seconds % 60;
-    return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
   }
 
   /**
@@ -24468,6 +26139,7 @@ const newChatModal = new NewChatModal();
 class CreateAccountModal {
   constructor() {
     this.checkTimeout = null;
+    this.isCreatingAccount = false;
   }
 
   load() {
@@ -24592,6 +26264,14 @@ class CreateAccountModal {
    */
   isActive() {
     return this.modal?.classList.contains('active') || false;
+  }
+
+  startAccountCreationUnloadWarning() {
+    this.isCreatingAccount = true;
+  }
+
+  stopAccountCreationUnloadWarning() {
+    this.isCreatingAccount = false;
   }
 
   handleUsernameInput(e) {
@@ -24745,6 +26425,8 @@ class CreateAccountModal {
       this.privateKeyError.style.display = 'none'; // Ensure hidden if generated
     }
 
+    this.startAccountCreationUnloadWarning();
+
     // Generate uncompressed public key
     const publicKey = getPublicKey(privateKey);
     const publicKeyHex = bin2hex(publicKey);
@@ -24767,6 +26449,7 @@ class CreateAccountModal {
           this.privateKeyError.textContent = 'An account already exists for this private key.';
           this.privateKeyError.style.color = '#dc3545';
           this.privateKeyError.style.display = 'inline';
+          this.stopAccountCreationUnloadWarning();
           return; // Stop the account creation process
         } else {
           this.privateKeyError.style.display = 'none';
@@ -24776,6 +26459,7 @@ class CreateAccountModal {
         this.privateKeyError.textContent = 'Network error checking key. Please try again.';
         this.privateKeyError.style.color = '#dc3545';
         this.privateKeyError.style.display = 'inline';
+        this.stopAccountCreationUnloadWarning();
         return; // Stop process on error
       }
     }
@@ -24814,6 +26498,7 @@ class CreateAccountModal {
       if (waitingToastId) hideToast(waitingToastId);
       showToast(`Failed to fetch network parameters, try again later.`, 0, 'error');
       console.error('Failed to fetch network parameters, using defaults:', error);
+      this.stopAccountCreationUnloadWarning();
       return;
     }
 
@@ -24845,6 +26530,7 @@ class CreateAccountModal {
         existingAccounts.netids[netid].usernames[username] = { address: myAccount.keys.address };
         localStorage.setItem('accounts', stringify(existingAccounts));
         saveState();
+        this.stopAccountCreationUnloadWarning();
 
         // Refresh wallet balance immediately after account creation for fee-dependent screens.
         try {
@@ -24869,6 +26555,7 @@ class CreateAccountModal {
         }
 
         clearMyData();
+        this.stopAccountCreationUnloadWarning();
 
         // Note: `checkPendingTransactions` will also remove the item from `myData.pending` if it's rejected by the service.
         return;
@@ -24888,6 +26575,7 @@ class CreateAccountModal {
       }
 
       clearMyData();
+      this.stopAccountCreationUnloadWarning();
 
       // no toast here since injectTx will show it
       return;
@@ -25231,6 +26919,18 @@ class SendAssetFormModal {
    */
   async handleSendFormSubmit(event) {
     event.preventDefault();
+
+    const hasPendingTransfer =
+      Array.isArray(myData?.pending) &&
+      myData.pending.some((pendingTx) => pendingTx?.type === 'transfer');
+    if (hasPendingTransfer) {
+      showToast(
+        'You already have a pending asset transfer. Wait for it to finish before sending another.',
+        5000,
+        'warning'
+      );
+      return;
+    }
 
     // Get form values
     const assetSymbol = this.assetSelectDropdown.options[this.assetSelectDropdown.selectedIndex].text;
@@ -25781,7 +27481,7 @@ class SendAssetConfirmModal {
     }
 
     const wallet = myData.wallet;
-    const assetIndex = sendAssetFormModal.assetSelectDropdown.value; // TODO include the asset id and symbol in the tx
+    const assetIndex = Number(sendAssetFormModal.assetSelectDropdown.value);
     const amount = bigxnum2big(wei, sendAssetFormModal.amountInput.value);
     const memoIn = sendAssetFormModal.memoInput.value || '';
     const memo = memoIn.trim();
@@ -25919,7 +27619,7 @@ class SendAssetConfirmModal {
 
     try {
       // Send the transaction using postAssetTransfer
-      const response = await postAssetTransfer(toAddress, amount, payload, keys);
+      const response = await postAssetTransfer(toAddress, amount, payload, keys, assetIndex);
 
       if (!response || !response.result || !response.result.success) {
         const str = response.result.reason;
@@ -28318,6 +30018,30 @@ async function checkPendingTransaction(txid, submittedts){
   return null;
 }
 
+async function refreshActiveBalanceDisplays(didSettlePendingState) {
+  if (createAccountModal.isActive()) {
+    return;
+  }
+
+  if (didSettlePendingState) {
+    myData.wallet.timestamp = 0;
+  }
+
+  if (walletScreen.isActive()) {
+    await walletScreen.updateWalletView();
+  } else {
+    await walletScreen.updateWalletBalances();
+  }
+
+  if (sendAssetFormModal.isActive()) {
+    await sendAssetFormModal.updateAvailableBalance();
+  }
+
+  if (stakeValidatorModal.isActive()) {
+    await stakeValidatorModal.updateStakeBalanceDisplay();
+  }
+}
+
 /**
  * Check pending transactions that are at least 5 seconds old
  * @returns {Promise<void>}
@@ -28381,6 +30105,15 @@ async function checkPendingTransactions() {
           reconcilePendingMessageEdit(pendingTxInfo);
           showToast('Edit timed out and was reverted', 0, 'error');
         }
+        if (type === 'update_toll_required') {
+          const { currentFriendStatus, previousFriendStatus, didRemoveStatusHistory } = revertPendingUpdateTollRequired(pendingTxInfo);
+          showToast('Update contact status timed out. Reverting contact to old status.', 0, 'error');
+          await contactsScreen.updateContactsList();
+          if (didRemoveStatusHistory || currentFriendStatus === 0 || previousFriendStatus === 0) {
+            await chatsScreen.updateChatList();
+          }
+          chatModal.refreshCurrentView(txid);
+        }
         // remove the pending tx from the pending array
         myData.pending.splice(i, 1);
         didMutatePendingState = true;
@@ -28432,7 +30165,7 @@ async function checkPendingTransactions() {
         if (type === 'update_toll_required') {
           // log used by e2e tests do not delete
           console.log(`DEBUG: update_toll_required transaction successfully processed!`);
-          myData.contacts[pendingTxInfo.to].friendOld = myData.contacts[pendingTxInfo.to].friend;
+          syncPendingUpdateTollRequiredSuccess(pendingTxInfo, res.transaction);
         }
 
         if (type === 'read') {
@@ -28493,14 +30226,11 @@ async function checkPendingTransactions() {
             }
           } else if (type === 'update_toll_required') {
             showToast(`Update contact status failed: ${userFailureReason}. Reverting contact to old status.`, 0, 'error');
-            const currentFriendStatus = Number(myData.contacts?.[pendingTxInfo.to]?.friend);
-            const previousFriendStatus = Number(myData.contacts?.[pendingTxInfo.to]?.friendOld);
-            // revert the local myData.contacts[toAddress].friend to the old value
-            myData.contacts[pendingTxInfo.to].friend = myData.contacts[pendingTxInfo.to].friendOld;
+            const { currentFriendStatus, previousFriendStatus, didRemoveStatusHistory } = revertPendingUpdateTollRequired(pendingTxInfo);
             // update contact list since friend status was reverted
             await contactsScreen.updateContactsList();
-            // Only refresh chats list if the revert enters or exits "blocked"
-            if (currentFriendStatus === 0 || previousFriendStatus === 0) {
+            // Refresh when removing the optimistic divider or when the revert enters/exits "blocked"
+            if (didRemoveStatusHistory || currentFriendStatus === 0 || previousFriendStatus === 0) {
               await chatsScreen.updateChatList();
             }
           } else if (type === 'read') {
@@ -28548,14 +30278,18 @@ async function checkPendingTransactions() {
   for (const chain of resolvedReactionChains) {
     cleanupResolvedReactionChain(chain.contactAddress, chain.targetTxid);
   }
-  // if createAccountModal is open, skip balance change
-  if (!createAccountModal.isActive()) {
-    walletScreen.updateWalletBalances();
-  }
+
+  const didSettlePendingState = startingPendingCount !== myData.pending.length || didMutatePendingState;
 
   // save state if pending transactions were processed
-  if (startingPendingCount !== myData.pending.length || didMutatePendingState) {
+  if (didSettlePendingState) {
     saveState();
+  }
+
+  try {
+    await refreshActiveBalanceDisplays(didSettlePendingState);
+  } catch (error) {
+    console.error('Error refreshing active balance displays:', error);
   }
 }
 
@@ -30253,6 +31987,9 @@ function closeTopModal(topModal){
       break;
     case 'settingsModal':
       settingsModal.close();
+      break;
+    case 'chatSettingsModal':
+      chatSettingsModal.handleClose();
       break;
     case 'sendAssetFormModal':
       sendAssetFormModal.close();
