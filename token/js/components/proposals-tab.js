@@ -1,8 +1,13 @@
 import { CONFIG } from '../config.js';
 import { formatSignatureProgress } from '../utils/proposal-helpers.js';
 
-const MAX_GET_LOGS_BLOCK_SPAN = 9999; // Infura Polygon allows 10,000 blocks per eth_getLogs request.
-const MAX_LOG_SCAN_CHUNKS_PER_LOAD = 25;
+// Infura Polygon allows 10,000 blocks per eth_getLogs request.
+const MAX_GET_LOGS_BLOCK_SPAN = 9999;
+const PROPOSALS_PER_LOAD = 3;
+// Tradeoff: loads may scan deeply, with chunk delays, to find the next visible batch.
+const LOG_SCAN_CHUNKS_UNTIL_TARGET = Number.POSITIVE_INFINITY;
+const GET_LOGS_CHUNK_DELAY_MS = 500;
+const OPERATION_COUNT_TTL_MS = 30 * 1000;
 
 export class ProposalsTab {
   constructor() {
@@ -15,9 +20,9 @@ export class ProposalsTab {
     this.refreshBtn = null;
     this.clearCacheBtn = null;
 
-    this.pageSize = 25;
+    this.pageSize = PROPOSALS_PER_LOAD;
     // Minimum items to show from cache before triggering a fresh load (used in cache restoration logic)
-    this.initialMinItems = 5;
+    this.initialMinItems = PROPOSALS_PER_LOAD;
 
     this._isLoading = false;
     this._allLogsLoaded = false; // whether we've fetched full historical logs once
@@ -26,11 +31,14 @@ export class ProposalsTab {
     this._loadedEvents = []; // displayed (newest first)
 
     this._requiredSignatures = null; // fetched once per session (no persistent caching)
+    this._operationCount = null; // fetched from operationCount() and persisted with proposal cache
+    this._operationCountFetchedAtMs = 0;
+    this._operationCountRefreshSucceeded = false;
 
     // Cache / refresh
     this.cacheTtlMs = 5 * 60 * 1000;
     this.cacheMaxItems = 500;
-    this._cacheSchemaVersion = 4; // Bumped to add chunked log-scan cursor metadata
+    this._cacheSchemaVersion = 5; // Bumped to add operationCount metadata
 
     this._lastFetchedBlock = 0; // latest block number at time of last scan (for incremental refresh)
     this._nextScanToBlock = null; // next older block to scan when loading historical proposal logs
@@ -139,16 +147,11 @@ export class ProposalsTab {
     });
 
     // When a new operation is requested (Phase 5), refresh proposals in background.
-    document.addEventListener('operationRequested', (e) => {
+    document.addEventListener('operationRequested', () => {
       // Mark stale; only hit RPC if the tab is active.
       this._needsRefresh = true;
-      const inserted = this._insertEventFromNotification(e?.detail?.event);
       if (this._isActive) {
-        if (inserted) {
-          this._ensureRequiredSignaturesAndHydrateVisible().catch(() => {});
-        } else {
-          this._scheduleBackgroundRefresh();
-        }
+        this._scheduleBackgroundRefresh();
       }
     });
 
@@ -191,7 +194,10 @@ export class ProposalsTab {
 
     // If we have little/no visible data, load a page now.
     if (this._loadedEvents.length < this.initialMinItems) {
-      this.loadMore().catch(() => {});
+      this.loadProposalsPage(
+        PROPOSALS_PER_LOAD,
+        LOG_SCAN_CHUNKS_UNTIL_TARGET
+      ).catch(() => {});
     }
 
     // If cache was stale (or an operation was requested while inactive), refresh incrementally.
@@ -234,14 +240,13 @@ export class ProposalsTab {
   }
 
   async loadMore() {
-    if (this._isLoading) return;
-    // Allow draining prefetched items even when scanning is finished.
-    if (this._allLogsLoaded && this._pendingEvents.length === 0) return;
-    await this.loadProposalsPage();
+    await this.loadProposalsPage(this.pageSize, LOG_SCAN_CHUNKS_UNTIL_TARGET);
   }
 
-  async loadProposalsPage() {
+  async loadProposalsPage(pageSize, maxScanChunks) {
     if (!this.listEl) return;
+    if (this._isLoading || this._hasNoMoreEventsToLoad()) return;
+
     const contractManager = window.contractManager;
     if (!contractManager?.isReady?.()) {
       this._setStatus('Contract not ready');
@@ -255,8 +260,8 @@ export class ProposalsTab {
     const toastId = toast?.loading?.('Retrieving proposals…', { id: 'proposals-loading', delayMs: 250 });
 
     try {
-      // Fetch all proposals in one getLogs call (if not already loaded), then display first page
-      await this._fillPendingUntil(this.pageSize);
+      // Scan proposal logs until a page is available, or this load's chunk budget is reached.
+      await this._fillPendingUntil(pageSize, maxScanChunks);
 
       if (this._pendingEvents.length === 0) {
         if (this._loadedEvents.length === 0 && this._allLogsLoaded) {
@@ -274,7 +279,7 @@ export class ProposalsTab {
         return;
       }
 
-      const page = this._pendingEvents.splice(0, this.pageSize); // may be < pageSize
+      const page = this._pendingEvents.splice(0, pageSize); // may be < pageSize
       this._loadedEvents.push(...page);
 
       // Re-render all loaded events (filtered)
@@ -296,8 +301,13 @@ export class ProposalsTab {
       this._lastRefreshAtMs = Date.now();
       toast?.dismiss?.(toastId);
     } catch (e) {
-      this._setStatus('Error loading proposals');
-      toast?.update?.(toastId, { type: 'error', title: 'Failed to load', message: e?.message || 'Failed to load proposals', timeoutMs: 0, dismissible: true });
+      if (isRateLimitError(e)) {
+        this._setStatus('Rate limited. Try again shortly.');
+        toast?.dismiss?.(toastId);
+      } else {
+        this._setStatus('Error loading proposals');
+        toast?.update?.(toastId, { type: 'error', title: 'Failed to load', message: e?.message || 'Failed to load proposals', timeoutMs: 0, dismissible: true });
+      }
     } finally {
       this._isLoading = false;
       // Update button state after _isLoading is set to false
@@ -305,7 +315,58 @@ export class ProposalsTab {
     }
   }
 
-  async _fillPendingUntil(minCount) {
+  _hasDiscoveredAllOperations() {
+    if (this._operationCount == null) return false;
+    const knownEvents = dedupeBy([...this._loadedEvents, ...this._pendingEvents], (x) => x.operationId);
+    return knownEvents.length >= this._operationCount;
+  }
+
+  _hasNoMoreEventsToLoad() {
+    return this._pendingEvents.length === 0 && (this._allLogsLoaded || this._hasDiscoveredAllOperations());
+  }
+
+  async _ensureOperationCount(forceRefresh = false) {
+    const now = Date.now();
+    this._operationCountRefreshSucceeded = false;
+    if (
+      !forceRefresh &&
+      this._operationCount != null &&
+      now - this._operationCountFetchedAtMs < OPERATION_COUNT_TTL_MS
+    ) {
+      return this._operationCount;
+    }
+
+    const contract = window.contractManager?.getReadContract?.();
+    if (!contract || typeof contract.operationCount !== 'function') return this._operationCount;
+
+    try {
+      const previousCount = this._operationCount;
+      const value = await contract.operationCount();
+      const count = Number(value?.toString?.() ?? value);
+      if (!Number.isFinite(count)) return this._operationCount;
+
+      this._operationCount = count;
+      this._operationCountFetchedAtMs = Date.now();
+      this._operationCountRefreshSucceeded = true;
+
+      if (this._hasDiscoveredAllOperations()) {
+        this._allLogsLoaded = true;
+        this._nextScanToBlock = null;
+      } else if (previousCount != null && count > previousCount) {
+        this._allLogsLoaded = false;
+      }
+
+      this._renderCount();
+      this._updateLoadMoreVisibility();
+      this._saveCache();
+      return this._operationCount;
+    } catch (error) {
+      if (isRateLimitError(error)) throw error;
+      return this._operationCount;
+    }
+  }
+
+  async _fillPendingUntil(minCount, maxScanChunks) {
     const contractManager = window.contractManager;
     const provider = contractManager.getReadOnlyProvider();
     const contract = contractManager.getReadContract();
@@ -313,20 +374,34 @@ export class ProposalsTab {
 
     if (!provider || !contract) return;
 
+    await this._ensureOperationCount();
+
+    const remainingAfterLoaded =
+      this._operationCount == null
+        ? minCount
+        : Math.max(0, this._operationCount - this._loadedEvents.length);
+    const targetPendingCount = Math.min(minCount, remainingAfterLoaded);
+    if (targetPendingCount <= 0) {
+      this._allLogsLoaded = true;
+      this._nextScanToBlock = null;
+      this._saveCache();
+      return;
+    }
+
     if (this._allLogsLoaded) return;
     // Skip fetch if we already have enough items in pending queue
-    if (this._pendingEvents.length >= minCount) return;
+    if (this._pendingEvents.length >= targetPendingCount) return;
 
     const topic = contract.interface.getEventTopic('OperationRequested');
-    const latest = await provider.getBlockNumber();
-    if (!Number.isFinite(Number(latest))) return;
+    const latestBlock = Number(await provider.getBlockNumber());
+    if (!Number.isFinite(latestBlock)) return;
 
-    this._lastFetchedBlock = Math.max(Number(this._lastFetchedBlock || 0), Number(latest));
+    this._lastFetchedBlock = Math.max(Number(this._lastFetchedBlock || 0), latestBlock);
 
-    let toBlock = this._nextScanToBlock == null ? Number(latest) : Number(this._nextScanToBlock);
-    if (!Number.isFinite(toBlock) || toBlock > Number(latest)) toBlock = Number(latest);
+    let toBlock = this._nextScanToBlock == null ? latestBlock : Number(this._nextScanToBlock);
+    if (!Number.isFinite(toBlock) || toBlock > latestBlock) toBlock = latestBlock;
 
-    if (floorBlock > Number(latest) || toBlock < floorBlock) {
+    if (floorBlock > latestBlock || toBlock < floorBlock) {
       this._allLogsLoaded = true;
       this._nextScanToBlock = null;
       return;
@@ -334,11 +409,11 @@ export class ProposalsTab {
 
     let chunksScanned = 0;
     while (
-      this._pendingEvents.length < minCount &&
+      this._pendingEvents.length < targetPendingCount &&
       !this._allLogsLoaded &&
-      chunksScanned < MAX_LOG_SCAN_CHUNKS_PER_LOAD
+      chunksScanned < maxScanChunks
     ) {
-      const chunkTo = Math.min(toBlock, Number(latest));
+      const chunkTo = Math.min(toBlock, latestBlock);
       if (chunkTo < floorBlock) {
         this._allLogsLoaded = true;
         this._nextScanToBlock = null;
@@ -360,12 +435,21 @@ export class ProposalsTab {
       this._pendingEvents.push(...parsed);
 
       chunksScanned += 1;
-      if (chunkFrom <= floorBlock) {
+      if (this._hasDiscoveredAllOperations() || chunkFrom <= floorBlock) {
         this._allLogsLoaded = true;
         this._nextScanToBlock = null;
       } else {
         toBlock = chunkFrom - 1;
         this._nextScanToBlock = toBlock;
+      }
+
+      this._saveCache();
+      if (
+        !this._allLogsLoaded &&
+        this._pendingEvents.length < targetPendingCount &&
+        chunksScanned < maxScanChunks
+      ) {
+        await sleep(GET_LOGS_CHUNK_DELAY_MS);
       }
     }
   }
@@ -585,12 +669,13 @@ export class ProposalsTab {
     const pending = this._pendingEvents.length;
     const suffix = pending > 0 ? ` (+${pending} prefetched)` : '';
     const filterSuffix = shown < total ? ` (filtered from ${total})` : '';
-    this.countEl.textContent = `Showing ${shown}${filterSuffix}${suffix}`;
+    const totalSuffix = this._operationCount != null ? ` of ${this._operationCount} proposals` : '';
+    this.countEl.textContent = `Showing ${shown}${filterSuffix}${totalSuffix}${suffix}`;
   }
 
   _updateLoadMoreVisibility() {
     if (!this.loadMoreBtn) return;
-    const noMore = this._allLogsLoaded && this._pendingEvents.length === 0;
+    const noMore = this._hasNoMoreEventsToLoad();
     this.loadMoreBtn.classList.toggle('hidden', noMore);
     // Enable button if not loading and there are more items (either prefetched or not yet scanned)
     this.loadMoreBtn.disabled = this._isLoading || noMore;
@@ -603,26 +688,6 @@ export class ProposalsTab {
     for (const ev of filtered) {
       this._appendRow(ev);
     }
-  }
-
-  _insertEventFromNotification(ev) {
-    if (!ev?.operationId) return false;
-
-    const existing = new Set(
-      [...this._loadedEvents, ...this._pendingEvents].map((item) => item.operationId)
-    );
-    if (existing.has(ev.operationId)) return false;
-
-    this._loadedEvents = [ev, ...this._loadedEvents];
-    if (ev.blockNumber) {
-      this._lastFetchedBlock = Math.max(Number(this._lastFetchedBlock || 0), Number(ev.blockNumber) || 0);
-    }
-
-    this._renderLoadedFromState();
-    this._renderCount();
-    this._updateLoadMoreVisibility();
-    this._saveCache();
-    return true;
   }
 
   _getFilteredEvents() {
@@ -769,7 +834,7 @@ export class ProposalsTab {
       return ev;
     });
     
-    // Limit initial render to initialMinItems (5) for fast first paint
+    // Limit initial render to initialMinItems for fast first paint
     // This prevents "Loading..." rows beyond what we hydrate immediately
     const visibleCount = Math.min(this.initialMinItems, restored.length);
 
@@ -780,6 +845,12 @@ export class ProposalsTab {
     this._lastFetchedBlock = Number(cache?.lastFetchedBlock || 0) || this._lastFetchedBlock;
     this._nextScanToBlock =
       cache?.nextScanToBlock == null ? null : (Number(cache.nextScanToBlock) || null);
+    this._operationCount =
+      cache?.operationCount == null ? null : (Number(cache.operationCount) || null);
+    this._operationCountFetchedAtMs =
+      this._operationCount == null
+        ? 0
+        : (Number(cache?.cachedAtMs || 0) || 0);
     this._resolvedThroughBlock = Number(cache?.resolvedThroughBlock || 0) || this._resolvedThroughBlock;
   }
 
@@ -806,6 +877,7 @@ export class ProposalsTab {
       cachedAtMs: Date.now(),
       lastFetchedBlock: this._lastFetchedBlock || null,
       nextScanToBlock: this._nextScanToBlock || null,
+      operationCount: this._operationCount ?? null,
       allLogsLoaded: this._allLogsLoaded,
       resolvedThroughBlock: this._resolvedThroughBlock || null,
       eventsTruncated: wasTruncated,
@@ -835,6 +907,9 @@ export class ProposalsTab {
     this._loadedEvents = [];
     this._allLogsLoaded = false;
     this._requiredSignatures = null;
+    this._operationCount = null;
+    this._operationCountFetchedAtMs = 0;
+    this._operationCountRefreshSucceeded = false;
     this._lastFetchedBlock = 0;
     this._nextScanToBlock = null;
     this._resolvedThroughBlock = 0;
@@ -846,7 +921,10 @@ export class ProposalsTab {
 
     // Reload only if tab is active (Phase 9.4 lazy loading).
     if (this._isActive) {
-      this.loadMore().catch(() => {});
+      this.loadProposalsPage(
+        PROPOSALS_PER_LOAD,
+        LOG_SCAN_CHUNKS_UNTIL_TARGET
+      ).catch(() => {});
     } else {
       this._needsRefresh = true;
       this._setStatus('Ready');
@@ -863,11 +941,28 @@ export class ProposalsTab {
       const contract = contractManager?.getReadContract?.();
       if (!provider || !contract) return;
 
+      const previousOperationCount = this._operationCount;
+      const currentOperationCount = await this._ensureOperationCount(true);
+      const operationCountRefreshSucceeded = this._operationCountRefreshSucceeded;
+
       const latestNow = await provider.getBlockNumber();
       if (!latestNow) return;
 
       const last = Number(this._lastFetchedBlock || 0);
       const floorBlock = this._getScanFloorBlock();
+
+      if (
+        operationCountRefreshSucceeded &&
+        previousOperationCount != null &&
+        currentOperationCount != null &&
+        currentOperationCount <= previousOperationCount
+      ) {
+        await this._ensureRequiredSignaturesAndHydrateVisible();
+        this._saveCache();
+        this._setStatus('Ready');
+        return;
+      }
+
       if (!last || latestNow <= last) {
         // Nothing new; refresh visible hydration only.
         await this._ensureRequiredSignaturesAndHydrateVisible();
@@ -877,14 +972,6 @@ export class ProposalsTab {
 
       const topic = contract.interface.getEventTopic('OperationRequested');
       const fromBlock = Math.max(last + 1, floorBlock);
-      if (fromBlock > latestNow) {
-        this._lastFetchedBlock = latestNow;
-        await this._ensureRequiredSignaturesAndHydrateVisible();
-        this._saveCache();
-        this._setStatus('Ready');
-        return;
-      }
-
       const logs = await getLogsWithFallback(provider, {
         address: contract.address,
         topics: [topic],
@@ -907,6 +994,10 @@ export class ProposalsTab {
       // Prepend to state
       this._loadedEvents = [...toInsert, ...this._loadedEvents];
       this._lastFetchedBlock = latestNow;
+      if (this._hasDiscoveredAllOperations()) {
+        this._allLogsLoaded = true;
+        this._nextScanToBlock = null;
+      }
 
       // Update DOM: insert new rows at top, preserving newest-first ordering.
       if (this.listEl && toInsert.length > 0) {
@@ -997,6 +1088,10 @@ function dedupeBy(arr, keyFn) {
   return out;
 }
 
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 async function getLogsWithFallback(provider, filter) {
   const from = Number(filter.fromBlock);
   const to = Number(filter.toBlock);
@@ -1005,12 +1100,14 @@ async function getLogsWithFallback(provider, filter) {
   }
   if (from > to) return [];
   if (to - from > MAX_GET_LOGS_BLOCK_SPAN) {
-    const mid = Math.floor((from + to) / 2);
-    const [left, right] = await Promise.all([
-      getLogsWithFallback(provider, { ...filter, fromBlock: from, toBlock: mid }),
-      getLogsWithFallback(provider, { ...filter, fromBlock: mid + 1, toBlock: to }),
-    ]);
-    return [...left, ...right];
+    const logs = [];
+    for (let start = from; start <= to; start += MAX_GET_LOGS_BLOCK_SPAN + 1) {
+      const end = Math.min(start + MAX_GET_LOGS_BLOCK_SPAN, to);
+      const chunkLogs = await getLogsWithFallback(provider, { ...filter, fromBlock: start, toBlock: end });
+      logs.push(...chunkLogs);
+      if (end < to) await sleep(GET_LOGS_CHUNK_DELAY_MS);
+    }
+    return logs;
   }
 
   try {
@@ -1021,15 +1118,14 @@ async function getLogsWithFallback(provider, filter) {
     }
   }
 
-  if (!Number.isFinite(from) || !Number.isFinite(to) || from >= to) {
+  if (from >= to) {
     throw new Error('getLogs fallback failed to split range');
   }
 
   const mid = Math.floor((from + to) / 2);
-  const [left, right] = await Promise.all([
-    getLogsWithFallback(provider, { ...filter, fromBlock: from, toBlock: mid }),
-    getLogsWithFallback(provider, { ...filter, fromBlock: mid + 1, toBlock: to }),
-  ]);
+  const left = await getLogsWithFallback(provider, { ...filter, fromBlock: from, toBlock: mid });
+  await sleep(GET_LOGS_CHUNK_DELAY_MS);
+  const right = await getLogsWithFallback(provider, { ...filter, fromBlock: mid + 1, toBlock: to });
 
   return [...left, ...right];
 }
@@ -1048,7 +1144,38 @@ async function getLogsWithFallback(provider, filter) {
 function isLogLimitError(error) {
   if (!error) return false;
 
-  const message = [
+  if (isRateLimitError(error)) return false;
+
+  const code = Number(error?.code ?? error?.error?.code ?? error?.data?.code);
+  if (code === -32005) return true;
+
+  const message = getErrorMessage(error);
+  if (!message) return false;
+
+  return (
+    message.includes('more than 10000') ||
+    message.includes('10000 results') ||
+    message.includes('too many results') ||
+    message.includes('exceeds limit') ||
+    message.includes('block range') ||
+    /range\s+\d+\s+exceeds\s+limit\s+of\s+\d+/i.test(message) ||
+    /query\s+returned\s+more\s+than\s+\d+\s+result/i.test(message)
+  );
+}
+
+function isRateLimitError(error) {
+  if (!error) return false;
+
+  const message = getErrorMessage(error);
+  return (
+    message.includes('too many requests') ||
+    message.includes('rate limit') ||
+    message.includes('rate-limited')
+  );
+}
+
+function getErrorMessage(error) {
+  return [
     error?.message,
     error?.reason,
     error?.error?.message,
@@ -1058,26 +1185,4 @@ function isLogLimitError(error) {
     .filter(Boolean)
     .map((s) => String(s).toLowerCase())
     .join(' ');
-  if (!message) return false;
-
-  if (
-    message.includes('too many requests') ||
-    message.includes('rate limit') ||
-    message.includes('rate-limited')
-  ) {
-    return false;
-  }
-
-  const code = Number(error?.code ?? error?.error?.code ?? error?.data?.code);
-
-  return (
-    code === -32005 ||
-    message.includes('more than 10000') ||
-    message.includes('10000 results') ||
-    message.includes('too many results') ||
-    message.includes('exceeds limit') ||
-    message.includes('block range') ||
-    /range\s+\d+\s+exceeds\s+limit\s+of\s+\d+/i.test(message) ||
-    /query\s+returned\s+more\s+than\s+\d+\s+result/i.test(message)
-  );
 }

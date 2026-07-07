@@ -585,37 +585,17 @@ export class ProposeTab {
 
       // Try to extract operationId from OperationRequested event in receipt.
       let opId = null;
-      let proposalEvent = null;
       try {
         for (const log of receipt?.logs || []) {
           if (String(log.address).toLowerCase() !== String(write.address).toLowerCase()) continue;
-          let parsed = null;
-          try {
-            parsed = write.interface.parseLog(log);
-          } catch {
-            continue;
-          }
+          const parsed = write.interface.parseLog(log);
           if (parsed?.name === 'OperationRequested') {
             opId = String(parsed.args?.operationId || parsed.args?.[0] || '');
-            proposalEvent = {
-              operationId: opId,
-              opType: Number(parsed.args?.opType?.toString?.() ?? parsed.args?.[1]?.toString?.() ?? opType),
-              requester: String(parsed.args?.requester || parsed.args?.[2] || from),
-              target: String(parsed.args?.target || parsed.args?.[3] || target),
-              value: parsed.args?.value ?? parsed.args?.[4] ?? value,
-              data: String(parsed.args?.data || parsed.args?.[5] || data),
-              deadline: Number((parsed.args?.deadline || parsed.args?.[6] || 0).toString()),
-              timestamp: Number((parsed.args?.timestamp || parsed.args?.[7] || 0).toString()),
-              blockNumber: Number(log.blockNumber || receipt?.blockNumber || 0) || null,
-              transactionHash: log.transactionHash || tx.hash,
-              logIndex: Number(log.logIndex || 0),
-            };
             break;
           }
         }
       } catch {
         opId = null;
-        proposalEvent = null;
       }
 
       const msg = opId ? `Operation requested: ${opId}` : 'Operation requested.';
@@ -641,11 +621,7 @@ export class ProposeTab {
       this._resetForm();
 
       // Ask proposals list to refresh (best-effort).
-      document.dispatchEvent(
-        new CustomEvent('operationRequested', {
-          detail: { txHash: tx.hash, operationId: opId, event: proposalEvent },
-        })
-      );
+      document.dispatchEvent(new CustomEvent('operationRequested', { detail: { txHash: tx.hash, operationId: opId } }));
 
       // If user requested a Mint proposal, refresh the mint readiness banner (best-effort).
       if (opType === 0) {
