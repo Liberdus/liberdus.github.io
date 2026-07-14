@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'e'
+const version = 'f'
 const BOOT_SPLASH_HANDOFF_MS = 1000;
 let myVersion = '0';
 async function checkVersion() {
@@ -2477,7 +2477,6 @@ function formatDaoDate(ts) {
 }
 
 function getDaoUiStateLabel(key) {
-  if (key === 'discussion') return 'Review';
   return getDaoStateLabel(key);
 }
 
@@ -2738,7 +2737,7 @@ class DaoModal {
       const titleText = String(p.title || '').trim() || 'Proposal';
       const rowTitleText = p.number ? `#${p.number}: ${titleText}` : titleText;
       const title = escapeHtml(rowTitleText);
-      const typeLabel = escapeHtml(getDaoTypeLabel(p.proposalType || p.type) || 'Proposal');
+      const typeLabel = escapeHtml(getDaoTypeLabel(p.proposalType) || 'Proposal');
       const previewHtml = this.renderProposalRowPreview(p);
 
       li.tabIndex = 0;
@@ -3740,9 +3739,9 @@ class ConfirmProposalModal {
           <div class="dao-confirm-change">
             <div class="dao-confirm-change-title">Change ${index + 1}: ${escapeHtml(change.key)}</div>
             <div class="dao-confirm-change-values">
-              <small>Current: ${escapeHtml(formatDaoConfirmValue(change.current))}</small>
+              <small><span>Current:</span><strong>${escapeHtml(formatDaoConfirmValue(change.current))}</strong></small>
               <span class="dao-confirm-change-arrow" aria-hidden="true">&rarr;</span>
-              <strong>New: ${escapeHtml(formatDaoConfirmValue(change.value))}</strong>
+              <small><span>New:</span><strong>${escapeHtml(formatDaoConfirmValue(change.value))}</strong></small>
             </div>
           </div>
         `).join('')
@@ -3782,7 +3781,7 @@ function getDaoCurrentAccountAddress() {
 }
 
 function getDaoProposalReviewWindow(proposal) {
-  const start = Number(proposal?.startTime || proposal?.created || proposal?.creationTime || 0);
+  const start = Number(proposal?.startTime || 0);
   const duration = Number(proposal?.reviewDuration);
   if (!start || !Number.isFinite(duration) || duration < 0) {
     return {
@@ -3824,7 +3823,7 @@ function getDaoProposalReviewWindow(proposal) {
 }
 
 function getDaoProposalVotingWindow(proposal, now = Date.now()) {
-  const reviewStart = Number(proposal?.startTime || proposal?.created || proposal?.creationTime || 0);
+  const reviewStart = Number(proposal?.startTime || 0);
   const reviewDuration = Number(proposal?.reviewDuration);
   const votingDuration = Number(proposal?.votingDuration);
   if (
@@ -3905,14 +3904,10 @@ function formatDaoScaledBigInt(value, scale, decimals = 3) {
 }
 
 function formatDaoVoteWeightUnits(value, suffix) {
-  if (typeof value === 'bigint') {
-    const formatted = formatDaoScaledBigInt(value, DAO_VOTE_WEIGHT_PRECISION_BIGINT, 3);
-    return formatted === null ? 'Unavailable' : `${formatted} ${suffix}`;
-  }
-
-  const n = Number(value);
-  if (!Number.isFinite(n)) return 'Unavailable';
-  return `${formatDaoShortNumber(n / DAO_VOTE_WEIGHT_PRECISION, 3)} ${suffix}`;
+  const bigintValue = parseDaoUnsignedBigInt(value);
+  if (bigintValue === null) return 'Unavailable';
+  const formatted = formatDaoScaledBigInt(bigintValue, DAO_VOTE_WEIGHT_PRECISION_BIGINT, 3);
+  return formatted === null ? 'Unavailable' : `${formatted} ${suffix}`;
 }
 
 function formatDaoVotingPower(value) {
@@ -3929,12 +3924,9 @@ function formatDaoPercent(value) {
 }
 
 function formatDaoLibWei(value) {
-  try {
-    const weiValue = typeof value === 'bigint' ? value : BigInt(value || 0);
-    return `${formatDaoShortNumber(EthNum.toStr(weiValue))} LIB`;
-  } catch {
-    return 'Unavailable';
-  }
+  const weiValue = parseDaoUnsignedBigInt(value);
+  if (weiValue === null) return 'Unavailable';
+  return `${formatDaoShortNumber(EthNum.toStr(weiValue))} LIB`;
 }
 
 function parseDaoUnsignedBigInt(value) {
@@ -3943,6 +3935,16 @@ function parseDaoUnsignedBigInt(value) {
   if (typeof value === 'number') {
     if (!Number.isFinite(value) || value < 0) return null;
     return BigInt(Math.trunc(value));
+  }
+  if (typeof value === 'object') {
+    if (value.dataType !== 'bi') return null;
+    const hexText = String(value.value ?? '').trim();
+    if (!/^[0-9a-f]+$/i.test(hexText)) return null;
+    try {
+      return BigInt(`0x${hexText}`);
+    } catch {
+      return null;
+    }
   }
 
   const text = String(value).trim();
@@ -3968,12 +3970,11 @@ function formatDaoBigIntPercent(part, total) {
 }
 
 function getDaoProposalOptions(proposal) {
-  if (!Array.isArray(proposal?.options) || proposal.options.length === 0) return ['Yes', 'No'];
-  return proposal.options.map((option, index) => String(option || `Option ${index + 1}`));
+  return proposal.options.map((option) => String(option));
 }
 
 function getDaoVoteTotals(proposal) {
-  const totalVote = Array.isArray(proposal?.totalVote) ? proposal.totalVote : [];
+  const totalVote = proposal.totalVote;
   if (totalVote.length === 0) return [];
 
   const options = getDaoProposalOptions(proposal);
@@ -4048,11 +4049,7 @@ function getDaoProposalResultSummary(proposal) {
 function normalizeDaoAddress(value) {
   const text = String(value || '').trim();
   if (!text) return '';
-  try {
-    return normalizeAddress(text);
-  } catch {
-    return text.toLowerCase();
-  }
+  return normalizeAddress(text);
 }
 
 function getDaoVoterEntries(proposal) {
@@ -4071,7 +4068,7 @@ function getDaoClaimList(proposal) {
 }
 
 function getDaoProposalClaimWindow(proposal) {
-  const reviewStart = Number(proposal?.startTime || proposal?.created || proposal?.creationTime || 0);
+  const reviewStart = Number(proposal?.startTime || 0);
   const reviewDuration = Number(proposal?.reviewDuration);
   const votingDuration = Number(proposal?.votingDuration);
   const claimDuration = Number(proposal?.claimDuration);
@@ -4104,7 +4101,7 @@ function getDaoProposalApplyWindow(proposal, now = Date.now()) {
     return { eligibleAt: backendEligibleAt, isReady: now >= backendEligibleAt };
   }
 
-  const reviewStart = Number(proposal?.startTime || proposal?.created || proposal?.creationTime || 0);
+  const reviewStart = Number(proposal?.startTime || 0);
   const reviewDuration = Number(proposal?.reviewDuration);
   const votingDuration = Number(proposal?.votingDuration);
   const gracePeriod = Number(proposal?.gracePeriod);
@@ -4122,7 +4119,7 @@ function getDaoProposalApplyWindow(proposal, now = Date.now()) {
 }
 
 function isDaoParameterProposalType(proposal) {
-  const type = String(proposal?.proposalType || proposal?.type || '').toLowerCase();
+  const type = String(proposal?.proposalType || '').toLowerCase();
   return type === 'governance' || type === 'economic' || type === 'protocol';
 }
 
@@ -4158,12 +4155,9 @@ function getDaoProposalApplyLifecycleAction(proposal, currentAddress = getDaoCur
     );
   }
 
-  const hasWallet = Boolean(currentAddress);
   if (proposal?.emergency && !isDaoProposalCommitteeMember(proposal, currentAddress)) {
     return getDaoApplyParametersLifecycleAction(
-      hasWallet
-        ? 'Emergency proposal parameters can only be applied by a proposal committee member.'
-        : 'Sign in with a proposal committee wallet to apply these emergency proposal parameters.',
+      'Emergency proposal parameters can only be applied by a proposal committee member.',
       false,
     );
   }
@@ -4176,14 +4170,6 @@ function getDaoProposalApplyLifecycleAction(proposal, currentAddress = getDaoCur
         ? `Apply becomes available after the grace period ends: ${eligibleAt}.`
         : 'Apply timing is unavailable until the proposal includes grace-period timing.',
       false,
-    );
-  }
-
-  if (!hasWallet) {
-    return getDaoApplyParametersLifecycleAction(
-      'This proposal is ready to apply. Sign in with a funded wallet to apply parameters.',
-      false,
-      'Ready to apply',
     );
   }
 
@@ -4304,7 +4290,6 @@ function getDaoProposalRewardSummary(proposal, currentAddress = getDaoCurrentAcc
 
 function getDaoProposalLifecycleActions(proposal, rewardSummary, currentAddress = getDaoCurrentAccountAddress(), now = Date.now()) {
   const state = getEffectiveDaoState(proposal);
-  const hasWallet = Boolean(currentAddress);
 
   if (state === 'voting') {
     const votingWindow = getDaoProposalVotingWindow(proposal, now);
@@ -4312,14 +4297,11 @@ function getDaoProposalLifecycleActions(proposal, rewardSummary, currentAddress 
       return [{
         kind: 'vote_result',
         title: 'Vote result',
-        help: hasWallet
-          ? 'Voting has ended. Finalize the vote result to move this proposal to accepted or rejected.'
-          : 'Voting has ended. Sign in with a funded wallet to finalize the vote result.',
+        help: 'Voting has ended. Finalize the vote result to move this proposal to accepted or rejected.',
         buttonLabel: 'Finalize vote result',
         loadingLabel: 'Finalizing vote result...',
         successMessage: 'Vote result finalized',
         refreshWarning: 'Vote result finalized, but proposal refresh failed',
-        canSubmit: hasWallet,
       }];
     }
     return [];
@@ -4337,14 +4319,11 @@ function getDaoProposalLifecycleActions(proposal, rewardSummary, currentAddress 
     actions.push({
       kind: 'burn_reward',
       title: 'Reward burn',
-      help: hasWallet
-        ? 'The claim window has ended. Burn the unclaimed reward pool so the proposal accounting is finalized.'
-        : 'The claim window has ended. Sign in with a funded wallet to burn the unclaimed reward pool.',
+      help: 'The claim window has ended. Burn the unclaimed reward pool so the proposal accounting is finalized.',
       buttonLabel: 'Burn unclaimed reward',
       loadingLabel: 'Burning reward...',
       successMessage: 'Unclaimed reward burned',
       refreshWarning: 'Reward burned, but proposal refresh failed',
-      canSubmit: hasWallet,
     });
   }
 
@@ -4354,7 +4333,7 @@ function getDaoProposalLifecycleActions(proposal, rewardSummary, currentAddress 
     now >= claimWindow.start &&
     now <= claimWindow.end &&
     unclaimed > 0n &&
-    hasWallet &&
+    currentAddress &&
     rewardSummary?.claimStatus === 'Claimable'
   ) {
     actions.push({
@@ -4367,7 +4346,6 @@ function getDaoProposalLifecycleActions(proposal, rewardSummary, currentAddress 
       loadingLabel: 'Claiming reward...',
       successMessage: 'Reward claimed',
       refreshWarning: 'Reward claimed, but proposal refresh failed',
-      canSubmit: true,
     });
   }
 
@@ -4382,10 +4360,6 @@ function formatDaoDetailValue(value) {
   if (Array.isArray(value)) return value.map(formatDaoDetailValue).join(', ');
   if (typeof value === 'object') return stringify(value);
   return String(value);
-}
-
-function getDaoBooleanCapability(proposal, key) {
-  return typeof proposal?.[key] === 'boolean' ? proposal[key] : null;
 }
 
 function parseDaoPositiveLibAmount(value) {
@@ -4537,13 +4511,12 @@ class ProposalInfoModal {
     const currentAddress = getDaoCurrentAccountAddress();
     const currentVote = committeeVotes.find((vote) => vote?.memberAddress === currentAddress) || null;
     const capabilities = this.getReviewCapabilities({
-      proposal,
       state,
       reviewWindow,
       currentAddress,
       committeeAddressSet,
     });
-    const proposalType = proposal.proposalType || proposal.type;
+    const proposalType = proposal.proposalType;
     const resultSummary = getDaoProposalResultSummary(proposal);
     const rewardSummary = getDaoProposalRewardSummary(proposal, currentAddress);
     const lifecycleActions = getDaoProposalLifecycleActions(proposal, rewardSummary, currentAddress);
@@ -4593,21 +4566,10 @@ class ProposalInfoModal {
     this.renderVoteActions({ proposal, state });
   }
 
-  getReviewCapabilities({ proposal, state, reviewWindow, currentAddress, committeeAddressSet }) {
-    const backendCommitteeMember = getDaoBooleanCapability(proposal, 'isCommitteeMemberForProposal');
-    const isCommitteeMember = backendCommitteeMember ?? Boolean(currentAddress && committeeAddressSet.has(currentAddress));
-
-    const backendCanCommitteeVote = getDaoBooleanCapability(proposal, 'canCommitteeVote');
-    const canCommitteeVote = backendCanCommitteeVote ?? (
-      state === 'review' &&
-      reviewWindow.canCommitteeVote &&
-      isCommitteeMember
-    );
-
-    const backendCanFinalizeReviewResult = getDaoBooleanCapability(proposal, 'canFinalizeReviewResult');
-    const canFinalizeReviewResult = Boolean(currentAddress) && state === 'review' && (
-      backendCanFinalizeReviewResult ?? reviewWindow.canFinalizeReviewResult
-    );
+  getReviewCapabilities({ state, reviewWindow, currentAddress, committeeAddressSet }) {
+    const isCommitteeMember = Boolean(currentAddress && committeeAddressSet.has(currentAddress));
+    const canCommitteeVote = state === 'review' && reviewWindow.canCommitteeVote && isCommitteeMember;
+    const canFinalizeReviewResult = Boolean(currentAddress) && state === 'review' && reviewWindow.canFinalizeReviewResult;
 
     return { isCommitteeMember, canCommitteeVote, canFinalizeReviewResult };
   }
@@ -4619,7 +4581,7 @@ class ProposalInfoModal {
   }
 
   renderProposalTitle(proposal) {
-    const description = proposal.description || proposal.summary || '';
+    const description = proposal.description || '';
     const descriptionHtml = description
       ? `<p class="proposal-info-description">${escapeHtml(description)}</p>`
       : '';
@@ -4701,7 +4663,7 @@ class ProposalInfoModal {
 
   getCurrentVoteTotalRows(proposal) {
     const options = this.getVoteOptions(proposal);
-    const totalVote = Array.isArray(proposal?.totalVote) ? proposal.totalVote : [];
+    const totalVote = proposal.totalVote;
     return options.map((option, index) => ({
       option,
       total: this.parseCurrentVoteTotal(totalVote[index]),
@@ -4709,20 +4671,7 @@ class ProposalInfoModal {
   }
 
   parseCurrentVoteTotal(value) {
-    if (typeof value === 'bigint') return value >= 0n ? value : 0n;
-    if (typeof value === 'number') {
-      if (!Number.isFinite(value) || value <= 0) return 0n;
-      return BigInt(Math.trunc(value));
-    }
-
-    const text = String(value ?? '').trim();
-    if (!text) return 0n;
-    try {
-      const parsed = BigInt(text);
-      return parsed >= 0n ? parsed : 0n;
-    } catch {
-      return 0n;
-    }
+    return parseDaoUnsignedBigInt(value) ?? 0n;
   }
 
   getCurrentVoteSegmentUnits(part, total) {
@@ -4939,8 +4888,8 @@ class ProposalInfoModal {
         ['Number', proposal.number ? `#${proposal.number}` : 'Unavailable'],
         ['Type', getDaoTypeLabel(proposalType) || 'Unavailable'],
         ['Status', getDaoStateLabel(state) || state],
-        ['Created', formatDaoDetailTimestamp(proposal.created || proposal.creationTime)],
-        ['Updated', formatDaoDetailTimestamp(proposal.state_changed || proposal.timestamp || proposal.created)],
+        ['Created', formatDaoDetailTimestamp(proposal.created)],
+        ['Updated', formatDaoDetailTimestamp(proposal.state_changed)],
       ]),
       this.renderSection('Review Timeline', [
         ['Window state', reviewWindow.label],
@@ -4978,28 +4927,22 @@ class ProposalInfoModal {
   }
 
   renderSection(title, rows) {
-    const renderedRows = rows.map(([label, value, tone]) => {
-      const displayValue = formatDaoDetailValue(value);
-      const rowClass = this.getSectionRowClass(label, displayValue);
-      return {
-        label,
-        value: displayValue,
-        classes: [
+    const rowHtml = rows
+      .map(([label, value, tone]) => {
+        const displayValue = formatDaoDetailValue(value);
+        const rowClass = this.getSectionRowClass(label, displayValue);
+        const classes = [
           rowClass,
           tone ? `proposal-info-row--${tone}` : '',
-        ].filter(Boolean),
-        isFull: rowClass.includes('proposal-info-row--full'),
-      };
-    });
-    this.centerTwoCardRows(renderedRows);
+        ].filter(Boolean);
 
-    const rowHtml = renderedRows
-      .map((row) => `
-        <div class="${row.classes.join(' ')}">
-          <span>${escapeHtml(row.label)}</span>
-          <span class="proposal-info-value">${escapeHtml(row.value)}</span>
+        return `
+        <div class="${classes.join(' ')}">
+          <span>${escapeHtml(label)}</span>
+          <span class="proposal-info-value">${escapeHtml(displayValue)}</span>
         </div>
-      `)
+      `;
+      })
       .join('');
 
     return `
@@ -5008,24 +4951,6 @@ class ProposalInfoModal {
         <div class="proposal-info-grid">${rowHtml}</div>
       </section>
     `;
-  }
-
-  centerTwoCardRows(renderedRows) {
-    let row = [];
-    const flush = () => {
-      if (row.length === 2) row[0].classes.push('proposal-info-row--center-pair');
-      row = [];
-    };
-
-    for (const renderedRow of renderedRows) {
-      if (renderedRow.isFull) {
-        flush();
-        continue;
-      }
-      row.push(renderedRow);
-      if (row.length === 3) flush();
-    }
-    flush();
   }
 
   getSectionRowClass(label, value) {
@@ -5046,9 +4971,7 @@ class ProposalInfoModal {
   }
 
   renderProposalBody(proposal) {
-    const options = Array.isArray(proposal.options) && proposal.options.length
-      ? proposal.options.map((option, index) => `${index + 1}. ${option}`).join('\n')
-      : 'Unavailable';
+    const options = proposal.options.map((option, index) => `${index + 1}. ${option}`).join('\n');
 
     return this.renderSection('Proposal Body', [
       ['Emergency', proposal.emergency ? 'Yes' : 'No'],
@@ -5057,9 +4980,8 @@ class ProposalInfoModal {
   }
 
   renderParameterChanges(proposal) {
-    const fields = proposal.fields && typeof proposal.fields === 'object' ? proposal.fields : {};
     const payloads = ['governance', 'economic', 'protocol']
-      .map((key) => [key, proposal[key] || fields[key]])
+      .map((key) => [key, proposal[key]])
       .filter(([, payload]) => payload && typeof payload === 'object');
 
     if (payloads.length === 0) {
@@ -5559,7 +5481,8 @@ class ProposalInfoModal {
     for (const button of this.lifecycleActionSection?.querySelectorAll('button[data-lifecycle-action-index]') || []) {
       const action = this.currentLifecycleActions[Number(button.dataset.lifecycleActionIndex)];
       const isSubmittingAction = this.isSubmitting && action === this.submittingLifecycleAction;
-      button.disabled = this.isSubmitting || !action?.canSubmit;
+      const canSubmitLifecycle = action?.canSubmit !== false;
+      button.disabled = this.isSubmitting || !action || !canSubmitLifecycle;
       button.textContent = isSubmittingAction ? action.loadingLabel : action?.buttonLabel || '';
     }
     if (this.voteSubmitButton) {
@@ -5791,7 +5714,8 @@ class ProposalInfoModal {
   }
 
   async handleLifecycleActionSubmit(action) {
-    if (this.isSubmitting || !action?.canSubmit) return;
+    const canSubmitLifecycle = action?.canSubmit !== false;
+    if (this.isSubmitting || !action || !canSubmitLifecycle) return;
 
     const proposal = this.getCurrentProposal();
     if (!proposal) {
