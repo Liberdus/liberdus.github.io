@@ -2384,10 +2384,6 @@ input[type='file'].form-control::file-selector-button {
   border-left: 0;
 }
 
-#proposalInfoModal .proposal-result-meter-segment--winner {
-  background: var(--primary-color);
-}
-
 #proposalInfoModal .proposal-result-meter-segment--palette-0 {
   background: #3d3dce;
 }
@@ -2424,6 +2420,55 @@ input[type='file'].form-control::file-selector-button {
   background: rgba(101, 103, 107, 0.18);
 }
 
+#proposalInfoModal .proposal-withhold-reasons {
+  border-top: 1px solid var(--border-color);
+  display: grid;
+  gap: 8px;
+  padding-top: 10px;
+}
+
+#proposalInfoModal .proposal-withhold-reasons h4 {
+  color: var(--text-color);
+  font-size: 13px;
+  font-weight: var(--font-weight-semibold);
+  line-height: 1.35;
+  margin: 0;
+}
+
+#proposalInfoModal .proposal-withhold-reason-list {
+  display: grid;
+  gap: 6px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+#proposalInfoModal .proposal-withhold-reason-row {
+  align-items: start;
+  background: var(--input-background);
+  border-radius: 8px;
+  display: grid;
+  gap: 8px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  padding: 8px 10px;
+}
+
+#proposalInfoModal .proposal-withhold-reason-text {
+  color: var(--text-color);
+  font-size: 13px;
+  line-height: 1.35;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+#proposalInfoModal .proposal-withhold-reason-count {
+  color: var(--secondary-text-color);
+  font-size: 11px;
+  line-height: 1.35;
+  white-space: nowrap;
+}
+
 #confirmProposalModal .dao-confirm-change,
 #proposalInfoModal .proposal-change-row {
   background: var(--input-background);
@@ -2439,7 +2484,6 @@ input[type='file'].form-control::file-selector-button {
 #proposalInfoModal .proposal-change-row {
   flex: 0 1 calc(50% - 4px);
   min-width: min(100%, 180px);
-  min-inline-size: 0;
 }
 
 #proposalInfoModal .proposal-change-row--single {
@@ -2519,19 +2563,7 @@ input[type='file'].form-control::file-selector-button {
   font-size: 13px;
 }
 
-#confirmProposalModal .dao-confirm-change-values small {
-  text-align: center;
-}
-
-#proposalInfoModal .proposal-change-values small {
-  text-align: center;
-}
-
 #confirmProposalModal .dao-confirm-change-values strong {
-  text-align: center;
-}
-
-#proposalInfoModal .proposal-change-values strong {
   text-align: center;
 }
 
@@ -2580,13 +2612,9 @@ input[type='file'].form-control::file-selector-button {
 }
 
 #proposalInfoModal .proposal-info + .proposal-committee-actions,
-#proposalInfoModal .proposal-info + .proposal-review-result-actions,
-#proposalInfoModal .proposal-info + .proposal-lifecycle-actions,
-#proposalInfoModal .proposal-info + .proposal-vote-actions,
 #proposalInfoModal .proposal-committee-actions + .proposal-review-result-actions,
 #proposalInfoModal .proposal-review-result-actions + .proposal-lifecycle-actions,
-#proposalInfoModal .proposal-lifecycle-actions + .proposal-vote-actions,
-#proposalInfoModal .proposal-review-result-actions + .proposal-vote-actions {
+#proposalInfoModal .proposal-lifecycle-actions + .proposal-vote-actions {
   margin-top: 10px;
 }
 
@@ -2599,10 +2627,6 @@ input[type='file'].form-control::file-selector-button {
   display: grid;
   gap: 8px;
   padding: 10px;
-}
-
-#proposalInfoModal .proposal-vote-actions {
-  gap: 8px;
 }
 
 #proposalInfoModal .proposal-lifecycle-action {
@@ -2802,10 +2826,6 @@ input[type='file'].form-control::file-selector-button {
   display: grid;
   gap: 8px;
   grid-template-columns: minmax(0, 1fr);
-}
-
-#proposalInfoModal .proposal-vote-status-grid:empty {
-  display: none;
 }
 
 #proposalInfoModal .proposal-vote-current-meter {
