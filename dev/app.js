@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'g'
+const version = 'h'
 const BOOT_SPLASH_HANDOFF_MS = 1000;
 let myVersion = '0';
 async function checkVersion() {
@@ -79,13 +79,24 @@ import { stringify, parse } from './external/stringify-shardus.js';
 import {
   buildDaoProposalCreateDraft,
   createDaoBackendFetcher,
+  DAO_ACTION_TYPES,
   DAO_CONFIG_CHANGE_OPTIONS,
+  DAO_PROPOSAL_CREATE_TYPE,
   DAO_PROPOSAL_TITLE_MAX_LENGTH,
   daoRepo,
   DAO_STATES,
+  getDaoTransactionMessage,
+  getDaoProposalClaimWindow,
+  getDaoRewardClaimStatus,
   getDaoStateLabel,
+  getDaoTypeForLifecycleKind,
   getDaoTypeLabel,
   getEffectiveDaoState,
+  hasPendingDaoAction,
+  isDaoProposalClaimable,
+  isDaoTransactionType,
+  normalizeDaoAddress,
+  parseDaoUnsignedBigInt,
   setDaoBackendFetcher,
 } from './dao.repo.js';
 
@@ -2456,6 +2467,9 @@ const menuModal = new MenuModal();
 // DAO proposals are loaded via `daoRepo` and kept in memory (no localStorage persistence).
 setDaoBackendFetcher(createDaoBackendFetcher(queryNetwork));
 
+const DAO_CLAIMABLE_FILTER = { key: 'claimable', label: 'Claimable' };
+const DAO_FILTER_OPTIONS = [...DAO_STATES, DAO_CLAIMABLE_FILTER];
+
 function formatDaoTimestamp(ts) {
   const n = Number(ts || 0);
   if (!n) return '';
@@ -2479,7 +2493,7 @@ function formatDaoDate(ts) {
 class DaoModal {
   constructor() {
     this.selectedGroupKey = 'active';
-    this.selectedStateKey = 'voting';
+    this.selectedFilterKey = 'voting';
     this._outsideClickHandler = null;
     this.isLoading = false;
   }
@@ -2490,6 +2504,7 @@ class DaoModal {
     this.titleEl = document.getElementById('daoModalTitle');
     this.statusMenuButton = document.getElementById('daoFilterButton');
     this.statusMenu = document.getElementById('daoStatusContextMenu');
+    this.groupToolbar = this.modal.querySelector('.dao-toolbar');
     this.groupActiveButton = document.getElementById('daoGroupActiveButton');
     this.groupArchivedButton = document.getElementById('daoGroupArchivedButton');
     this.list = document.getElementById('daoProposalList');
@@ -2520,9 +2535,9 @@ class DaoModal {
       this.statusMenu.addEventListener('click', (e) => {
         const option = e.target.closest('.context-menu-option');
         if (!option) return;
-        const key = option.dataset.stateKey;
+        const key = option.dataset.filterKey;
         if (!key) return;
-        this.setStateFilter(key);
+        this.setFilter(key);
       });
     }
 
@@ -2537,6 +2552,7 @@ class DaoModal {
   }
 
   open() {
+    assert(getDaoCurrentAccountAddress(), 'DAO modal requires an active account');
     this._open();
   }
 
@@ -2551,7 +2567,7 @@ class DaoModal {
     enterFullscreen();
 
     // Default filter is Voting
-    this.selectedStateKey = this.selectedStateKey || 'voting';
+    this.selectedFilterKey = this.selectedFilterKey || 'voting';
     this.selectedGroupKey = this.selectedGroupKey || 'active';
     this.render();
 
@@ -2586,6 +2602,34 @@ class DaoModal {
     return this.modal.classList.contains('active');
   }
 
+  async refreshAfterDaoSettlement(pendingTxInfo, outcome) {
+    let didRefreshDaoData = false;
+    try {
+      await daoRepo.refresh({ force: true });
+      didRefreshDaoData = true;
+    } catch (error) {
+      console.warn('DAO settlement refresh failed:', error);
+    }
+
+    // A confirmed action must remain blocked until the UI can render fresh
+    // proposal state. Failed and timed-out actions can safely release the UI.
+    if (didRefreshDaoData || outcome !== 'success') {
+      if (this.isActive()) this.render();
+      proposalInfoModal.refreshIfOpen(pendingTxInfo.proposalStoreId);
+    }
+
+    if (outcome === 'success' && pendingTxInfo.type === DAO_ACTION_TYPES.APPLY_PARAMETERS) {
+      try {
+        const refreshed = await getNetworkParams(true);
+        if (!refreshed) throw new Error('Network parameter refresh failed');
+      } catch (error) {
+        console.warn('DAO network parameter refresh failed after settlement:', error);
+      }
+    }
+
+    return didRefreshDaoData;
+  }
+
   toggleStatusMenu(e) {
     e.preventDefault();
     e.stopPropagation();
@@ -2601,7 +2645,7 @@ class DaoModal {
     if (!this.statusMenu || !this.statusMenuButton) return;
     const buttonRect = this.statusMenuButton.getBoundingClientRect();
     const menuWidth = 176;
-    const approxMenuHeight = 16 + DAO_STATES.length * 40; // padding + items
+    const approxMenuHeight = 16 + DAO_FILTER_OPTIONS.length * 40; // padding + items
 
     let left = buttonRect.right - menuWidth;
     let top = buttonRect.bottom + 8;
@@ -2626,8 +2670,8 @@ class DaoModal {
     if (this.statusMenuButton) this.statusMenuButton.setAttribute('aria-expanded', 'false');
   }
 
-  setStateFilter(key) {
-    this.selectedStateKey = key;
+  setFilter(key) {
+    this.selectedFilterKey = key;
     this.closeStatusMenu();
     this.render();
   }
@@ -2640,20 +2684,27 @@ class DaoModal {
   render() {
     const proposalsActive = daoRepo.getProposalsForUi('active');
     const proposalsArchived = daoRepo.getProposalsForUi('archived');
+    const currentAddress = getDaoCurrentAccountAddress();
+    const now = Date.now();
+    const isClaimableFilter = this.selectedFilterKey === DAO_CLAIMABLE_FILTER.key;
+    const groupedProposals = this.selectedGroupKey === 'archived' ? proposalsArchived : proposalsActive;
+    const claimableProposals = [...proposalsActive, ...proposalsArchived]
+      .filter((proposal) => isDaoProposalClaimable(proposal, currentAddress, now));
 
-    const proposals = this.selectedGroupKey === 'archived' ? proposalsArchived : proposalsActive;
-
-    // Update counts by state (within selected group)
-    const counts = Object.fromEntries(DAO_STATES.map((s) => [s.key, 0]));
-    for (const p of proposals) {
+    // State counts follow the selected group; Claimable spans both groups.
+    const counts = Object.fromEntries(DAO_FILTER_OPTIONS.map((filter) => [filter.key, 0]));
+    for (const p of groupedProposals) {
       const state = getEffectiveDaoState(p);
       if (counts[state] !== undefined) counts[state] += 1;
     }
+    counts[DAO_CLAIMABLE_FILTER.key] = claimableProposals.length;
 
     // Update header title
     const groupLabel = this.selectedGroupKey === 'archived' ? 'Archived' : 'Active';
-    const label = getDaoStateLabel(this.selectedStateKey);
-    if (this.titleEl) this.titleEl.textContent = `DAO - ${groupLabel} - ${label}`;
+    const label = DAO_FILTER_OPTIONS.find((filter) => filter.key === this.selectedFilterKey)?.label
+      || this.selectedFilterKey;
+    if (this.titleEl) this.titleEl.textContent = isClaimableFilter ? 'DAO - Claimable' : `DAO - ${groupLabel} - ${label}`;
+    if (this.groupToolbar) this.groupToolbar.classList.toggle('hidden', isClaimableFilter);
 
     // Update group toggle labels + selection
     if (this.groupActiveButton) {
@@ -2667,28 +2718,28 @@ class DaoModal {
       this.groupArchivedButton.setAttribute('aria-selected', this.selectedGroupKey === 'archived' ? 'true' : 'false');
     }
 
-    for (const s of DAO_STATES) {
-      const option = this.statusMenu?.querySelector(`[data-state-key="${s.key}"]`);
-      const labelEl = document.getElementById(`daoStatusOption${s.label.replace(/\s+/g, '')}`);
+    for (const filter of DAO_FILTER_OPTIONS) {
+      const option = this.statusMenu?.querySelector(`[data-filter-key="${filter.key}"]`);
+      const labelEl = option?.querySelector('.dao-status-label');
       const countEl = option?.querySelector('.dao-status-count');
-      const count = counts[s.key] || 0;
-      const displayLabel = getDaoStateLabel(s.key);
+      const count = counts[filter.key] || 0;
 
-      if (labelEl) labelEl.textContent = displayLabel;
+      if (labelEl) labelEl.textContent = filter.label;
       if (countEl) {
         countEl.textContent = String(count);
-        countEl.setAttribute('aria-label', `${count} ${displayLabel.toLowerCase()} proposals`);
+        countEl.setAttribute('aria-label', `${count} ${filter.label.toLowerCase()} proposals`);
       }
       if (option) {
-        const selected = s.key === this.selectedStateKey;
+        const selected = filter.key === this.selectedFilterKey;
         option.classList.toggle('active', selected);
         option.setAttribute('aria-checked', selected ? 'true' : 'false');
       }
     }
 
     // Filter + sort (newest entered into state first)
-    const filtered = proposals
-      .filter((p) => getEffectiveDaoState(p) === this.selectedStateKey)
+    const filtered = (isClaimableFilter
+      ? claimableProposals
+      : groupedProposals.filter((proposal) => getEffectiveDaoState(proposal) === this.selectedFilterKey))
       .sort((a, b) => Number(b.stateEnteredAt || b.createdAt || 0) - Number(a.stateEnteredAt || a.createdAt || 0));
 
     // Clear old list items
@@ -2710,6 +2761,9 @@ class DaoModal {
       if (this.isLoading) {
         if (headlineEl) headlineEl.textContent = 'Loading proposals…';
         if (sublineEl) sublineEl.textContent = 'Please wait';
+      } else if (isClaimableFilter) {
+        if (headlineEl) headlineEl.textContent = 'No claimable proposals found';
+        if (sublineEl) sublineEl.textContent = 'You have no voter rewards ready to claim';
       } else {
         if (headlineEl) headlineEl.textContent = isArchived ? 'No archived proposals found' : 'No proposals found';
         if (sublineEl) {
@@ -3599,7 +3653,19 @@ class ConfirmProposalModal {
         return;
       }
 
-      const proposalReady = await this.refreshSubmittedProposal(result.proposalStoreId);
+      const pendingProposal = myData?.pending?.find(
+        (pendingTx) => pendingTx.txid === result.response?.txid
+      );
+      if (pendingProposal) {
+        Object.assign(pendingProposal, {
+          proposalStoreId: result.proposalStoreId,
+          proposalId: result.transaction?.proposalId || '',
+          proposalNumber: result.proposalNumber,
+          from: result.transaction?.from || '',
+          action: '',
+        });
+      }
+
       if (loadingToastId) {
         hideToast(loadingToastId);
         loadingToastId = null;
@@ -3607,13 +3673,7 @@ class ConfirmProposalModal {
       this.setSubmitting(false);
       this.close();
       addProposalModal.close();
-
-      if (proposalReady) {
-        showToast('Proposal submitted', 3000, 'success');
-        proposalInfoModal.open(result.proposalStoreId);
-      } else {
-        showToast('Proposal submitted. It may take a moment to appear in the DAO list.', 5000, 'success');
-      }
+      showToast('Proposal submitted—pending confirmation', 4000, 'info');
     } catch (error) {
       console.warn('Failed to submit DAO proposal:', error);
       if (loadingToastId) {
@@ -3625,24 +3685,6 @@ class ConfirmProposalModal {
       if (loadingToastId) hideToast(loadingToastId);
       if (this.isActive()) this.setSubmitting(false);
     }
-  }
-
-  async refreshSubmittedProposal(proposalStoreId) {
-    for (let attempt = 0; attempt < 3; attempt += 1) {
-      try {
-        await daoRepo.refresh({ force: true });
-        if (daoModal?.isActive?.()) daoModal.render();
-        if (daoRepo.getProposalById(proposalStoreId)) return true;
-      } catch (error) {
-        console.warn('Failed to refresh DAO proposals after submit:', error);
-      }
-
-      if (attempt < 2) {
-        await new Promise((resolve) => setTimeout(resolve, 1000));
-      }
-    }
-
-    return false;
   }
 
   render() {
@@ -3913,34 +3955,6 @@ function formatDaoLibWei(value) {
   return `${formatDaoShortNumber(EthNum.toStr(weiValue))} LIB`;
 }
 
-function parseDaoUnsignedBigInt(value) {
-  if (value === undefined || value === null || value === '') return null;
-  if (typeof value === 'bigint') return value >= 0n ? value : null;
-  if (typeof value === 'number') {
-    if (!Number.isFinite(value) || value < 0) return null;
-    return BigInt(Math.trunc(value));
-  }
-  if (typeof value === 'object') {
-    if (value.dataType !== 'bi') return null;
-    const hexText = String(value.value ?? '').trim();
-    if (!/^[0-9a-f]+$/i.test(hexText)) return null;
-    try {
-      return BigInt(`0x${hexText}`);
-    } catch {
-      return null;
-    }
-  }
-
-  const text = String(value).trim();
-  if (!text) return null;
-  try {
-    const parsed = BigInt(text);
-    return parsed >= 0n ? parsed : null;
-  } catch {
-    return null;
-  }
-}
-
 function formatDaoRewardAmount(value) {
   return value === null ? 'Unavailable' : formatDaoLibWei(value);
 }
@@ -4050,12 +4064,6 @@ function getDaoProposalResultSummary(proposal) {
   return getDaoCommitteeReviewResultSummary(proposal) || getDaoVoteResultSummary(proposal);
 }
 
-function normalizeDaoAddress(value) {
-  const text = String(value || '').trim();
-  if (!text) return '';
-  return normalizeAddress(text);
-}
-
 function getDaoVoterEntries(proposal) {
   if (!Array.isArray(proposal?.voterList)) return [];
   return proposal.voterList
@@ -4064,35 +4072,6 @@ function getDaoVoterEntries(proposal) {
       timestamp: Number(entry?.timestamp || 0),
     }))
     .filter((entry) => entry.address && Number.isFinite(entry.timestamp) && entry.timestamp > 0);
-}
-
-function getDaoClaimList(proposal) {
-  if (!Array.isArray(proposal?.claimList)) return [];
-  return proposal.claimList.map(normalizeDaoAddress).filter(Boolean);
-}
-
-function getDaoProposalClaimWindow(proposal) {
-  const reviewStart = Number(proposal?.startTime || 0);
-  const reviewDuration = Number(proposal?.reviewDuration);
-  const votingDuration = Number(proposal?.votingDuration);
-  const claimDuration = Number(proposal?.claimDuration);
-  if (
-    !Number.isFinite(reviewStart) ||
-    !Number.isFinite(reviewDuration) ||
-    !Number.isFinite(votingDuration) ||
-    !Number.isFinite(claimDuration)
-  ) {
-    return { start: null, end: null, votingStart: null, votingDuration: null };
-  }
-
-  const votingStart = reviewStart + reviewDuration;
-  const votingEnd = proposal?.emergency ? votingStart : votingStart + votingDuration;
-  return {
-    start: votingEnd,
-    end: votingEnd + claimDuration,
-    votingStart,
-    votingDuration,
-  };
 }
 
 function getDaoProposalApplyWindow(proposal, now = Date.now()) {
@@ -4140,9 +4119,6 @@ function getDaoApplyParametersLifecycleAction(help, canSubmit, rowPreviewLabel =
     help,
     buttonLabel: 'Apply parameters',
     loadingLabel: 'Applying parameters...',
-    successMessage: 'Parameters applied',
-    refreshWarning: 'Parameters applied, but proposal or parameter refresh failed',
-    refreshNetworkParams: true,
     canSubmit,
   };
   if (rowPreviewLabel) action.rowPreviewLabel = rowPreviewLabel;
@@ -4212,19 +4188,6 @@ function getDaoClaimRewardEstimate({ pool, claimed, voterEntries, voterIndex, vo
   return reward;
 }
 
-function getDaoRewardClaimStatus({ state, currentAddress, voterIndex, hasClaimed, pool, claimed, claimWindow, now }) {
-  if (!currentAddress) return 'Sign in to check rewards';
-  if (state === 'withheld') return 'Reward pool burned';
-  if (voterIndex < 0) return 'Not eligible';
-  if (hasClaimed) return 'Already claimed';
-  if (pool <= 0n) return 'Reward pool empty';
-  if (claimed >= pool) return 'Reward pool fully claimed';
-  if (!claimWindow.end) return 'Claim timing unavailable';
-  if (now > claimWindow.end) return 'Claim window ended';
-  if (now < claimWindow.start) return 'Claim window not open';
-  return 'Claimable';
-}
-
 function getDaoProposalRewardSummary(proposal, currentAddress = getDaoCurrentAccountAddress(), now = Date.now()) {
   const state = getEffectiveDaoState(proposal);
   const isRewardState = state === 'accepted' || state === 'rejected' || state === 'applied' || state === 'withheld';
@@ -4235,14 +4198,13 @@ function getDaoProposalRewardSummary(proposal, currentAddress = getDaoCurrentAcc
   const initialBurned = parseDaoUnsignedBigInt(proposal?.initialBurnedReward);
   const finalBurned = parseDaoUnsignedBigInt(proposal?.finalBurnedReward);
   const voterEntries = getDaoVoterEntries(proposal);
-  const claimList = getDaoClaimList(proposal);
   const hasRewardData = (
     pool !== null ||
     claimed !== null ||
     initialBurned !== null ||
     finalBurned !== null ||
     voterEntries.length > 0 ||
-    claimList.length > 0
+    proposal?.claimList?.length > 0
   );
   if (!hasRewardData) return null;
 
@@ -4251,18 +4213,8 @@ function getDaoProposalRewardSummary(proposal, currentAddress = getDaoCurrentAcc
   const claimWindow = getDaoProposalClaimWindow(proposal);
   const normalizedAddress = normalizeDaoAddress(currentAddress);
   const voterIndex = normalizedAddress ? voterEntries.findIndex((entry) => entry.address === normalizedAddress) : -1;
-  const hasClaimed = normalizedAddress ? claimList.includes(normalizedAddress) : false;
-  const claimStatus = getDaoRewardClaimStatus({
-    state,
-    currentAddress: normalizedAddress,
-    voterIndex,
-    hasClaimed,
-    pool: safePool,
-    claimed: safeClaimed,
-    claimWindow,
-    now,
-  });
-  const claimEstimate = hasClaimed
+  const claimStatus = getDaoRewardClaimStatus(proposal, normalizedAddress, now);
+  const claimEstimate = claimStatus === 'Already claimed'
     ? null
     : getDaoClaimRewardEstimate({
         pool: safePool,
@@ -4301,8 +4253,6 @@ function getDaoProposalLifecycleActions(proposal, rewardSummary, currentAddress 
         help: 'Voting has ended. Finalize the vote result to move this proposal to accepted or rejected.',
         buttonLabel: 'Finalize vote result',
         loadingLabel: 'Finalizing vote result...',
-        successMessage: 'Vote result finalized',
-        refreshWarning: 'Vote result finalized, but proposal refresh failed',
       }];
     }
     return [];
@@ -4323,8 +4273,6 @@ function getDaoProposalLifecycleActions(proposal, rewardSummary, currentAddress 
       help: 'The claim window has ended. Burn the unclaimed reward pool so the proposal accounting is finalized.',
       buttonLabel: 'Burn unclaimed reward',
       loadingLabel: 'Burning reward...',
-      successMessage: 'Unclaimed reward burned',
-      refreshWarning: 'Reward burned, but proposal refresh failed',
     });
   }
 
@@ -4334,7 +4282,6 @@ function getDaoProposalLifecycleActions(proposal, rewardSummary, currentAddress 
     now >= claimWindow.start &&
     now <= claimWindow.end &&
     unclaimed > 0n &&
-    currentAddress &&
     rewardSummary?.claimStatus === 'Claimable'
   ) {
     actions.push({
@@ -4345,8 +4292,6 @@ function getDaoProposalLifecycleActions(proposal, rewardSummary, currentAddress 
         : `Your estimated claim is ${formatDaoLibWei(rewardSummary.claimEstimate)}. Submit the claim and refresh proposal accounting.`,
       buttonLabel: 'Claim reward',
       loadingLabel: 'Claiming reward...',
-      successMessage: 'Reward claimed',
-      refreshWarning: 'Reward claimed, but proposal refresh failed',
     });
   }
 
@@ -4609,13 +4554,10 @@ class ProposalInfoModal {
     const winnerIndex = totalWeight > 0n
       ? rows.reduce((winner, row, index) => (row.total > rows[winner].total ? index : winner), 0)
       : -1;
-    const labelLayout = rows.length === 2 ? 'balanced' : 'segmented';
-
     const labels = rows
       .map((row, index) => {
         const position = index === 0 ? 'start' : index === rows.length - 1 ? 'end' : 'center';
         const isWinner = index === winnerIndex;
-        const units = this.getCurrentVoteSegmentUnits(row.total, totalWeight);
         const power = formatDaoVotingPower(row.total);
         const percent = formatDaoBigIntPercent(row.total, totalWeight);
         const valueLabel = totalWeight > 0n ? `${power} / ${percent}` : power;
@@ -4626,7 +4568,6 @@ class ProposalInfoModal {
         return `
           <div
             class="proposal-vote-current-label proposal-vote-current-label--${position}${isWinner ? ' proposal-vote-current-label--winner' : ''}"
-            style="--vote-total-segment-units: ${units};"
             title="${escapeDaoFormAttribute(title)}"
             aria-label="${escapeDaoFormAttribute(title)}"
           >
@@ -4654,7 +4595,7 @@ class ProposalInfoModal {
       <section class="proposal-info-section proposal-vote-current-section">
         <h3>Current Vote</h3>
         <div class="proposal-vote-current-meter" aria-label="Current vote totals">
-          <div class="proposal-vote-current-labels proposal-vote-current-labels--${labelLayout}">${labels}</div>
+          <div class="proposal-vote-current-labels">${labels}</div>
           <div class="proposal-vote-current-track" aria-hidden="true">${segments}</div>
         </div>
         <div class="proposal-vote-status-grid proposal-vote-status-grid--current">
@@ -5140,8 +5081,12 @@ class ProposalInfoModal {
     this.canSubmitReviewResult = true;
     this.reviewResultSection.classList.remove('hidden');
     if (this.reviewResultHelp) {
-      const nextState = this.getReviewFinalizedStateLabel(proposal, acceptCount, withholdCount);
-      this.reviewResultHelp.textContent = `${reviewWindow.label}. Finalize the review result to move this proposal to ${nextState}.`;
+      if (this.isDaoActionPending(DAO_ACTION_TYPES.COMMITTEE_RESULT)) {
+        this.reviewResultHelp.textContent = getDaoTransactionMessage(DAO_ACTION_TYPES.COMMITTEE_RESULT, 'pending');
+      } else {
+        const nextState = this.getReviewFinalizedStateLabel(proposal, acceptCount, withholdCount);
+        this.reviewResultHelp.textContent = `${reviewWindow.label}. Finalize the review result to move this proposal to ${nextState}.`;
+      }
     }
     this.updateSubmitButtons();
   }
@@ -5160,11 +5105,16 @@ class ProposalInfoModal {
     }
 
     this.lifecycleActionSection.innerHTML = this.currentLifecycleActions
-      .map((action, index) => `
+      .map((action, index) => {
+        const actionType = getDaoTypeForLifecycleKind(action.kind);
+        const help = actionType && this.isDaoActionPending(actionType)
+          ? getDaoTransactionMessage(actionType, 'pending')
+          : action.help;
+        return `
         <div class="proposal-lifecycle-action">
           <div class="proposal-committee-actions-header">
             <h3>${escapeHtml(action.title)}</h3>
-            <p>${escapeHtml(action.help)}</p>
+            <p>${escapeHtml(help)}</p>
           </div>
           <button
             type="button"
@@ -5172,7 +5122,8 @@ class ProposalInfoModal {
             data-lifecycle-action-index="${index}"
           >${escapeHtml(action.buttonLabel)}</button>
         </div>
-      `)
+      `;
+      })
       .join('');
     this.lifecycleActionSection.classList.remove('hidden');
     this.updateSubmitButtons();
@@ -5215,7 +5166,9 @@ class ProposalInfoModal {
 
     this.voteActionSection.classList.remove('hidden');
     if (this.voteActionHelp) {
-      this.voteActionHelp.textContent = 'Allocate options and spend LIB to preview voting power.';
+      this.voteActionHelp.textContent = this.isDaoActionPending(DAO_ACTION_TYPES.VOTE)
+        ? getDaoTransactionMessage(DAO_ACTION_TYPES.VOTE, 'pending')
+        : 'Allocate options and spend LIB to preview voting power.';
     }
     if (this.voteSubmitButton) {
       this.voteSubmitButton.textContent = this.voteSubmitButtonLabel;
@@ -5366,7 +5319,7 @@ class ProposalInfoModal {
       return { ok: false, message: 'Voting is only available while the proposal is in voting status.' };
     }
     if (!myAccount?.keys?.address) {
-      return { ok: false, message: 'Sign in with a wallet to preview vote eligibility.' };
+      return { ok: false, message: 'Wallet address unavailable.' };
     }
 
     const totalWeight = this.voteWeights.reduce((sum, weight) => sum + weight, 0);
@@ -5457,6 +5410,39 @@ class ProposalInfoModal {
     return `<div class="proposal-vote-preview-message proposal-vote-preview-message--${tone}">${escapeHtml(message)}</div>`;
   }
 
+  getCurrentProposal() {
+    return this._currentProposalId ? daoRepo.getProposalById(this._currentProposalId) : null;
+  }
+
+  isDaoActionPending(type) {
+    return hasPendingDaoAction(
+      myData?.pending,
+      type,
+      this._currentProposalId,
+      getDaoCurrentAccountAddress(),
+    );
+  }
+
+  recordAcceptedDaoAction(result, proposal) {
+    const pendingAction = myData.pending.find(
+      (pendingTx) => pendingTx.txid === result.response.txid
+    );
+    assert(pendingAction, `Accepted DAO transaction missing pending entry: ${result.response.txid}`);
+    assert(this._currentProposalId, 'Accepted DAO transaction missing proposal store ID');
+    Object.assign(pendingAction, {
+      proposalStoreId: this._currentProposalId,
+      proposalId: proposal.accountId,
+      proposalNumber: proposal.number,
+      from: result.transaction.from,
+    });
+  }
+
+  async submitDaoTransaction(transaction) {
+    if (!myAccount?.keys) throw new Error('Wallet keys unavailable');
+    const txid = await signObj(transaction, myAccount.keys);
+    return injectTx(transaction, txid);
+  }
+
   setSubmitting(isSubmitting) {
     this.isSubmitting = Boolean(isSubmitting);
     if (this.closeButton) this.closeButton.disabled = this.isSubmitting;
@@ -5464,10 +5450,14 @@ class ProposalInfoModal {
   }
 
   updateSubmitButtons() {
-    const disableCommittee = this.isSubmitting || !this.canSubmitCommitteeReview;
+    const pendingLabel = 'Pending confirmation...';
+    const pendingCommittee = this.isDaoActionPending(DAO_ACTION_TYPES.COMMITTEE_VOTE);
+    const pendingReviewResult = this.isDaoActionPending(DAO_ACTION_TYPES.COMMITTEE_RESULT);
+    const pendingVote = this.isDaoActionPending(DAO_ACTION_TYPES.VOTE);
+    const disableCommittee = this.isSubmitting || !this.canSubmitCommitteeReview || pendingCommittee;
     const isSameVote = Boolean(this.currentCommitteeVote && this.committeeChoice === this.currentCommitteeVote);
-    const disableResult = this.isSubmitting || !this.canSubmitReviewResult;
-    const disableVote = this.isSubmitting || !this.canSubmitVote;
+    const disableResult = this.isSubmitting || !this.canSubmitReviewResult || pendingReviewResult;
+    const disableVote = this.isSubmitting || !this.canSubmitVote || pendingVote;
 
     if (this.acceptButton) this.acceptButton.disabled = disableCommittee || this.currentCommitteeVote === 'accept';
     if (this.withholdButton) this.withholdButton.disabled = disableCommittee || this.currentCommitteeVote === 'withhold';
@@ -5475,33 +5465,50 @@ class ProposalInfoModal {
     if (this.customReasonInput) this.customReasonInput.disabled = disableCommittee || isSameVote;
     if (this.submitButton) {
       this.submitButton.disabled = disableCommittee || isSameVote;
-      this.submitButton.textContent = this.isSubmitting && this.canSubmitCommitteeReview ? 'Submitting...' : this.submitButtonLabel;
+      this.submitButton.textContent = this.submitButtonLabel;
+      if (this.isSubmitting && this.canSubmitCommitteeReview) {
+        this.submitButton.textContent = 'Submitting...';
+      }
+      if (pendingCommittee) this.submitButton.textContent = pendingLabel;
     }
     if (this.reviewResultButton) {
       this.reviewResultButton.disabled = disableResult;
-      this.reviewResultButton.textContent = this.isSubmitting && this.canSubmitReviewResult ? 'Finalizing...' : this.reviewResultButtonLabel;
+      this.reviewResultButton.textContent = this.reviewResultButtonLabel;
+      if (this.isSubmitting && this.canSubmitReviewResult) {
+        this.reviewResultButton.textContent = 'Finalizing...';
+      }
+      if (pendingReviewResult) this.reviewResultButton.textContent = pendingLabel;
     }
     for (const button of this.lifecycleActionSection?.querySelectorAll('button[data-lifecycle-action-index]') || []) {
       const action = this.currentLifecycleActions[Number(button.dataset.lifecycleActionIndex)];
+      const actionType = getDaoTypeForLifecycleKind(action?.kind);
+      const pendingLifecycle = Boolean(actionType && this.isDaoActionPending(actionType));
       const isSubmittingAction = this.isSubmitting && action === this.submittingLifecycleAction;
       const canSubmitLifecycle = action?.canSubmit !== false;
-      button.disabled = this.isSubmitting || !action || !canSubmitLifecycle;
-      button.textContent = isSubmittingAction ? action.loadingLabel : action?.buttonLabel || '';
+      button.disabled = this.isSubmitting || !action || !canSubmitLifecycle || pendingLifecycle;
+      button.textContent = action?.buttonLabel || '';
+      if (isSubmittingAction) button.textContent = action.loadingLabel;
+      if (pendingLifecycle) button.textContent = pendingLabel;
     }
     if (this.voteSubmitButton) {
       this.voteSubmitButton.disabled = disableVote;
-      this.voteSubmitButton.textContent = this.isSubmitting && this.canSubmitVote ? 'Submitting...' : this.voteSubmitButtonLabel;
+      this.voteSubmitButton.textContent = this.voteSubmitButtonLabel;
+      if (this.isSubmitting && this.canSubmitVote) {
+        this.voteSubmitButton.textContent = 'Submitting...';
+      }
+      if (pendingVote) this.voteSubmitButton.textContent = pendingLabel;
     }
-    if (this.voteSpendInput) this.voteSpendInput.disabled = this.isSubmitting;
+    if (this.voteSpendInput) this.voteSpendInput.disabled = this.isSubmitting || pendingVote;
     if (this.voteOptions) {
       for (const input of this.voteOptions.querySelectorAll('input[data-vote-option-index]')) {
-        input.disabled = this.isSubmitting;
+        input.disabled = this.isSubmitting || pendingVote;
       }
     }
   }
 
   handleCommitteeChoiceClick(choice) {
     if (this.isSubmitting || !this.canSubmitCommitteeReview) return;
+    if (this.isDaoActionPending(DAO_ACTION_TYPES.COMMITTEE_VOTE)) return;
     if (choice === this.currentCommitteeVote) return;
     this.setCommitteeChoice(choice);
     this.scrollToCommitteeActionBottom();
@@ -5522,6 +5529,10 @@ class ProposalInfoModal {
 
   setCommitteeActionHelp(state, reviewWindow) {
     if (!this.committeeActionHelp) return;
+    if (this.isDaoActionPending(DAO_ACTION_TYPES.COMMITTEE_VOTE)) {
+      this.committeeActionHelp.textContent = getDaoTransactionMessage(DAO_ACTION_TYPES.COMMITTEE_VOTE, 'pending');
+      return;
+    }
     if (!this.canSubmitCommitteeReview) {
       this.committeeActionHelp.textContent = state === 'review'
         ? `${reviewWindow?.label || 'Committee review unavailable'}. Committee review submission is unavailable.`
@@ -5568,40 +5579,12 @@ class ProposalInfoModal {
       : String(this.withholdReasonSelect?.value || '').trim();
   }
 
-  getCurrentProposal() {
-    return this._currentProposalId ? daoRepo.getProposalById(this._currentProposalId) : null;
-  }
-
-  async submitDaoTransaction(transaction) {
-    if (!myAccount?.keys) throw new Error('Wallet keys unavailable');
-    const txid = await signObj(transaction, myAccount.keys);
-    return injectTx(transaction, txid);
-  }
-
-  async refreshAfterDaoAction(warningMessage, { refreshNetworkParams = false } = {}) {
-    try {
-      await daoRepo.refresh({ force: true });
-      if (daoModal?.isActive?.()) daoModal.render();
-
-      const proposal = this.getCurrentProposal();
-      if (proposal) {
-        this.renderProposal(proposal);
-      } else {
-        this.renderNotFound();
-      }
-
-      if (refreshNetworkParams) {
-        const refreshed = await getNetworkParams(true);
-        if (!refreshed) throw new Error('Network parameter refresh failed');
-      }
-    } catch (error) {
-      console.warn('Failed to refresh proposal after DAO action:', error);
-      showToast(warningMessage, 4000, 'warning');
-    }
-  }
-
   async handleCommitteeSubmit() {
     if (this.isSubmitting || !this.canSubmitCommitteeReview) return;
+    if (this.isDaoActionPending(DAO_ACTION_TYPES.COMMITTEE_VOTE)) {
+      showToast(getDaoTransactionMessage(DAO_ACTION_TYPES.COMMITTEE_VOTE, 'pending'), 2500, 'info');
+      return;
+    }
     if (this.currentCommitteeVote && this.committeeChoice === this.currentCommitteeVote) {
       showToast(`You already submitted ${this.formatCommitteeChoice(this.currentCommitteeVote)}`, 2500, 'info');
       return;
@@ -5649,8 +5632,10 @@ class ProposalInfoModal {
         return;
       }
 
-      showToast('Committee review submitted', 3000, 'success');
-      await this.refreshAfterDaoAction('Committee review submitted, but proposal refresh failed');
+      this.recordAcceptedDaoAction(result, proposal);
+      showToast(getDaoTransactionMessage(DAO_ACTION_TYPES.COMMITTEE_VOTE, 'pending'), 4000, 'info');
+      this.updateSubmitButtons();
+      this.setCommitteeActionHelp();
     } catch (error) {
       console.warn('Failed to submit committee review:', error);
       showToast(error?.message || 'Committee review submission failed', 3000, 'warning');
@@ -5662,6 +5647,10 @@ class ProposalInfoModal {
 
   async handleReviewResultSubmit() {
     if (this.isSubmitting || !this.canSubmitReviewResult) return;
+    if (this.isDaoActionPending(DAO_ACTION_TYPES.COMMITTEE_RESULT)) {
+      showToast(getDaoTransactionMessage(DAO_ACTION_TYPES.COMMITTEE_RESULT, 'pending'), 2500, 'info');
+      return;
+    }
 
     const proposal = this.getCurrentProposal();
     if (!proposal) {
@@ -5690,8 +5679,9 @@ class ProposalInfoModal {
         return;
       }
 
-      showToast('Review result finalized', 3000, 'success');
-      await this.refreshAfterDaoAction('Review result finalized, but proposal refresh failed');
+      this.recordAcceptedDaoAction(result, proposal);
+      showToast(getDaoTransactionMessage(DAO_ACTION_TYPES.COMMITTEE_RESULT, 'pending'), 4000, 'info');
+      this.updateSubmitButtons();
     } catch (error) {
       console.warn('Failed to finalize review result:', error);
       showToast(error?.message || 'Review result finalization failed', 3000, 'warning');
@@ -5711,6 +5701,16 @@ class ProposalInfoModal {
 
   async handleLifecycleActionSubmit(action) {
     if (this.isSubmitting || !action || action.canSubmit === false) return;
+
+    const actionType = getDaoTypeForLifecycleKind(action.kind);
+    if (!actionType) {
+      showToast(`Unknown DAO lifecycle action: ${action.kind}`, 3000, 'warning');
+      return;
+    }
+    if (this.isDaoActionPending(actionType)) {
+      showToast(getDaoTransactionMessage(actionType, 'pending'), 2500, 'info');
+      return;
+    }
 
     const proposal = this.getCurrentProposal();
     if (!proposal) {
@@ -5757,8 +5757,9 @@ class ProposalInfoModal {
         return;
       }
 
-      showToast(action.successMessage, 3000, 'success');
-      await this.refreshAfterDaoAction(action.refreshWarning, { refreshNetworkParams: action.refreshNetworkParams });
+      this.recordAcceptedDaoAction(result, proposal);
+      showToast(getDaoTransactionMessage(actionType, 'pending'), 4000, 'info');
+      this.updateSubmitButtons();
     } catch (error) {
       console.warn('Failed to submit DAO lifecycle action:', error);
       showToast(error?.message || `${action.title} failed`, 3000, 'warning');
@@ -5771,6 +5772,10 @@ class ProposalInfoModal {
 
   async handleVoteSubmit() {
     if (this.isSubmitting || !this.canSubmitVote) return;
+    if (this.isDaoActionPending(DAO_ACTION_TYPES.VOTE)) {
+      showToast(getDaoTransactionMessage(DAO_ACTION_TYPES.VOTE, 'pending'), 2500, 'info');
+      return;
+    }
 
     const proposal = this.getCurrentProposal();
     if (!proposal) {
@@ -5808,8 +5813,9 @@ class ProposalInfoModal {
         return;
       }
 
-      showToast('Vote submitted', 3000, 'success');
-      await this.refreshAfterDaoAction('Vote submitted, but proposal refresh failed');
+      this.recordAcceptedDaoAction(result, proposal);
+      showToast(getDaoTransactionMessage(DAO_ACTION_TYPES.VOTE, 'pending'), 4000, 'info');
+      this.updateSubmitButtons();
     } catch (error) {
       console.warn('Failed to submit vote:', error);
       showToast(error?.message || 'Vote submission failed', 3000, 'warning');
@@ -5823,6 +5829,17 @@ class ProposalInfoModal {
     if (this.isSubmitting) return;
     this.modal.classList.remove('active');
     enterFullscreen();
+  }
+
+  refreshIfOpen(proposalId) {
+    if (!this.modal.classList.contains('active') || this._currentProposalId !== proposalId) return;
+
+    const proposal = this.getCurrentProposal();
+    if (proposal) {
+      this.renderProposal(proposal);
+    } else {
+      this.renderNotFound();
+    }
   }
 
 }
@@ -32763,17 +32780,25 @@ class ReactNativeApp {
 const reactNativeApp = new ReactNativeApp();
 
 /**
+ * Remove a transaction from the pending list by ID.
+ * @param {string} txid
+ * @returns {boolean} Whether a pending transaction was removed
+ */
+function removePendingTransaction(txid) {
+  const index = myData.pending.findIndex((tx) => tx.txid === txid);
+  if (index === -1) return false;
+
+  myData.pending.splice(index, 1);
+  return true;
+}
+
+/**
  * Remove failed transaction from the contacts messages, pending, and wallet history
  * @param {string} txid - The transaction ID to remove
  * @param {string} currentAddress - The address of the current contact
  */
 function removeFailedTx(txid, currentAddress) {
-  // remove pending tx if exists
-  const index = myData.pending.findIndex((tx) => tx.txid === txid);
-  if (index > -1) {
-    myData.pending.splice(index, 1);
-  }
-
+  removePendingTransaction(txid);
   const contact = myData?.contacts?.[currentAddress];
   if (contact && contact.messages) {
     contact.messages = contact.messages.filter((msg) => msg.txid !== txid);
@@ -32823,11 +32848,24 @@ async function refreshActiveBalanceDisplays(didSettlePendingState) {
   }
 }
 
+let checkPendingTransactionsPromise = null;
+
 /**
  * Check pending transactions that are at least 5 seconds old
  * @returns {Promise<void>}
  */
 async function checkPendingTransactions() {
+  if (!checkPendingTransactionsPromise) {
+    checkPendingTransactionsPromise = checkPendingTransactionsOnce()
+      .finally(() => {
+        checkPendingTransactionsPromise = null;
+      });
+  }
+
+  return checkPendingTransactionsPromise;
+}
+
+async function checkPendingTransactionsOnce() {
   if (!myData || !myAccount) {
     return;
   }
@@ -32860,6 +32898,7 @@ async function checkPendingTransactions() {
     const pendingTxInfo = myData.pending[i];
     const { txid, type, submittedts } = pendingTxInfo;
     const reactionPending = pendingTxInfo.reactionPending;
+    const isPendingDaoTransaction = isDaoTransactionType(type);
     if (reactionPending && reactionPending.status !== 'pending') {
       continue;
     }
@@ -32882,6 +32921,9 @@ async function checkPendingTransactions() {
           }
           continue;
         }
+        if (!removePendingTransaction(txid)) continue;
+        didMutatePendingState = true;
+
         if (pendingTxInfo.editPending) {
           reconcilePendingMessageEdit(pendingTxInfo);
           showToast('Edit timed out and was reverted', 0, 'error');
@@ -32900,9 +32942,10 @@ async function checkPendingTransactions() {
           chatModal.refreshCurrentView(txid);
           await chatsScreen.updateChatList();
         }
-        // remove the pending tx from the pending array
-        myData.pending.splice(i, 1);
-        didMutatePendingState = true;
+        if (isPendingDaoTransaction) {
+          await daoModal.refreshAfterDaoSettlement(pendingTxInfo, 'timeout');
+          showToast(getDaoTransactionMessage(type, 'timeout'), 0, 'warning');
+        }
         continue;
       }
 
@@ -32910,8 +32953,7 @@ async function checkPendingTransactions() {
         if (reactionPending) {
           settleAndQueueReactionCleanup(pendingTxInfo, 'success');
         } else {
-          // comment out to test the pending txs removal logic
-          myData.pending.splice(i, 1);
+          if (!removePendingTransaction(txid)) continue;
           didMutatePendingState = true;
         }
 
@@ -32961,8 +33003,23 @@ async function checkPendingTransactions() {
         if (type === 'reclaim_toll') {
           console.log(`DEBUG: reclaim_toll transaction successfully processed!`);
         }
+
+        if (isPendingDaoTransaction) {
+          const didRefreshDaoData = await daoModal.refreshAfterDaoSettlement(pendingTxInfo, 'success');
+          if (didRefreshDaoData) {
+            showToast(getDaoTransactionMessage(type, 'success'), 3000, 'success');
+          } else if (!myData.pending.some((pendingTx) => pendingTx.txid === txid)) {
+            // Keep the pending guard active and retry reconciliation on the next poll.
+            myData.pending.push(pendingTxInfo);
+          }
+        }
       } else if (res?.transaction?.success === false) {
         console.log(`DEBUG: txid ${txid} failed, removing completely`);
+        if (!reactionPending) {
+          if (!removePendingTransaction(txid)) continue;
+          didMutatePendingState = true;
+        }
+
         // Check for failure reason in the transaction receipt
         const failureReason = res?.transaction?.reason || 'Transaction failed';
         const feeMismatchStatus = await refreshNetworkParamsOnTxFeeMismatch(failureReason);
@@ -33027,21 +33084,21 @@ async function checkPendingTransactions() {
             if (failureReason !== 'user is trying to reclaim toll but the toll pool is empty') {
               showToast(`Reclaim toll failed: ${userFailureReason}`, 0, 'error');
             }
-          } else {
+          } else if (!isPendingDaoTransaction) {
             // for messages, transfer etc.
             showToast(userFailureReason, 0, 'error');
           }
 
-          if (!reactionPending && !pendingTxInfo.editPending) {
+          if (!reactionPending && !pendingTxInfo.editPending && !isPendingDaoTransaction) {
             const toAddress = pendingTxInfo.to;
             updateTransactionStatus(txid, toAddress, 'failed', type);
             chatModal.refreshCurrentView(txid);
           }
         }
-        if (!reactionPending) {
-          // Remove from pending array
-          myData.pending.splice(i, 1);
-          didMutatePendingState = true;
+        if (!reactionPending && isPendingDaoTransaction) {
+          await daoModal.refreshAfterDaoSettlement(pendingTxInfo, 'failure');
+          const failureMessage = getDaoTransactionMessage(type, 'failure');
+          showToast(`${failureMessage}: ${userFailureReason}`, 0, 'error');
         }
 
         // refresh the validator modal if this is a withdraw_stake/deposit_stake and validator modal is open
