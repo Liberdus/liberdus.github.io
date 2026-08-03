@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'j'
+const version = 'k'
 const BOOT_SPLASH_HANDOFF_MS = 1000;
 let myVersion = '0';
 async function checkVersion() {
@@ -37,6 +37,7 @@ async function checkVersion() {
       newUrl,
       'styles.css',
       'app.js',
+      'evm-assets.js',
       'dao.repo.js',
       'data/emoji-picker-data.js',
       'lib.js',
@@ -82,6 +83,8 @@ import {
   DAO_ACTION_TYPES,
   DAO_CONFIG_CHANGE_OPTIONS,
   DAO_PROPOSAL_CREATE_TYPE,
+  DAO_PROPOSAL_DAY_MS,
+  DAO_PROPOSAL_GRACE_PERIOD_MAX_MS,
   DAO_PROPOSAL_TITLE_MAX_LENGTH,
   daoRepo,
   DAO_STATES,
@@ -159,6 +162,8 @@ import {
   CHAT_REACTION_SHEET_RECENT_CATEGORY_KEY,
 } from './data/emoji-picker-data.js';
 
+import { evmAssets } from './evm-assets.js';
+
 const weiDigits = 18;
 const wei = 10n ** BigInt(weiDigits);
 //network.monitor.url = "http://test.liberdus.com:3000"    // URL of the monitor server
@@ -168,6 +173,7 @@ const MENU_NAVIGATION_LOCK_MS = 400;
 const MAX_CHAT_MESSAGE_BYTES = 1000; // 1000 bytes for chat messages
 const BRIDGE_USERNAME = 'liberdusbridge';
 const TRANSACTION_TIMESTAMP_OFFSET_MS = 500; // Transaction offset to allow for slow connections
+const IS_DEV_NETWORK = network?.name === 'Devnet';
 
 let myData = null;
 let myAccount = null; // this is set to myData.account for convience
@@ -443,6 +449,7 @@ function newDataRecord(myAccount) {
 function clearMyData() {
   myData = null;
   myAccount = null;
+  evmAssets.reset();
 }
 
 /**
@@ -738,6 +745,9 @@ document.addEventListener('DOMContentLoaded', async () => {
   // Wallet Screen
   walletScreen.load();
 
+  // Connected EVM assets
+  evmAssets.load();
+
   // About and Contact Modals
   sourceModal.load();
   aboutModal.load();
@@ -880,9 +890,9 @@ document.addEventListener('DOMContentLoaded', async () => {
   // Import Contacts Modal
   importContactsModal.load();
 
-  // Call Schedule Modals
+  // Call scheduling and shared date/time picker modals
   callScheduleChoiceModal.load();
-  callScheduleDateModal.load();
+  dateTimePickerModal.load();
 
   // Remove Accounts Modal
   removeAccountsModal.load();
@@ -1355,7 +1365,7 @@ class WelcomeMenuModal {
       this.launchButton.addEventListener('click', () => launchModal.open());
       this.launchButton.style.display = 'block';
       this.updateButton.addEventListener('click', () => aboutModal.openStore());
-      this.updateButton.style.display = 'block';
+      this.updateButton.style.display = 'flex';
     }
   }
 
@@ -2134,7 +2144,6 @@ class WalletScreen {
       }
     }
 
-    // Update total networth
     const walletUsdValue = calculateWalletUsdValue(walletData.assets);
     walletData.networth = walletUsdValue ?? 0.0;
     this.totalBalance.textContent = walletUsdValue === null ? 'N/A' : walletUsdValue.toFixed(2);
@@ -2313,10 +2322,8 @@ class MenuModal {
     this.validatorButton = document.getElementById('openValidator');
     this.validatorButton.addEventListener('click', () => validatorStakingModal.open());
     this.daoButton = document.getElementById('openDao');
-    if (network.name === 'Devnet') {
-      this.daoButton.style.display = 'block';
-      this.daoButton.addEventListener('click', () => daoModal.open());
-    }
+    this.daoButton.style.display = 'flex';
+    this.daoButton.addEventListener('click', () => daoModal.open());
     this.inviteButton = document.getElementById('openInvite');
     this.inviteButton.addEventListener('click', () => inviteModal.open());
     this.explorerButton = document.getElementById('openExplorer');
@@ -2348,7 +2355,7 @@ class MenuModal {
 
       this.updateButton = document.getElementById('openUpdate');
       this.updateButton.addEventListener('click', () => updateWarningModal.open());
-      this.updateButton.style.display = 'block';
+      this.updateButton.style.display = 'flex';
     }
   }
 
@@ -2466,7 +2473,7 @@ const menuModal = new MenuModal();
 // =====================
 
 // DAO proposals are loaded via `daoRepo` and kept in memory (no localStorage persistence).
-setDaoBackendFetcher(createDaoBackendFetcher(queryNetwork));
+setDaoBackendFetcher(createDaoBackendFetcher(queryNetwork, IS_DEV_NETWORK));
 
 const DAO_CLAIMABLE_FILTER = { key: 'claimable', label: 'Claimable' };
 const DAO_FILTER_OPTIONS = [...DAO_STATES, DAO_CLAIMABLE_FILTER];
@@ -2491,12 +2498,43 @@ function formatDaoDate(ts) {
   }
 }
 
+function formatDaoDayOrTime(ts, now) {
+  const at = Number(ts || 0);
+  if (!at) return '';
+  const atDate = new Date(at);
+  const nowDate = new Date(now);
+  const sameDay = (
+    atDate.getFullYear() === nowDate.getFullYear()
+    && atDate.getMonth() === nowDate.getMonth()
+    && atDate.getDate() === nowDate.getDate()
+  );
+  if (!sameDay) return formatDaoDate(at);
+  try {
+    return atDate.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
+  } catch {
+    return '';
+  }
+}
+
+function formatDaoReadyAtLabel(ts, now) {
+  const when = formatDaoDayOrTime(ts, now);
+  return when ? `Ready at ${when}` : '';
+}
+
+function formatDaoProposalTitle(proposal) {
+  const title = String(proposal.title || '').trim() || 'Proposal';
+  return proposal.number ? `#${proposal.number}: ${title}` : title;
+}
+
 class DaoModal {
   constructor() {
     this.selectedGroupKey = 'active';
     this.selectedFilterKey = 'voting';
     this._outsideClickHandler = null;
-    this.isLoading = false;
+    this.refreshState = 'loading';
+    this.refreshSequence = 0;
+    this.openRefreshId = 0;
+    this.lastSuccessfulRefreshId = 0;
   }
 
   load() {
@@ -2558,7 +2596,9 @@ class DaoModal {
   }
 
   async _open() {
-    this.isLoading = true;
+    const refreshId = ++this.refreshSequence;
+    this.openRefreshId = refreshId;
+    this.refreshState = 'loading';
 
     // Close the main menu if opened from it
     if (menuModal?.isActive?.()) menuModal.close();
@@ -2574,16 +2614,21 @@ class DaoModal {
 
     try {
       await daoRepo.refresh({ force: true });
+      this.lastSuccessfulRefreshId = Math.max(this.lastSuccessfulRefreshId, refreshId);
+      if (!this.isActive() || refreshId !== this.openRefreshId) return;
+      this.refreshState = 'ready';
     } catch (e) {
+      if (refreshId !== this.openRefreshId || this.lastSuccessfulRefreshId > refreshId) return;
+      this.refreshState = 'error';
       console.warn('Failed to refresh DAO proposals:', e);
       showToast('Failed to load proposals', 2500, 'error');
-    } finally {
-      this.isLoading = false;
-      this.render();
     }
+
+    this.render();
   }
 
   close() {
+    this.openRefreshId = ++this.refreshSequence;
     this.closeStatusMenu();
     this.modal.classList.remove('active');
     enterFullscreen();
@@ -2604,12 +2649,18 @@ class DaoModal {
   }
 
   async refreshAfterDaoSettlement(pendingTxInfo, outcome) {
+    const refreshId = ++this.refreshSequence;
     let didRefreshDaoData = false;
     try {
       await daoRepo.refresh({ force: true });
       didRefreshDaoData = true;
     } catch (error) {
       console.warn('DAO settlement refresh failed:', error);
+    }
+
+    if (didRefreshDaoData) {
+      this.lastSuccessfulRefreshId = Math.max(this.lastSuccessfulRefreshId, refreshId);
+      if (this.isActive() && refreshId > this.openRefreshId) this.refreshState = 'ready';
     }
 
     // A confirmed action must remain blocked until the UI can render fresh
@@ -2685,8 +2736,9 @@ class DaoModal {
   }
 
   render() {
-    const proposalsActive = daoRepo.getProposalsForUi('active');
-    const proposalsArchived = daoRepo.getProposalsForUi('archived');
+    const hasFreshData = this.refreshState === 'ready';
+    const proposalsActive = hasFreshData ? daoRepo.getProposalsForUi('active') : [];
+    const proposalsArchived = hasFreshData ? daoRepo.getProposalsForUi('archived') : [];
     const currentAddress = getDaoCurrentAccountAddress();
     const now = getTransactionTimestamp();
     const isClaimableFilter = this.selectedFilterKey === DAO_CLAIMABLE_FILTER.key;
@@ -2711,12 +2763,12 @@ class DaoModal {
 
     // Update group toggle labels + selection
     if (this.groupActiveButton) {
-      this.groupActiveButton.textContent = `Active ${proposalsActive.length}`;
+      this.groupActiveButton.textContent = `Active ${hasFreshData ? proposalsActive.length : '—'}`;
       this.groupActiveButton.classList.toggle('active', this.selectedGroupKey !== 'archived');
       this.groupActiveButton.setAttribute('aria-selected', this.selectedGroupKey !== 'archived' ? 'true' : 'false');
     }
     if (this.groupArchivedButton) {
-      this.groupArchivedButton.textContent = `Archived ${proposalsArchived.length}`;
+      this.groupArchivedButton.textContent = `Archived ${hasFreshData ? proposalsArchived.length : '—'}`;
       this.groupArchivedButton.classList.toggle('active', this.selectedGroupKey === 'archived');
       this.groupArchivedButton.setAttribute('aria-selected', this.selectedGroupKey === 'archived' ? 'true' : 'false');
     }
@@ -2729,8 +2781,11 @@ class DaoModal {
 
       if (labelEl) labelEl.textContent = filter.label;
       if (countEl) {
-        countEl.textContent = String(count);
-        countEl.setAttribute('aria-label', `${count} ${filter.label.toLowerCase()} proposals`);
+        countEl.textContent = hasFreshData ? String(count) : '—';
+        countEl.setAttribute(
+          'aria-label',
+          hasFreshData ? `${count} ${filter.label.toLowerCase()} proposals` : `${filter.label} count unavailable`
+        );
       }
       if (option) {
         const selected = filter.key === this.selectedFilterKey;
@@ -2761,9 +2816,12 @@ class DaoModal {
       const sublineEl = lines[2] || null;
       const isArchived = this.selectedGroupKey === 'archived';
 
-      if (this.isLoading) {
+      if (this.refreshState === 'loading') {
         if (headlineEl) headlineEl.textContent = 'Loading proposals…';
         if (sublineEl) sublineEl.textContent = 'Please wait';
+      } else if (this.refreshState === 'error') {
+        if (headlineEl) headlineEl.textContent = 'Failed to load proposals';
+        if (sublineEl) sublineEl.textContent = 'Close and reopen the DAO to retry';
       } else if (isClaimableFilter) {
         if (headlineEl) headlineEl.textContent = 'No claimable proposals found';
         if (sublineEl) sublineEl.textContent = 'You have no voter rewards ready to claim';
@@ -2783,8 +2841,7 @@ class DaoModal {
       const li = document.createElement('li');
       li.classList.add('chat-item', 'dao-proposal-row');
 
-      const titleText = String(p.title || '').trim() || 'Proposal';
-      const rowTitleText = p.number ? `#${p.number}: ${titleText}` : titleText;
+      const rowTitleText = formatDaoProposalTitle(p);
       const title = escapeHtml(rowTitleText);
       const typeLabel = escapeHtml(getDaoTypeLabel(p.proposalType) || 'Proposal');
       const previewHtml = this.renderProposalRowPreview(p);
@@ -2814,7 +2871,7 @@ class DaoModal {
 
     // Show + button when modal is active
     if (this.addButton) {
-      this.addButton.classList.toggle('visible', this.isActive());
+      this.addButton.classList.toggle('visible', hasFreshData && this.isActive());
     }
   }
 
@@ -2832,7 +2889,8 @@ class DaoModal {
     }
 
     if (state === 'review') {
-      const reviewWindow = getDaoProposalReviewWindow(proposal);
+      const now = getTransactionTimestamp();
+      const reviewWindow = getDaoProposalReviewWindow(proposal, now);
 
       if (reviewWindow.canFinalizeReviewResult) {
         const { acceptCount, withholdCount } = getDaoCommitteeReview(proposal);
@@ -2844,19 +2902,29 @@ class DaoModal {
         });
       }
 
+      let reviewLabel = reviewWindow.label;
+      if (reviewWindow.canFinalizeReviewResult) {
+        reviewLabel = 'Ready to finalize';
+      } else if (now < reviewWindow.start) {
+        reviewLabel = formatDaoReadyAtLabel(reviewWindow.start, now) || reviewLabel;
+      } else if (now <= reviewWindow.end) {
+        const endLabel = formatDaoDayOrTime(reviewWindow.end, now);
+        if (endLabel) reviewLabel = `Ends ${endLabel}`;
+      }
+
       chips.push({
-        value: reviewWindow.canFinalizeReviewResult ? 'Ready to finalize' : reviewWindow.label,
+        value: reviewLabel,
         tone: 'neutral',
       });
     } else if (state === 'voting') {
       const now = getTransactionTimestamp();
       const votingWindow = getDaoProposalVotingWindow(proposal, now);
-      const endDate = formatDaoDate(votingWindow.end);
+      const endLabel = formatDaoDayOrTime(votingWindow.end, now);
       const votingEnded = Boolean(votingWindow.end && now > votingWindow.end);
 
-      if (endDate && !votingEnded) {
+      if (endLabel && !votingEnded) {
         chips.push({
-          value: `Ends ${endDate}`,
+          value: `Ends ${endLabel}`,
           tone: 'neutral',
         });
       }
@@ -2886,11 +2954,11 @@ class DaoModal {
       if (applyAction?.rowPreviewLabel) {
         chips.push({
           value: applyAction.rowPreviewLabel,
-          tone: 'neutral',
+          tone: applyAction.canSubmit ? 'accepted' : 'neutral',
         });
       }
     }
-    if (result) {
+    if (result && state !== 'accepted') {
       chips.push({
         value: result.headline,
         tone: result.tone,
@@ -2927,6 +2995,8 @@ function escapeDaoFormAttribute(value) {
   return escapeHtml(value).replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 }
 
+const DAO_REVIEW_START_MAX_MS = new Date(9999, 11, 31, 23, 59, 0, 0).getTime();
+
 class AddProposalModal {
   load() {
     this.modal = document.getElementById('addProposalModal');
@@ -2942,9 +3012,11 @@ class AddProposalModal {
     this.changesList = document.getElementById('addProposalChangesList');
     this.addChangeButton = document.getElementById('addProposalChangeButton');
     this.emergencySelect = document.getElementById('addProposalEmergency');
-    this.startDelayInput = document.getElementById('addProposalStartDelayDays');
+    this.reviewStartButton = document.getElementById('addProposalReviewStartTime');
+    this.reviewStartHelp = document.getElementById('addProposalReviewStartHelp');
     this.gracePeriodInput = document.getElementById('addProposalGracePeriodMs');
     this.gracePeriodHelp = document.getElementById('addProposalGracePeriodHelp');
+    this.gracePeriodLimit = document.getElementById('addProposalGracePeriodLimit');
     this.submitButton = this.form?.querySelector('button[type="submit"]');
     this.resetConfigCache();
 
@@ -2962,6 +3034,7 @@ class AddProposalModal {
       ));
       this.form.addEventListener('input', (event) => this.clearValidationError(event.target));
       this.form.addEventListener('change', (event) => this.clearValidationError(event.target));
+      this.form.addEventListener('click', (event) => this.handleTimingHelpClick(event));
     }
 
     if (this.typeSelect) {
@@ -2973,8 +3046,13 @@ class AddProposalModal {
     if (this.emergencySelect) {
       this.emergencySelect.addEventListener('change', () => this.renderProposalFee());
     }
+    if (this.reviewStartButton) this.reviewStartButton.addEventListener('click', () => this.openReviewStartPicker());
     if (this.gracePeriodInput) {
-      this.gracePeriodInput.addEventListener('input', () => this.renderGracePeriodDefaultHint());
+      this.gracePeriodInput.addEventListener('input', () => {
+        const maxLength = String(DAO_PROPOSAL_GRACE_PERIOD_MAX_MS).length;
+        this.gracePeriodInput.value = this.gracePeriodInput.value.slice(0, maxLength);
+        this.renderGracePeriodLimitHint();
+      });
     }
 
     if (this.optionsList) {
@@ -2992,16 +3070,20 @@ class AddProposalModal {
     enterFullscreen();
     this.resetConfigCache();
     this.proposalFeeUsdStr = null;
-    this.defaultGracePeriodMs = null;
+    this.maxGracePeriodMs = null;
     if (this.titleInput) this.titleInput.value = '';
     if (this.typeSelect) this.typeSelect.value = 'governance';
     if (this.descriptionInput) this.descriptionInput.value = '';
     if (this.emergencySelect) this.emergencySelect.value = 'false';
-    if (this.startDelayInput) this.startDelayInput.value = '0';
-    if (this.gracePeriodInput) this.gracePeriodInput.value = '';
+    this.reviewStartTimeMs = 0;
+    this.renderReviewStartTime();
+    if (this.gracePeriodInput) {
+      this.gracePeriodInput.value = '';
+      this.gracePeriodInput.removeAttribute('max');
+    }
     this.renderOptions(['yes', 'no']);
-    this.renderGracePeriodDefaultHint();
-    this.refreshProposalFee();
+    this.renderGracePeriodLimitHint();
+    this.refreshProposalDefaults();
     this.refreshSelectedConfigOptions();
     setTimeout(() => {
       this.titleInput?.focus();
@@ -3023,7 +3105,7 @@ class AddProposalModal {
     this.networkAccountConfigPromise = null;
     this.protocolConfigPromise = null;
     this.configRequestId = 0;
-    this.proposalFeeRequestId = 0;
+    this.proposalDefaultsRequestId = 0;
   }
 
   getConfigOptions() {
@@ -3064,52 +3146,59 @@ class AddProposalModal {
       : 'Unavailable';
   }
 
-  renderGracePeriodDefaultHint() {
-    const defaultSummary = this.defaultGracePeriodMs === null
-      ? ''
-      : `${formatDaoDurationMsInput(this.defaultGracePeriodMs)} ms (${formatDaoDurationDaysEstimate(this.defaultGracePeriodMs)})`;
-    const currentValue = String(this.gracePeriodInput?.value ?? '').trim();
-    const currentSummary = currentValue
-      ? formatDaoDurationDaysEstimate(currentValue)
-      : '';
-    if (this.gracePeriodInput) {
-      this.gracePeriodInput.placeholder = defaultSummary ? 'Custom ms' : 'Loading default...';
-    }
-    if (this.gracePeriodHelp) {
-      if (currentSummary && defaultSummary) {
-        this.gracePeriodHelp.textContent = `Estimate: ${currentSummary}. Default: ${defaultSummary}`;
-      } else if (currentSummary) {
-        this.gracePeriodHelp.textContent = `Estimate: ${currentSummary}. Default: loading...`;
-      } else if (defaultSummary) {
-        this.gracePeriodHelp.textContent = `Default: ${defaultSummary}`;
-      } else {
-        this.gracePeriodHelp.textContent = 'Default: loading...';
-      }
-    }
+  renderMaximumWarning(input, warning, message) {
+    if (!warning) return;
+    warning.textContent = message;
+    warning.classList.toggle('hidden', !input?.validity.rangeOverflow);
   }
 
-  async refreshProposalFee() {
-    const requestId = ++this.proposalFeeRequestId;
+  renderGracePeriodLimitHint() {
+    const maximumSummary = this.maxGracePeriodMs === null
+      ? ''
+      : `${formatDaoDurationEstimate(this.maxGracePeriodMs)} (${this.maxGracePeriodMs} ms)`;
+    const currentValue = String(this.gracePeriodInput?.value ?? '').trim();
+    const currentSummary = currentValue ? formatDaoDurationEstimate(currentValue) : '';
+    if (this.gracePeriodInput) {
+      this.gracePeriodInput.placeholder = maximumSummary ? 'Custom ms' : 'Loading maximum...';
+    }
+    if (this.gracePeriodHelp) {
+      this.gracePeriodHelp.textContent = currentSummary ? `Estimate: ${currentSummary}` : '';
+    }
+    this.renderMaximumWarning(
+      this.gracePeriodInput,
+      this.gracePeriodLimit,
+      `Maximum: ${maximumSummary}`
+    );
+  }
+
+  async refreshProposalDefaults() {
+    const requestId = ++this.proposalDefaultsRequestId;
     this.renderProposalFee();
 
     try {
-      const { proposalFeeUsdStr, defaultGracePeriodMs } = await this.loadDaoProposalDefaults();
-      if (!this.isActive() || requestId !== this.proposalFeeRequestId) return;
+      const { proposalFeeUsdStr, maxGracePeriodMs } = await this.loadDaoProposalDefaults();
+      if (!this.isActive() || requestId !== this.proposalDefaultsRequestId) return;
       this.proposalFeeUsdStr = proposalFeeUsdStr;
-      this.defaultGracePeriodMs = defaultGracePeriodMs;
-      if (this.gracePeriodInput && !String(this.gracePeriodInput.value || '').trim()) {
-        this.gracePeriodInput.value = formatDaoDurationMsInput(defaultGracePeriodMs);
+      this.maxGracePeriodMs = maxGracePeriodMs;
+      if (this.gracePeriodInput) {
+        this.gracePeriodInput.max = String(maxGracePeriodMs);
+        if (!String(this.gracePeriodInput.value || '').trim()) {
+          this.gracePeriodInput.value = String(maxGracePeriodMs);
+        }
       }
       this.renderProposalFee();
-      this.renderGracePeriodDefaultHint();
+      this.renderGracePeriodLimitHint();
     } catch (error) {
       console.warn('Could not refresh DAO proposal fee:', error);
-      if (!this.isActive() || requestId !== this.proposalFeeRequestId) return;
+      if (!this.isActive() || requestId !== this.proposalDefaultsRequestId) return;
       this.proposalFeeUsdStr = '';
-      this.defaultGracePeriodMs = null;
-      if (this.gracePeriodInput) this.gracePeriodInput.value = '';
+      this.maxGracePeriodMs = null;
+      if (this.gracePeriodInput) {
+        this.gracePeriodInput.value = '';
+        this.gracePeriodInput.removeAttribute('max');
+      }
       this.renderProposalFee();
-      this.renderGracePeriodDefaultHint();
+      this.renderGracePeriodLimitHint();
       showToast('Could not refresh DAO proposal fee', 2500, 'warning');
     }
   }
@@ -3132,7 +3221,7 @@ class AddProposalModal {
   clearValidationError(target) {
     const highlight = this.getValidationHighlight(target);
     highlight?.classList.remove('dao-form-error');
-    if (target?.matches?.('input, select, textarea')) {
+    if (target?.matches?.('input, select, textarea, button')) {
       target.removeAttribute('aria-invalid');
     }
   }
@@ -3148,7 +3237,7 @@ class AddProposalModal {
       highlight.classList.add('dao-form-error');
       highlight.scrollIntoView({ block: 'center', behavior: 'smooth' });
     }
-    if (target?.matches?.('input, select, textarea')) {
+    if (target?.matches?.('input, select, textarea, button')) {
       target.setAttribute('aria-invalid', 'true');
       target.focus({ preventScroll: true });
     }
@@ -3217,24 +3306,29 @@ class AddProposalModal {
     return options;
   }
 
-  async loadDaoProposalDefaults() {
-    const account = await this.fetchNetworkAccountConfig();
-    const fee = account?.current?.dao?.proposalFeeUsdStr;
-    if (fee === undefined || fee === null || String(fee).trim() === '') {
-      throw new Error('Missing DAO proposal fee');
+  async loadDaoProposalDefaults({ refresh = false } = {}) {
+    const account = await this.fetchNetworkAccountConfig({ refresh });
+    const daoConfig = account?.current?.dao;
+    const proposalFeeUsdStr = String(daoConfig?.proposalFeeUsdStr ?? '').trim();
+    if (!proposalFeeUsdStr) throw new Error('Missing DAO proposal fee');
+    const graceDuration = Number(daoConfig?.graceDuration);
+    if (!Number.isSafeInteger(graceDuration) || graceDuration < 0) {
+      throw new Error('Missing DAO maximum grace duration');
     }
-    const graceDuration = Number(account?.current?.dao?.graceDuration);
-    if (!Number.isInteger(graceDuration) || graceDuration < 0) {
-      throw new Error('Missing DAO default grace duration');
-    }
-    return {
-      proposalFeeUsdStr: String(fee).trim(),
-      defaultGracePeriodMs: graceDuration,
+    const proposalDurations = {
+      reviewDuration: Number(daoConfig?.reviewDuration),
+      votingDuration: Number(daoConfig?.votingDuration),
+      claimDuration: Number(daoConfig?.claimDuration),
     };
+    if (Object.values(proposalDurations).some((duration) => !Number.isSafeInteger(duration) || duration < 0)) {
+      throw new Error('Missing DAO proposal lifecycle durations');
+    }
+    const maxGracePeriodMs = Math.min(graceDuration, DAO_PROPOSAL_GRACE_PERIOD_MAX_MS);
+    return { proposalFeeUsdStr, maxGracePeriodMs, proposalDurations };
   }
 
-  async fetchNetworkAccountConfig() {
-    if (!this.networkAccountConfigPromise) {
+  async fetchNetworkAccountConfig({ refresh = false } = {}) {
+    if (refresh || !this.networkAccountConfigPromise) {
       this.networkAccountConfigPromise = queryNetwork(`/account/${NETWORK_ACCOUNT_ID}`)
         .then((result) => result?.account || null);
     }
@@ -3427,21 +3521,89 @@ class AddProposalModal {
     this.renderParameterChanges(rows);
   }
 
-  getDaysValue(input, label) {
-    const value = String(input?.value || '0').trim();
+  getIntegerValue(input, label, unit = '') {
+    const value = String(input?.value ?? '').trim();
+    const unitSuffix = unit ? ` of ${unit}` : '';
+    if (!/^\d+$/.test(value)) {
+      throw this.createValidationError(`${label} must be a non-negative whole number${unitSuffix}`, input);
+    }
     const n = Number(value);
-    if (!Number.isInteger(n) || n < 0) {
-      throw this.createValidationError(`${label} must be a non-negative whole number`, input);
+    if (!Number.isSafeInteger(n)) {
+      throw this.createValidationError(`${label} is too large`, input);
     }
     return n;
   }
 
-  getMillisecondsValue(input, label) {
-    const value = String(input?.value ?? '').trim();
-    if (!value) throw this.createValidationError(`${label} is not loaded yet`, input);
-    const n = Number(value);
-    if (!Number.isInteger(n) || n < 0) {
-      throw this.createValidationError(`${label} must be a non-negative whole number of milliseconds`, input);
+  openReviewStartPicker() {
+    dateTimePickerModal.open({
+      onDone: (timestamp) => {
+        if (timestamp === null) return;
+        this.reviewStartTimeMs = timestamp;
+        this.renderReviewStartTime();
+        this.clearValidationError(this.reviewStartButton);
+      },
+      title: 'Choose Review Start',
+      initialTimestamp: this.reviewStartTimeMs,
+      minTimestamp: getTransactionTimestamp(),
+      maxTimestamp: DAO_REVIEW_START_MAX_MS,
+      allowImmediate: true,
+      selectionFormatter: (timestamp) => {
+        const delayMs = Math.max(0, timestamp - getTransactionTimestamp());
+        return {
+          preview: `Delay: ${formatDaoDurationSummary(delayMs)}`,
+          submitLabel: `Submit: ${delayMs} ms delay`,
+        };
+      },
+      minError: 'Review start time must be in the future',
+      maxError: 'Review start time must be before the year 10000',
+    });
+  }
+
+  handleTimingHelpClick(event) {
+    const helpButton = event.target?.closest?.('[data-dao-timing-help]');
+    if (!helpButton) return;
+
+    event.preventDefault();
+    event.stopPropagation();
+    showToast(helpButton.title, 0, 'info');
+  }
+
+  renderReviewStartTime() {
+    if (!this.reviewStartButton) return;
+    const delayMs = this.reviewStartTimeMs > 0
+      ? Math.max(0, this.reviewStartTimeMs - getTransactionTimestamp())
+      : 0;
+    this.reviewStartButton.textContent = String(delayMs);
+    this.reviewStartButton.title = this.reviewStartTimeMs > 0
+      ? formatDaoTimestamp(this.reviewStartTimeMs)
+      : 'Start now';
+    if (this.reviewStartHelp) {
+      this.reviewStartHelp.textContent = `Delay: ${formatDaoDurationEstimate(delayMs)}`;
+    }
+  }
+
+  getReviewStartTimeMs() {
+    const timestamp = this.reviewStartTimeMs;
+    if (timestamp === 0) return 0;
+    if (!Number.isSafeInteger(timestamp) || Number.isNaN(new Date(timestamp).getTime())) {
+      throw this.createValidationError('Review start time must be a valid date and time', this.reviewStartButton);
+    }
+    if (timestamp < getTransactionTimestamp()) {
+      throw this.createValidationError('Review start time must be in the future', this.reviewStartButton);
+    }
+    if (timestamp > DAO_REVIEW_START_MAX_MS) {
+      throw this.createValidationError('Review start time must be before the year 10000', this.reviewStartButton);
+    }
+    return timestamp;
+  }
+
+  getMillisecondsValue(input, label, maximumMs) {
+    if (!Number.isSafeInteger(maximumMs) || maximumMs < 0) {
+      throw this.createValidationError(`${label} maximum is not loaded yet`, input);
+    }
+    const n = this.getIntegerValue(input, label, 'milliseconds');
+    if (n > maximumMs) {
+      throw this.createValidationError(`${label} must not exceed ${maximumMs} milliseconds`, input);
     }
     return n;
   }
@@ -3530,8 +3692,8 @@ class AddProposalModal {
     try {
       const options = this.getValidatedOptions();
       const changes = this.getValidatedChanges();
-      const startDelayDays = this.getDaysValue(this.startDelayInput, 'Start delay');
-      const gracePeriodMs = this.getMillisecondsValue(this.gracePeriodInput, 'Grace period');
+      const reviewStartTimeMs = this.getReviewStartTimeMs();
+      const gracePeriodMs = this.getMillisecondsValue(this.gracePeriodInput, 'Grace period', this.maxGracePeriodMs);
       const emergency = this.emergencySelect?.value === 'true';
       if (!emergency && !this.proposalFeeUsdStr) {
         throw this.createValidationError('Current DAO proposal fee is not loaded yet', this.proposalFeeInput);
@@ -3546,8 +3708,9 @@ class AddProposalModal {
         options,
         changes,
         proposalFeeUsdStr: this.proposalFeeUsdStr,
-        startDelayDays,
+        reviewStartTimeMs,
         gracePeriodMs,
+        maxGracePeriodMs: this.maxGracePeriodMs,
       });
       confirmProposalModal.open(draft);
     } catch (e) {
@@ -3560,35 +3723,38 @@ const addProposalModal = new AddProposalModal();
 
 function formatDaoDurationSummary(ms) {
   const n = Number(ms || 0);
-  if (!n) return '0 ms (now)';
-  const dayMs = 24 * 60 * 60 * 1000;
-  const days = n / dayMs;
-  const human = Number.isInteger(days)
-    ? `${days} day${days === 1 ? '' : 's'}`
-    : `${n} ms`;
-  return `${n} ms (${human})`;
+  if (!n) return '0 sec (0 ms)';
+  return `${formatDaoDurationEstimate(n)} (${n} ms)`;
 }
 
-function formatDaoDurationMsInput(ms) {
-  const n = Number(ms || 0);
-  if (!Number.isInteger(n) || n < 0) return '';
-  return String(n);
-}
-
-function formatDaoDurationDaysEstimate(ms) {
+function formatDaoDurationEstimate(ms) {
   const n = Number(ms);
   if (!Number.isFinite(n) || n < 0) return '';
-  const days = n / (24 * 60 * 60 * 1000);
-  const value = days === 0
-    ? '0'
-    : days >= 1
-    ? String(Number(days.toFixed(4)))
-    : String(Number(days.toPrecision(3)));
-  return `about ${value} day${value === '1' ? '' : 's'}`;
+  if (n === 0) return '0 sec';
+
+  const units = [
+    ['day', DAO_PROPOSAL_DAY_MS],
+    ['hr', 60 * 60 * 1000],
+    ['min', 60 * 1000],
+    ['sec', 1000],
+  ];
+  let remainingMs = n;
+  const parts = [];
+
+  for (const [unit, unitMs] of units) {
+    const value = Math.floor(remainingMs / unitMs);
+    if (value === 0) continue;
+    parts.push(`${value} ${unit}${unit === 'day' && value !== 1 ? 's' : ''}`);
+    remainingMs -= value * unitMs;
+    if (parts.length === 3) break;
+  }
+
+  if (parts.length === 0) return `${n} ms`;
+  return parts.join(' ');
 }
 
 function renderDaoProposalHeading(proposal) {
-  const title = proposal.title || (proposal.number ? `Proposal #${proposal.number}` : 'Proposal');
+  const title = formatDaoProposalTitle(proposal);
   const emergencyLabel = proposal.emergency === true ? 'Emergency proposal' : 'Standard proposal';
   const emergencyClass = proposal.emergency === true ? ' proposal-type-indicator--emergency' : '';
   const descriptionHtml = proposal.description
@@ -3770,10 +3936,13 @@ class ConfirmProposalModal {
     let loadingToastId = showToast('Submitting proposal...', 0, 'loading');
 
     try {
+      const { maxGracePeriodMs, proposalDurations } = await addProposalModal.loadDaoProposalDefaults({ refresh: true });
       const result = await daoRepo.createProposal({
         draft: this.currentDraft,
         timestamp: getTransactionTimestamp(),
         networkId: network?.netid || '',
+        maxGracePeriodMs,
+        proposalDurations,
         submitTransaction: async (transaction) => {
           if (!myAccount?.keys) throw new Error('Wallet keys unavailable');
           const txid = await signObj(transaction, myAccount.keys);
@@ -3837,6 +4006,9 @@ class ConfirmProposalModal {
     }
 
     const tx = draft.transaction;
+    const reviewDelayIfSubmittedNowMs = draft.reviewStartTimeMs > 0
+      ? Math.max(0, draft.reviewStartTimeMs - getTransactionTimestamp())
+      : 0;
     this.setTitle('Review Proposal');
     this.content.innerHTML = [
       renderDaoProposalHeading(tx),
@@ -3848,7 +4020,10 @@ class ConfirmProposalModal {
         ['Initial state', 'Review after signing'],
       ]),
       renderDaoProposalSection('Review Timeline', [
-        ['Review starts', formatDaoDurationSummary(draft.startDelayMs)],
+        ['Scheduled review start', draft.reviewStartTimeMs
+          ? formatDaoTimestamp(draft.reviewStartTimeMs)
+          : 'Start now'],
+        ['Time until start if submitted now', formatDaoDurationSummary(reviewDelayIfSubmittedNowMs)],
         ['Grace period', formatDaoDurationSummary(tx.gracePeriod)],
       ]),
       '<p class="proposal-info-muted">The proposal fee is derived from DAO params and seeds the voter reward pool for regular proposals. Signing submits this proposal for review.</p>',
@@ -3875,6 +4050,11 @@ const DAO_VOTE_WEIGHT_MAX = 1_000_000;
 const DAO_VOTE_WEIGHT_PRECISION = 1_000_000_000_000;
 const DAO_VOTE_WEIGHT_PRECISION_BIGINT = 1_000_000_000_000n;
 const DAO_CLAIM_REWARD_PRECISION = 10n ** 18n;
+const DAO_VOTE_HELP = {
+  weight: 'Weight is a ratio. 1 / 1 splits evenly; 3 / 1 gives 75% / 25%.',
+  voteThreshold: 'Minimum wallet balance required to vote on this proposal.',
+  minimumSpend: 'Minimum LIB you must spend for a valid vote on this proposal.',
+};
 
 function getDaoCurrentAccountAddress() {
   return myAccount?.keys?.address ? longAddress(myAccount.keys.address) : '';
@@ -4217,6 +4397,7 @@ function getDaoProposalApplyLifecycleAction(
         ? `Apply becomes available after the grace period ends: ${eligibleAt}.`
         : 'Apply timing is unavailable until the proposal includes grace-period timing.',
       false,
+      formatDaoReadyAtLabel(applyWindow.eligibleAt, now),
     );
   }
 
@@ -4407,6 +4588,14 @@ function getDaoUsdAsLibWei(usdValue) {
   }
 }
 
+// Snapshotted proposal USD rule → LIB display. null means the requirement does not apply.
+function formatDaoProposalVoteRequirementLib(usdValue) {
+  if (!(Number(usdValue || 0) > 0)) return null;
+  const weiAmount = getDaoUsdAsLibWei(usdValue);
+  if (weiAmount === null) return 'Unavailable';
+  return formatDaoLibWei(weiAmount);
+}
+
 function floorDaoVoteWeightEstimate(value) {
   const n = Number(value);
   if (!Number.isFinite(n) || n < 0) return null;
@@ -4466,6 +4655,7 @@ class ProposalInfoModal {
     if (this.submitButton) this.submitButton.addEventListener('click', () => this.handleCommitteeSubmit());
     if (this.reviewResultButton) this.reviewResultButton.addEventListener('click', () => this.handleReviewResultSubmit());
     if (this.lifecycleActionSection) this.lifecycleActionSection.addEventListener('click', (event) => this.handleLifecycleActionClick(event));
+    if (this.voteActionSection) this.voteActionSection.addEventListener('click', (event) => this.handleVoteHelpClick(event));
     if (this.voteSpendInput) this.voteSpendInput.addEventListener('input', () => this.handleVoteSpendInput());
     if (this.voteOptions) this.voteOptions.addEventListener('input', (event) => this.handleVoteWeightInput(event));
     if (this.voteSubmitButton) this.voteSubmitButton.addEventListener('click', () => this.handleVoteSubmit());
@@ -5162,13 +5352,25 @@ class ProposalInfoModal {
       this.voteSpendInput.value = this.voteSpendLib;
     }
     if (this.voteOptions) {
+      const totalWeight = this.getVoteWeightsTotal();
       this.voteOptions.innerHTML = `
         <div class="proposal-vote-options-header">
           <span>Option</span>
-          <span>Allocation</span>
+          <span>%</span>
+          <span class="proposal-vote-weight-label">
+            Weight
+            <button
+              type="button"
+              class="toll-info-icon proposal-vote-help"
+              data-icon="info"
+              data-vote-help
+              title="${escapeDaoFormAttribute(DAO_VOTE_HELP.weight)}"
+              aria-label="About Weight"
+            ></button>
+          </span>
         </div>
-        ${options.map((option, index) => this.renderVoteOption(option, index)).join('')}
-        <div class="proposal-vote-options-help">Allocation is a ratio. 1 / 1 splits evenly; 3 / 1 gives 75% / 25%.</div>
+        ${options.map((option, index) => this.renderVoteOption(option, index, totalWeight)).join('')}
+        ${this.renderVoteRequirements(proposal)}
       `;
     }
 
@@ -5181,11 +5383,61 @@ class ProposalInfoModal {
     this.updateSubmitButtons();
   }
 
-  renderVoteOption(option, index) {
+  renderVoteRequirements(proposal) {
+    const rows = [
+      {
+        help: DAO_VOTE_HELP.voteThreshold,
+        label: 'Vote Threshold',
+        value: formatDaoProposalVoteRequirementLib(proposal.voteThresholdUsdStr),
+      },
+      {
+        help: DAO_VOTE_HELP.minimumSpend,
+        label: 'Minimum Spend',
+        value: formatDaoProposalVoteRequirementLib(proposal.minimumSpendUsdStr),
+      },
+    ].filter((row) => row.value !== null);
+
+    if (rows.length === 0) return '';
+
+    return `
+      <div class="proposal-vote-requirements" aria-label="Vote requirements">
+        ${rows.map((row) => `
+          <span class="proposal-vote-requirement-label">
+            ${escapeHtml(row.label)}
+            <button
+              type="button"
+              class="toll-info-icon proposal-vote-help"
+              data-icon="info"
+              data-vote-help
+              title="${escapeDaoFormAttribute(row.help)}"
+              aria-label="${escapeDaoFormAttribute(`About ${row.label}`)}"
+            ></button>
+          </span>
+          <span class="proposal-vote-requirement-value">${escapeHtml(row.value)}</span>
+        `).join('')}
+      </div>
+    `;
+  }
+
+  handleVoteHelpClick(event) {
+    const helpButton = event.target?.closest?.('[data-vote-help]');
+    if (!helpButton) return;
+
+    event.preventDefault();
+    event.stopPropagation();
+    showToast(helpButton.title, 0, 'info');
+  }
+
+  renderVoteOption(option, index, totalWeight) {
     const weight = this.voteWeights[index] || 0;
     return `
       <label class="proposal-vote-option">
         <span>${escapeHtml(option)}</span>
+        <span
+          class="proposal-vote-weight-percent"
+          data-vote-weight-percent="${index}"
+          aria-label="${escapeDaoFormAttribute(`${option} percent`)}"
+        >${escapeHtml(this.formatCountPercent(weight, totalWeight))}</span>
         <input
           type="number"
           class="form-control"
@@ -5194,7 +5446,7 @@ class ProposalInfoModal {
           step="1"
           inputmode="numeric"
           placeholder="0"
-          aria-label="${escapeDaoFormAttribute(`${option} allocation`)}"
+          aria-label="${escapeDaoFormAttribute(`${option} weight`)}"
           data-vote-option-index="${index}"
           value="${escapeDaoFormAttribute(String(weight))}"
         >
@@ -5209,7 +5461,24 @@ class ProposalInfoModal {
     if (!Number.isInteger(index) || index < 0 || index >= this.voteWeights.length) return;
     this.voteWeights[index] = this.normalizeVoteWeight(input.value);
     input.value = String(this.voteWeights[index]);
+    this.updateVoteWeightPercents();
     this.updateVotePreview(this.getCurrentProposal());
+  }
+
+  updateVoteWeightPercents() {
+    const percentEls = this.voteOptions?.querySelectorAll('[data-vote-weight-percent]');
+    if (!percentEls?.length) return;
+
+    const totalWeight = this.getVoteWeightsTotal();
+    for (const el of percentEls) {
+      const index = Number(el.dataset.voteWeightPercent);
+      if (!Number.isInteger(index) || index < 0 || index >= this.voteWeights.length) continue;
+      el.textContent = this.formatCountPercent(this.voteWeights[index] || 0, totalWeight);
+    }
+  }
+
+  getVoteWeightsTotal() {
+    return this.voteWeights.reduce((sum, weight) => sum + weight, 0);
   }
 
   handleVoteSpendInput() {
@@ -5223,6 +5492,10 @@ class ProposalInfoModal {
     return Math.min(n, DAO_VOTE_WEIGHT_MAX);
   }
 
+  hasStartedVoteInput() {
+    return this.voteWeights.some((weight) => weight > 0) || this.voteSpendLib.trim() !== '';
+  }
+
   updateVotePreview(proposal) {
     if (!this.votePreview || !proposal) {
       this.canSubmitVote = false;
@@ -5231,6 +5504,7 @@ class ProposalInfoModal {
     }
 
     const submission = this.getVoteSubmission(proposal);
+    this.votePreview.classList.toggle('proposal-vote-preview--idle', !this.hasStartedVoteInput());
     if (!submission.ok) {
       this.canSubmitVote = false;
       this.updateSubmitButtons();
@@ -5307,7 +5581,7 @@ class ProposalInfoModal {
       return { ok: false, message: 'Wallet address unavailable.' };
     }
 
-    const totalWeight = this.voteWeights.reduce((sum, weight) => sum + weight, 0);
+    const totalWeight = this.getVoteWeightsTotal();
     if (totalWeight <= 0) {
       return { ok: false, message: 'Enter at least one positive option weight.' };
     }
@@ -8553,11 +8827,7 @@ class ClockTimer {
    * @returns {string} Formatted current time string
    */
   formatCurrentTime() {
-    const now = getCorrectedTimestamp();
-    const localMs = now - timeSkew;
-    const date = new Date(localMs);
-    
-    return date.toLocaleTimeString(undefined, {
+    return new Date().toLocaleTimeString(undefined, {
       hour: 'numeric',
       minute: '2-digit',
       second: '2-digit',
@@ -13360,7 +13630,7 @@ function markConnectivityDependentElements() {
     // Call schedule modals
     '#callScheduleNowBtn',
     '#openCallScheduleDateBtn',
-    '#confirmCallSchedule',
+    '#confirmDateTimePicker',
 
     // Message context menu (disable all except 'Delete for me' and 'Copy' and 'Join')
     '.message-context-menu .context-menu-option:not([data-action="delete"]):not([data-action="copy"]):not([data-action="join"]):not([data-action="location"])',
@@ -24491,7 +24761,7 @@ class ChatModal {
 
   /**
    * Opens a lightweight chooser to select calling now or scheduling for later.
-   * Returns 0 for immediate call or a corrected future timestamp (ms since epoch) using timeSkew.
+   * Returns 0 for immediate call or an absolute future Unix timestamp in milliseconds.
    * Returns null if user cancels.
    * @returns {Promise<number|null>}
    */
@@ -24502,7 +24772,7 @@ class ChatModal {
           if (choice === null) return resolve(null);
           if (choice === 'now') return resolve(0);
           // schedule
-          callScheduleDateModal.open((dateTs) => {
+          openCallScheduleDatePicker((dateTs) => {
             if (dateTs === null) {
               // back to choice
               return openChoice();
@@ -24564,8 +24834,7 @@ class ChatModal {
         if (chosenCallTime === 0) {
           window.open(callUrl + `${callUrlParams}"${myAccount.username}"`, '_blank');
         } else {
-          const when = new Date(chosenCallTime - timeSkew); // convert back to local wall-clock for display
-          showToast(`Call scheduled for ${when.toLocaleString()}`, 3000, 'success');
+          showToast(`Call scheduled for ${this.formatLocalDateTime(chosenCallTime)}`, 3000, 'success');
         }
       }
       
@@ -24623,7 +24892,7 @@ class ChatModal {
       const callObj = {
         type: 'call',
         url: meetUrl,
-        // callTime: 0 for immediate, or corrected future timestamp (ms since epoch)
+        // callTime: 0 for immediate, or an absolute future Unix timestamp in milliseconds
         callTime: normalizedCallTime
       };
 
@@ -25216,9 +25485,8 @@ class ChatModal {
   }
 
   formatLocalDateTime(ts) {
-    const localMs = (typeof ts === 'number' ? ts : Number(ts)) - timeSkew;
-    const minute = 60 * 1000;
-    const roundedMs = Math.round(localMs / minute) * minute;
+    const minuteMs = 60 * 1000;
+    const roundedMs = Math.round(Number(ts) / minuteMs) * minuteMs;
     return new Date(roundedMs).toLocaleString(undefined, {
       year: 'numeric',
       month: 'numeric',
@@ -27424,11 +27692,12 @@ function roundToMinuteMs(ms) {
   return Math.round(ms / 60000) * 60000;
 }
 
-function formatTimeInTimeZone(ms, tz) {
+function formatTimeInTimeZone(ms, tz, withDate = false) {
   if (!tz || !ms) return '';
   try {
     const fmt = new Intl.DateTimeFormat(undefined, {
       timeZone: tz,
+      ...(withDate ? { year: 'numeric', month: 'short', day: '2-digit' } : {}),
       hour: '2-digit',
       minute: '2-digit',
       timeZoneName: 'short'
@@ -27437,6 +27706,10 @@ function formatTimeInTimeZone(ms, tz) {
   } catch (e) {
     return '';
   }
+}
+
+function formatDateTimeInTimeZone(ms, tz) {
+  return formatTimeInTimeZone(ms, tz, true);
 }
 
 /**
@@ -27528,119 +27801,99 @@ class CallScheduleChoiceModal {
 }
 
 /**
- * Call Schedule Date Modal
- * Lets user pick date/time and submit
+ * Shared date/time picker used by scheduling flows.
  */
-class CallScheduleDateModal {
+class DateTimePickerModal {
   constructor() {
     this.modal = null;
+    this.title = null;
     this.form = null;
     this.dateInput = null;
     this.hourSelect = null;
     this.minuteSelect = null;
     this.ampmSelect = null;
-    this.recipientTime = null;
+    this.preview = null;
     this.submitBtn = null;
+    this.immediateBtn = null;
     this.cancelBtn = null;
     this.closeBtn = null;
-    this.onDone = null; // function(timestamp|null)
-    this.DEFAULT_OFFSET_MINUTES = 0;
-    this.maxDaysOut = 400;
-    this.clockTimer = new ClockTimer('callScheduleCurrentTime');
+    this.options = null;
+    this.returnFocus = null;
+    this.clockTimer = new ClockTimer('dateTimePickerCurrentTime');
     this._onCancel = this._onCancel.bind(this);
     this._onInputChange = this._onInputChange.bind(this);
   }
 
   load() {
-    this.modal = document.getElementById('callScheduleDateModal');
+    this.modal = document.getElementById('dateTimePickerModal');
     if (!this.modal) return;
-    this.form = document.getElementById('callScheduleDateForm');
-    this.dateInput = document.getElementById('callScheduleDate');
-    this.hourSelect = document.getElementById('callScheduleHour');
-    this.minuteSelect = document.getElementById('callScheduleMinute');
-    this.ampmSelect = document.getElementById('callScheduleAmPm');
-    this.recipientTime = document.getElementById('callScheduleConvertedTime');
-    this.submitBtn = document.getElementById('confirmCallSchedule');
-    this.cancelBtn = document.getElementById('cancelCallScheduleDate');
-    this.closeBtn = document.getElementById('closeCallScheduleDateModal');
+    this.title = document.getElementById('dateTimePickerModalTitle');
+    this.form = document.getElementById('dateTimePickerForm');
+    this.dateInput = document.getElementById('dateTimePickerDate');
+    this.hourSelect = document.getElementById('dateTimePickerHour');
+    this.minuteSelect = document.getElementById('dateTimePickerMinute');
+    this.ampmSelect = document.getElementById('dateTimePickerAmPm');
+    this.preview = document.getElementById('dateTimePickerPreview');
+    this.submitBtn = document.getElementById('confirmDateTimePicker');
+    this.immediateBtn = document.getElementById('clearDateTimePicker');
+    this.cancelBtn = document.getElementById('cancelDateTimePicker');
+    this.closeBtn = document.getElementById('closeDateTimePickerModal');
 
-    const wrappedConfirm = withButtonCooldown(this.submitBtn, BUTTON_COOLDOWN_MS, null, async () => {
-      this._submitValue();
-    });
+    this._populateTimeOptions();
+
+    const wrappedConfirm = withButtonCooldown(this.submitBtn, BUTTON_COOLDOWN_MS, null, async () => this._submitValue());
     if (this.form) this.form.addEventListener('submit', wrappedConfirm);
-    if (this.submitBtn) this.submitBtn.addEventListener('click', wrappedConfirm);
+    if (this.immediateBtn) this.immediateBtn.addEventListener('click', () => this._closeWith(0));
     if (this.cancelBtn) this.cancelBtn.addEventListener('click', this._onCancel);
     if (this.closeBtn) this.closeBtn.addEventListener('click', this._onCancel);
-
-    // Live update of converted time preview (single listener for all inputs)
     if (this.form) this.form.addEventListener('change', this._onInputChange);
   }
 
-  open(onDone) {
-    this.onDone = onDone;
-    const defaultDate = this._getDefaultDate();
-    // Populate hours 1-12 (12-hour format)
-    if (this.hourSelect) {
-      this.hourSelect.innerHTML = '';
-      for (let h = 1; h <= 12; h++) {
-        const opt = document.createElement('option');
-        opt.value = this._pad2(h);
-        opt.textContent = this._pad2(h);
-        this.hourSelect.appendChild(opt);
-      }
-      const hour24 = defaultDate.getHours();
-      const hour12 = ((hour24 % 12) === 0) ? 12 : (hour24 % 12);
-      this.hourSelect.value = this._pad2(hour12);
-    }
-    // Set AM/PM
-    if (this.ampmSelect) {
-      const hour24 = defaultDate.getHours();
-      this.ampmSelect.value = hour24 >= 12 ? 'PM' : 'AM';
-    }
-    // Populate 5-minute list starting with 00, going to 55
-    if (this.minuteSelect) {
-      this.minuteSelect.innerHTML = '';
-      const defaultMinute = defaultDate.getMinutes();
-      
-      // Always populate 00, 05, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55
-      for (let i = 0; i < 12; i++) {
-        const m = i * 5;
-        const opt = document.createElement('option');
-        opt.value = this._pad2(m);
-        opt.textContent = this._pad2(m);
-        this.minuteSelect.appendChild(opt);
-      }
-      
-      // Pre-select the closest future time (round up to next 5-minute interval)
-      const roundedMinute = Math.ceil(defaultMinute / 5) * 5;
-      this.minuteSelect.value = this._pad2(roundedMinute % 60);
-      
-      // Handle hour rollover when minute rounds to 60
-      if (roundedMinute === 60 && this.hourSelect && this.ampmSelect) {
-        const currentHour12 = parseInt(this.hourSelect.value);
-        const isAM = this.ampmSelect.value === 'AM';
-        
-        if (currentHour12 === 12) {
-          this.hourSelect.value = '01';
-          this.ampmSelect.value = isAM ? 'PM' : 'AM';
-        } else {
-          this.hourSelect.value = this._pad2(currentHour12 + 1);
-        }
-      }
-    }
-    // Set local date input
-    if (this.dateInput) {
-      const max = new Date();
-      max.setDate(max.getDate() + this.maxDaysOut);
-      this.dateInput.max = this._formatDateInput(max);
+  open({
+    onDone,
+    title = 'Select Date and Time',
+    initialTimestamp = 0,
+    minTimestamp = 0,
+    maxTimestamp = 0,
+    allowImmediate = false,
+    selectionFormatter = null,
+    minError = 'Please choose a date and time in the future',
+    maxError = 'Selected date and time is too far in the future',
+  }) {
+    if (typeof onDone !== 'function') throw new Error('Date/time picker callback is required');
+    this.returnFocus = document.activeElement;
+    this.options = {
+      onDone,
+      minTimestamp,
+      maxTimestamp,
+      selectionFormatter,
+      minError,
+      maxError,
+    };
 
-      this.dateInput.value = this._formatDateInput(defaultDate);
+    if (this.title) this.title.textContent = title;
+    if (this.immediateBtn) this.immediateBtn.classList.toggle('hidden', !allowImmediate);
+
+    const currentMinTimestamp = typeof minTimestamp === 'function' ? minTimestamp() : minTimestamp;
+    const defaultTimestamp = initialTimestamp > 0
+      ? initialTimestamp
+      : Math.max(Date.now(), currentMinTimestamp);
+    const defaultDate = new Date(this._roundUpToNextFiveMinutes(defaultTimestamp));
+    this._setFormValue(defaultDate);
+
+    if (this.dateInput) {
+      this.dateInput.min = currentMinTimestamp > 0
+        ? this._formatDateInput(new Date(currentMinTimestamp))
+        : '';
+      this.dateInput.max = maxTimestamp > 0
+        ? this._formatDateInput(new Date(maxTimestamp))
+        : '';
     }
+
     this.modal?.classList.add('active');
     this.clockTimer.start();
-
-    // Render the initial converted time preview
-    this._updateConvertedTimePreview();
+    this._updatePreview();
+    requestAnimationFrame(() => this.dateInput?.focus());
   }
 
   _onCancel() {
@@ -27648,10 +27901,33 @@ class CallScheduleDateModal {
   }
 
   _onInputChange() {
-    this._updateConvertedTimePreview();
+    this._updatePreview();
   }
 
-  _getSelectedCorrectedTimestamp() {
+  _populateTimeOptions() {
+    if (this.hourSelect) {
+      for (let hour = 1; hour <= 12; hour++) {
+        this.hourSelect.add(new Option(this._pad2(hour), this._pad2(hour)));
+      }
+    }
+    if (this.minuteSelect) {
+      for (let minute = 0; minute < 60; minute += 5) {
+        this.minuteSelect.add(new Option(this._pad2(minute), this._pad2(minute)));
+      }
+    }
+  }
+
+  _setFormValue(date) {
+    if (this.dateInput) this.dateInput.value = this._formatDateInput(date);
+    if (this.hourSelect) {
+      const hour12 = date.getHours() % 12 || 12;
+      this.hourSelect.value = this._pad2(hour12);
+    }
+    if (this.minuteSelect) this.minuteSelect.value = this._pad2(date.getMinutes());
+    if (this.ampmSelect) this.ampmSelect.value = date.getHours() >= 12 ? 'PM' : 'AM';
+  }
+
+  _getSelectedTimestamp() {
     if (!this.dateInput || !this.hourSelect || !this.minuteSelect || !this.ampmSelect) return 0;
     const dateVal = this.dateInput.value;
     const hourVal = this.hourSelect.value;
@@ -27666,93 +27942,55 @@ class CallScheduleDateModal {
 
     const hour24 = this._convert12To24(hour12, ampmVal);
     const { year, month, day } = parsed;
-    const localMs = new Date(year, month - 1, day, hour24, minute, 0, 0).getTime();
-    return localMs + timeSkew;
+    const selectedDate = new Date(year, month - 1, day, hour24, minute, 0, 0);
+    if (
+      selectedDate.getFullYear() !== year
+      || selectedDate.getMonth() !== month - 1
+      || selectedDate.getDate() !== day
+      || selectedDate.getHours() !== hour24
+      || selectedDate.getMinutes() !== minute
+    ) {
+      return NaN;
+    }
+    return selectedDate.getTime();
   }
 
-  _updateConvertedTimePreview() {
-    if (!this.recipientTime) return;
-
-    const tz = getActiveChatContactTimeZone();
-    const tsRaw = this._getSelectedCorrectedTimestamp();
-    // Display-only: stabilize at the chosen minute even if timeSkew includes seconds.
-    const ts = tsRaw ? roundToMinuteMs(tsRaw) : 0;
-
-    if (!tz || !ts) {
-      this.recipientTime.textContent = '';
-      this.recipientTime.style.display = 'none';
-      return;
-    }
-
-    const s = (() => {
-      if (!tz || !ts) return '';
-      try {
-        const fmt = new Intl.DateTimeFormat(undefined, {
-          timeZone: tz,
-          year: 'numeric',
-          month: 'short',
-          day: '2-digit',
-          hour: '2-digit',
-          minute: '2-digit',
-          timeZoneName: 'short'
-        });
-        return fmt.format(new Date(ts));
-      } catch (e) {
-        return '';
-      }
-    })();
-
-    if (!s) {
-      this.recipientTime.textContent = '';
-      this.recipientTime.style.display = 'none';
-      return;
-    }
-
-    this.recipientTime.textContent = `Recipient time: ${s}`;
-    this.recipientTime.style.display = '';
+  _updatePreview() {
+    if (!this.preview) return;
+    const timestamp = this._getSelectedTimestamp();
+    const selection = timestamp && typeof this.options?.selectionFormatter === 'function'
+      ? this.options.selectionFormatter(timestamp)
+      : null;
+    const preview = selection?.preview || '';
+    this.preview.textContent = preview;
+    this.preview.style.display = preview ? '' : 'none';
+    if (this.submitBtn) this.submitBtn.textContent = selection?.submitLabel || 'Submit';
   }
 
   _submitValue() {
-    if (!this.dateInput || !this.hourSelect || !this.minuteSelect || !this.ampmSelect) return;
-    const dateVal = this.dateInput.value;
-    const hourVal = this.hourSelect.value;
-    const minuteVal = this.minuteSelect.value;
-    const ampmVal = this.ampmSelect.value;
-    if (!dateVal || hourVal === '' || minuteVal === '') {
-      showToast('Please pick a date and time', 0, 'error');
+    const timestamp = this._getSelectedTimestamp();
+    if (Number.isNaN(timestamp)) {
+      showToast('That local time does not exist. Choose another time.', 0, 'error');
       return;
     }
-    const parsed = this._parseDateInput(dateVal);
-    const hour12 = Number(hourVal);
-    const minute = Number(minuteVal);
-    if (!parsed || Number.isNaN(hour12) || Number.isNaN(minute)) {
+    if (!timestamp || !Number.isSafeInteger(timestamp)) {
       showToast('Invalid date/time selected', 0, 'error');
       return;
     }
-    const hour24 = this._convert12To24(hour12, ampmVal);
-    const { year, month, day } = parsed;
-    const localMs = new Date(year, month - 1, day, hour24, minute, 0, 0).getTime();
-    const corrected = localMs + timeSkew;
-    const nowCorrected = getCorrectedTimestamp();
-    const minAllowed = nowCorrected - 5 * 60 * 1000;
-
-    // Max 400 days out
-    const d = new Date(nowCorrected);
-    d.setDate(d.getDate() + this.maxDaysOut);
-    const maxAllowed = d.getTime();
-
-    if (corrected < minAllowed) {
-      showToast('Please choose a date or time in the future', 0, 'error');
+    const minTimestamp = typeof this.options?.minTimestamp === 'function'
+      ? this.options.minTimestamp()
+      : this.options?.minTimestamp;
+    if (minTimestamp > 0 && timestamp < minTimestamp) {
+      showToast(this.options.minError, 0, 'error');
       return;
     }
-    if (corrected > maxAllowed) {
-      showToast(`Please choose a date within the next ${this.maxDaysOut} days`, 0, 'error');
+    if (this.options?.maxTimestamp > 0 && timestamp > this.options.maxTimestamp) {
+      showToast(this.options.maxError, 0, 'error');
       return;
     }
-    this._closeWith(corrected);
+    this._closeWith(timestamp);
   }
 
-  // Helpers
   _pad2(n) { return n < 10 ? '0' + n : '' + n; }
 
   _formatDateInput(d) {
@@ -27760,23 +27998,8 @@ class CallScheduleDateModal {
   }
 
   _roundUpToNextFiveMinutes(ms) {
-    const d = new Date(ms);
-    d.setSeconds(0, 0);
-    const minutes = d.getMinutes();
-    const rounded = Math.ceil(minutes / 5) * 5;
-    if (rounded === 60) {
-      d.setHours(d.getHours() + 1, 0, 0, 0);
-    } else {
-      d.setMinutes(rounded, 0, 0);
-    }
-    return d.getTime();
-  }
-
-  _getDefaultDate() {
-    const nowMs = Date.now();
-    const offsetMs = this.DEFAULT_OFFSET_MINUTES * 60 * 1000;
-    const defaultMs = this._roundUpToNextFiveMinutes(nowMs + offsetMs);
-    return new Date(defaultMs);
+    const intervalMs = 5 * 60 * 1000;
+    return Math.ceil(ms / intervalMs) * intervalMs;
   }
 
   _parseDateInput(val) {
@@ -27796,20 +28019,42 @@ class CallScheduleDateModal {
   _closeWith(value) {
     this.clockTimer.stop();
     if (this.modal) this.modal.classList.remove('active');
-    const cb = this.onDone;
-    this.onDone = null;
-
-    // Hide converted time preview when closing
-    if (this.recipientTime) {
-      this.recipientTime.textContent = '';
-      this.recipientTime.style.display = 'none';
+    const onDone = this.options?.onDone;
+    const returnFocus = this.returnFocus;
+    this.options = null;
+    this.returnFocus = null;
+    if (this.preview) {
+      this.preview.textContent = '';
+      this.preview.style.display = 'none';
     }
-    if (cb) cb(value);
+    if (onDone) onDone(value);
+    returnFocus?.focus();
   }
 }
 
+const CALL_SCHEDULE_MAX_DAYS = 400;
 const callScheduleChoiceModal = new CallScheduleChoiceModal();
-const callScheduleDateModal = new CallScheduleDateModal();
+const dateTimePickerModal = new DateTimePickerModal();
+
+function openCallScheduleDatePicker(onDone) {
+  const now = getCorrectedTimestamp();
+  const maximum = new Date(now);
+  maximum.setDate(maximum.getDate() + CALL_SCHEDULE_MAX_DAYS);
+  const recipientTimeZone = getActiveChatContactTimeZone();
+
+  dateTimePickerModal.open({
+    onDone,
+    title: 'Schedule Call',
+    initialTimestamp: now,
+    minTimestamp: () => getCorrectedTimestamp() - 5 * 60 * 1000,
+    maxTimestamp: maximum.getTime(),
+    selectionFormatter: (timestamp) => {
+      const formatted = formatDateTimeInTimeZone(roundToMinuteMs(timestamp), recipientTimeZone);
+      return { preview: formatted ? `Recipient time: ${formatted}` : '' };
+    },
+    maxError: `Please choose a date within the next ${CALL_SCHEDULE_MAX_DAYS} days`,
+  });
+}
 
 /**
  * Failed Message Context Menu Class
@@ -29396,6 +29641,7 @@ const createAccountModal = new CreateAccountModal();
  */
 class SendAssetFormModal {
   constructor() {
+    this.mode = 'liberdus';
     this.username = null;
     this.sendAssetFormModalCheckTimeout = null;
     this.foundAddressObject = { address: null };
@@ -29418,6 +29664,9 @@ class SendAssetFormModal {
     this.retryTxIdInput = document.getElementById('retryOfPaymentTxId');
     this.usernameAvailable = document.getElementById('sendToAddressError');
     this.submitButton = document.querySelector('#sendForm button[type="submit"]');
+    this.networkSelect = document.getElementById('sendNetwork');
+    this.networkGroup = document.getElementById('sendNetworkGroup');
+    this.networkStatus = document.getElementById('sendNetworkStatus');
     this.assetSelectDropdown = document.getElementById('sendAsset');
     this.balanceSymbol = document.getElementById('balanceSymbol');
     this.availableBalance = document.getElementById('availableBalance');
@@ -29444,10 +29693,8 @@ class SendAssetFormModal {
     });
 
     this.availableBalance.addEventListener('click', this.fillAmount.bind(this));
-    this.assetSelectDropdown.addEventListener('change', () => {
-      // updateSendAddresses();
-      this.updateAvailableBalance();
-    });
+    this.networkSelect.addEventListener('change', () => this.handleNetworkChange());
+    this.assetSelectDropdown.addEventListener('change', () => this.handleAssetChange());
     // amount input listener for normalizing
     this.amountInput.addEventListener('input', () => this.amountInput.value = normalizeUnsignedFloat(this.amountInput.value));
     // amount input listener for real-time balance validation
@@ -29481,7 +29728,9 @@ class SendAssetFormModal {
    * Opens the send asset modal
    * @returns {Promise<void>}
    */
-  async open() {
+  async open({ mode = 'liberdus', networkId = null, assetKey = null } = {}) {
+    this.mode = mode;
+    this.networkGroup.hidden = mode !== 'evm';
     this.modal.classList.add('active');
     this.memoValidation = {};
     this.memoByteCounter.textContent = '';
@@ -29507,16 +29756,67 @@ class SendAssetFormModal {
       this.username = null;
     }
 
-    await walletScreen.updateWalletBalances(); // Refresh wallet balances first
-    // Get wallet data
-    const wallet = myData.wallet;
-    // Populate assets dropdown
-    this.assetSelectDropdown.innerHTML = wallet.assets
-      .map((asset, index) => `<option value="${index}">${asset.name} (${asset.symbol})</option>`)
-      .join('');
+    if (this.mode === 'evm') {
+      await evmAssets.refresh();
+      evmAssets.populateNetworkSelect(this.networkSelect, {
+        selectedId: networkId || 'ethereum',
+        evmOnly: true,
+      });
+    } else {
+      await walletScreen.updateWalletBalances();
+      evmAssets.rebuildCatalog();
+      evmAssets.populateNetworkSelect(this.networkSelect, { selectedId: 'liberdus' });
+    }
+    await this.handleNetworkChange({ resetRecipient: false });
+    if (assetKey && [...this.assetSelectDropdown.options].some((option) => option.value === assetKey)) {
+      this.assetSelectDropdown.value = assetKey;
+      await this.handleAssetChange();
+    }
+  }
 
-    // Update addresses for first asset
-    this.updateSendAddresses();
+  getSelectedNetwork() {
+    return evmAssets.getNetwork(this.networkSelect.value);
+  }
+
+  getSelectedAsset() {
+    return evmAssets.getSelectedAsset(this.networkSelect.value, this.assetSelectDropdown);
+  }
+
+  isLiberdusSelected() {
+    return this.mode === 'liberdus';
+  }
+
+  async handleNetworkChange({ resetRecipient = true } = {}) {
+    const walletNetwork = this.getSelectedNetwork();
+    evmAssets.populateAssetSelect(this.assetSelectDropdown, walletNetwork?.id || 'liberdus');
+
+    if (resetRecipient) {
+      this.usernameInput.value = '';
+      this.foundAddressObject.address = null;
+      this.usernameAvailable.style.display = 'none';
+    }
+    this.amountInput.value = '';
+    this.balanceWarning.textContent = '';
+    this.balanceWarning.style.display = 'none';
+
+    if (walletNetwork?.source === 'evm') {
+      this.usernameInput.placeholder = 'Enter 0x wallet address';
+      this.networkStatus.textContent = `${walletNetwork.name} is connected for balances and receiving. Sending is coming in Phase 2.`;
+      this.networkStatus.dataset.status = walletNetwork.connected ? 'connected' : 'ready';
+    } else {
+      this.usernameInput.placeholder = 'Enter username';
+      this.networkStatus.textContent = 'Liberdus transfers are ready.';
+      this.networkStatus.dataset.status = 'connected';
+    }
+
+    await this.handleAssetChange();
+  }
+
+  async handleAssetChange() {
+    const asset = this.getSelectedAsset();
+    this.balanceSymbol.textContent = asset?.tokenSymbol || 'LIB';
+    this.toggleBalanceButton.disabled = !this.isLiberdusSelected();
+    await this.updateAvailableBalance();
   }
 
   /**
@@ -29544,6 +29844,17 @@ class SendAssetFormModal {
     if (this.sendAssetFormModalCheckTimeout) {
       clearTimeout(this.sendAssetFormModalCheckTimeout);
       this.sendAssetFormModalCheckTimeout = null;
+    }
+
+    if (!this.isLiberdusSelected()) {
+      this.clearFormInfo();
+      const isValidAddress = isValidEthereumAddress(rawInput);
+      this.foundAddressObject.address = isValidAddress ? rawInput : null;
+      this.usernameAvailable.textContent = isValidAddress ? 'valid address' : 'enter a valid 0x address';
+      this.usernameAvailable.style.color = isValidAddress ? '#28a745' : '#dc3545';
+      this.usernameAvailable.style.display = rawInput ? 'inline' : 'none';
+      await this.refreshSendButtonDisabledState();
+      return;
     }
 
     if (isValidEthereumAddress(rawInput)) {
@@ -29723,6 +30034,11 @@ class SendAssetFormModal {
   async handleSendFormSubmit(event) {
     event.preventDefault();
 
+    if (!this.isLiberdusSelected()) {
+      showToast('EVM sending will be enabled in Phase 2. Balances and receiving are available now.', 5000, 'info');
+      return;
+    }
+
     const hasPendingTransfer =
       Array.isArray(myData?.pending) &&
       myData.pending.some((pendingTx) => pendingTx?.type === 'transfer');
@@ -29808,8 +30124,17 @@ class SendAssetFormModal {
    * @returns {void}
    */
   async fillAmount() {
+    const selectedAsset = this.getSelectedAsset();
+    if (!selectedAsset) return;
+
+    if (!this.isLiberdusSelected()) {
+      this.amountInput.value = selectedAsset.tokenAmount || '0';
+      this.amountInput.dispatchEvent(new Event('input'));
+      return;
+    }
+
     await getNetworkParams();
-    const asset = myData.wallet.assets[this.assetSelectDropdown.value];
+    const asset = selectedAsset.walletAsset;
     const feeInWei = getTransactionFeeWei();
     const maxAmount = BigInt(asset.balance) - feeInWei;
     const maxAmountStr = big2str(maxAmount > 0n ? maxAmount : 0n, 18).slice(0, -16);
@@ -29833,19 +30158,14 @@ class SendAssetFormModal {
    * @returns {void}
    */
   async updateAvailableBalance() {
-    const walletData = myData.wallet;
-    const assetIndex = this.assetSelectDropdown.value;
-
-    // Check if we have any assets
-    if (!walletData.assets || walletData.assets.length === 0) {
+    const selectedAsset = this.getSelectedAsset();
+    if (!selectedAsset) {
       this.updateBalanceDisplay(null);
-      // If no assets, amount validation will likely fail or be irrelevant.
-      // Button state should reflect this.
       await this.refreshSendButtonDisabledState();
       return;
     }
 
-    this.updateBalanceDisplay(walletData.assets[assetIndex]);
+    await this.updateBalanceDisplay(selectedAsset);
     await this.refreshSendButtonDisabledState();
   }
 
@@ -29861,6 +30181,13 @@ class SendAssetFormModal {
       return;
     }
 
+    if (asset.source === 'evm') {
+      this.balanceSymbol.textContent = asset.tokenSymbol;
+      this.balanceAmount.textContent = `${evmAssets.formatTokenAmount(asset.tokenAmount)} ${asset.tokenSymbol}`;
+      this.transactionFee.textContent = 'Calculated at send';
+      return;
+    }
+
     await getNetworkParams();
     const txFeeInLIB = getTransactionFeeWei();
     const stabilityFactor = getStabilityFactor();
@@ -29871,10 +30198,10 @@ class SendAssetFormModal {
 
     // Only set to asset symbol if it's empty (initial state)
     if (!currentSymbol) {
-      this.balanceSymbol.textContent = asset.symbol;
+      this.balanceSymbol.textContent = asset.tokenSymbol;
     }
 
-    const balanceInLIB = big2str(BigInt(asset.balance), 18).slice(0, -12);
+    const balanceInLIB = big2str(BigInt(asset.walletAsset.balance), 18).slice(0, -12);
     const feeInLIB = big2str(txFeeInLIB, 18).slice(0, -16);
 
     this.updateBalanceAndFeeDisplay(balanceInLIB, feeInLIB, isCurrentlyUSD, stabilityFactor);
@@ -29885,11 +30212,7 @@ class SendAssetFormModal {
    * @returns {void}
    */
   updateSendAddresses() {
-    const walletData = myData.wallet;
-    // const assetIndex = document.getElementById('sendAsset').value;
-
-    // Check if we have any assets
-    if (!walletData.assets || walletData.assets.length === 0) {
+    if (!this.getSelectedAsset()) {
       showToast('No addresses available', 0, 'error');
       return;
     }
@@ -29903,6 +30226,13 @@ class SendAssetFormModal {
    * @returns {Promise<void>}
    */
   async refreshSendButtonDisabledState() {
+    if (!this.isLiberdusSelected()) {
+      this.balanceWarning.textContent = '';
+      this.balanceWarning.style.display = 'none';
+      this.submitButton.disabled = true;
+      return;
+    }
+
     // If offline, keep button disabled
     if (!isOnline) {
       this.submitButton.disabled = true;
@@ -29922,7 +30252,12 @@ class SendAssetFormModal {
       return;
     }
 
-    const assetIndex = this.assetSelectDropdown.value;
+    const selectedAsset = this.getSelectedAsset();
+    const assetIndex = myData.wallet.assets.indexOf(selectedAsset?.walletAsset);
+    if (assetIndex < 0) {
+      this.submitButton.disabled = true;
+      return;
+    }
 
     // Check if amount is in USD and convert to LIB for validation
     const isUSD = this.balanceSymbol.textContent === 'USD';
@@ -29982,6 +30317,9 @@ class SendAssetFormModal {
     if (e && typeof e.preventDefault === 'function') {
       e.preventDefault();
     }
+    if (!this.isLiberdusSelected()) {
+      return;
+    }
     this.balanceSymbol.textContent = this.balanceSymbol.textContent === 'LIB' ? 'USD' : 'LIB';
 
     // check the context value of the button to determine if it's LIB or USD
@@ -29992,7 +30330,8 @@ class SendAssetFormModal {
     const stabilityFactor = getStabilityFactor();
 
     // Get the raw values in LIB format
-    const asset = myData.wallet.assets[this.assetSelectDropdown.value];
+    const asset = this.getSelectedAsset()?.walletAsset;
+    if (!asset) return;
     const txFeeInWei = getTransactionFeeWei();
     const balanceInLIB = big2str(BigInt(asset.balance), 18).slice(0, -12);
     const feeInLIB = big2str(txFeeInWei, 18).slice(0, -16);
@@ -30271,6 +30610,13 @@ class SendAssetConfirmModal {
    */
   async handleSendAsset(event) {
     event.preventDefault();
+    const selectedAsset = sendAssetFormModal.getSelectedAsset();
+    if (!sendAssetFormModal.isLiberdusSelected() || selectedAsset?.source !== 'liberdus') {
+      showToast('EVM sending will be enabled in Phase 2.', 5000, 'info');
+      this.close();
+      return;
+    }
+
     const rawInput = sendAssetFormModal.usernameInput.value.trim();
     if (isValidEthereumAddress(rawInput)) {
       showToast('Address not supported; enter username instead.', 0, 'error');
@@ -30284,7 +30630,11 @@ class SendAssetConfirmModal {
     }
 
     const wallet = myData.wallet;
-    const assetIndex = Number(sendAssetFormModal.assetSelectDropdown.value);
+    const assetIndex = wallet.assets.indexOf(selectedAsset.walletAsset);
+    if (assetIndex < 0) {
+      showToast('Selected Liberdus asset is unavailable.', 0, 'error');
+      return;
+    }
     const amount = bigxnum2big(wei, sendAssetFormModal.amountInput.value);
     const memoIn = sendAssetFormModal.memoInput.value || '';
     const memo = memoIn.trim();
@@ -30548,10 +30898,14 @@ const sendAssetConfirmModal = new SendAssetConfirmModal();
 
 class ReceiveModal {
   constructor() {
+    this.mode = 'liberdus';
   }
 
   load() {
     this.modal = document.getElementById('receiveModal');
+    this.networkSelect = document.getElementById('receiveNetwork');
+    this.networkGroup = document.getElementById('receiveNetworkGroup');
+    this.networkStatus = document.getElementById('receiveNetworkStatus');
     this.assetSelect = document.getElementById('receiveAsset');
     this.amountInput = document.getElementById('receiveAmount');
     this.memoInput = document.getElementById('receiveMemo');
@@ -30574,53 +30928,66 @@ class ReceiveModal {
     this.displayAddress.addEventListener('click', () => this.copyAddress());
     
     // QR code updates
-    this.assetSelect.addEventListener('change', () => this.updateQRCode());
+    this.networkSelect.addEventListener('change', () => this.handleNetworkChange());
+    this.assetSelect.addEventListener('change', () => this.handleAssetChange());
     this.amountInput.addEventListener('input', () => this.amountInput.value = normalizeUnsignedFloat(this.amountInput.value));
     this.amountInput.addEventListener('input', this.debouncedUpdateQRCode);
     this.memoInput.addEventListener('input', this.debouncedUpdateQRCode);
     this.toggleReceiveBalanceButton.addEventListener('click', this.handleToggleBalance.bind(this));
   }
 
-  open() {
+  async open({ mode = 'liberdus', networkId = null, assetKey = null } = {}) {
+    this.mode = mode;
+    this.networkGroup.hidden = mode !== 'evm';
     this.modal.classList.add('active');
-
-    // Get wallet data
-    const walletData = myData.wallet;
-
-    // Populate assets dropdown
-    // Clear existing options
-    this.assetSelect.innerHTML = '';
-
-    // Check if wallet assets exist
-    if (walletData && walletData.assets && walletData.assets.length > 0) {
-      // Add options for each asset
-      walletData.assets.forEach((asset, index) => {
-        const option = document.createElement('option');
-        option.value = index;
-        option.textContent = `${asset.name} (${asset.symbol})`;
-        this.assetSelect.appendChild(option);
-      });
-    } else {
-      // Add a default option if no assets
-      const option = document.createElement('option');
-      option.value = 0;
-      option.textContent = 'Liberdus (LIB)';
-      this.assetSelect.appendChild(option);
-    }
 
     // Clear input fields
     this.amountInput.value = '';
     this.memoInput.value = '';
 
-    this.receiveBalanceSymbol.textContent = 'LIB';
-
-
-    // Initial update for addresses based on the first asset
-    this.updateReceiveAddresses();
+    if (this.mode === 'evm') {
+      await evmAssets.refresh();
+      evmAssets.populateNetworkSelect(this.networkSelect, {
+        selectedId: networkId || 'ethereum',
+        evmOnly: true,
+      });
+    } else {
+      evmAssets.rebuildCatalog();
+      evmAssets.populateNetworkSelect(this.networkSelect, { selectedId: 'liberdus' });
+    }
+    await this.handleNetworkChange();
+    if (assetKey && [...this.assetSelect.options].some((option) => option.value === assetKey)) {
+      this.assetSelect.value = assetKey;
+      await this.handleAssetChange();
+    }
   }
 
   close() {
     this.modal.classList.remove('active');
+  }
+
+  getSelectedNetwork() {
+    return evmAssets.getNetwork(this.networkSelect.value);
+  }
+
+  getSelectedAsset() {
+    return evmAssets.getSelectedAsset(this.networkSelect.value, this.assetSelect);
+  }
+
+  async handleNetworkChange() {
+    const walletNetwork = this.getSelectedNetwork();
+    evmAssets.populateAssetSelect(this.assetSelect, walletNetwork?.id || 'liberdus');
+    this.networkStatus.textContent = walletNetwork?.source === 'evm'
+      ? `Receive on ${walletNetwork.name} using this account's shared EVM address.`
+      : 'Receive Liberdus using your account address.';
+    this.networkStatus.dataset.status = walletNetwork?.connected ? 'connected' : 'ready';
+    await this.handleAssetChange();
+  }
+
+  async handleAssetChange() {
+    const asset = this.getSelectedAsset();
+    this.receiveBalanceSymbol.textContent = asset?.tokenSymbol || 'LIB';
+    this.updateReceiveAddresses();
   }
 
   updateReceiveAddresses() {
@@ -30659,37 +31026,25 @@ class ReceiveModal {
 
   // Create QR payment data object based on form values
   createQRPaymentData() {
-    // Get selected asset
-    const assetIndex = parseInt(this.assetSelect.value, 10) || 0;
+    const walletNetwork = this.getSelectedNetwork();
+    const asset = this.getSelectedAsset();
 
-    // Default asset info in case we can't find the selected asset
-    let assetId = 'liberdus';
-    let symbol = 'LIB';
-
-    // Try to get the selected asset
-    try {
-      if (myData && myData.wallet && myData.wallet.assets && myData.wallet.assets.length > 0) {
-        const asset = myData.wallet.assets[assetIndex];
-        if (asset) {
-          assetId = asset.id || 'liberdus';
-          symbol = asset.symbol || 'LIB';
-        } else {
-          console.warn(`Asset not found at index ${assetIndex}, using defaults`);
+    const paymentData = this.mode === 'evm'
+      ? {
+          u: myAccount.username,
+          n: walletNetwork?.id || 'ethereum',
+          c: walletNetwork?.chainId || 1,
+          i: asset?.contractAddress || asset?.key || 'native',
+          s: asset?.tokenSymbol || walletNetwork?.nativeSymbol || 'ETH',
+          d: String(this.receiveBalanceSymbol.textContent || asset?.tokenSymbol || 'ETH').toUpperCase(),
+          r: this.fullAddress,
         }
-      } else {
-        console.warn('Wallet assets not available, using default asset');
-      }
-    } catch (error) {
-      console.error('Error accessing asset data:', error);
-    }
-
-    // Build payment data object
-    const paymentData = {
-      u: myAccount.username, // username
-      i: assetId, // assetId
-      s: symbol, // symbol
-      d: String(this.receiveBalanceSymbol.textContent || 'LIB').toUpperCase() //display unit
-    };
+      : {
+          u: myAccount.username,
+          i: asset?.walletAsset?.id || 'liberdus',
+          s: asset?.tokenSymbol || 'LIB',
+          d: String(this.receiveBalanceSymbol.textContent || 'LIB').toUpperCase(),
+        };
 
     // Add optional fields if they have values
     const amount = this.amountInput.value.trim();
@@ -30779,22 +31134,33 @@ class ReceiveModal {
    */
   async handleToggleBalance() {
     try {
-      this.receiveBalanceSymbol.textContent = this.receiveBalanceSymbol.textContent === 'LIB' ? 'USD' : 'LIB';
+      const asset = this.getSelectedAsset();
+      const tokenSymbol = asset?.tokenSymbol || 'LIB';
+      const isShowingToken = this.receiveBalanceSymbol.textContent !== 'USD';
+      this.receiveBalanceSymbol.textContent = isShowingToken ? 'USD' : tokenSymbol;
+      const tokenPrice = Number(asset?.tokenPriceUsd);
+      let conversionPrice = Number.isFinite(tokenPrice) && tokenPrice > 0 ? tokenPrice : null;
+      if (conversionPrice === null && asset?.source === 'liberdus') {
+        await getNetworkParams();
+        const stabilityFactor = getStabilityFactor();
+        conversionPrice = Number.isFinite(stabilityFactor) && stabilityFactor > 0
+          ? stabilityFactor
+          : null;
+      }
 
-      const isLib = this.receiveBalanceSymbol.textContent === 'LIB';
-
-      await getNetworkParams();
-      const stabilityFactor = getStabilityFactor();
+      if (conversionPrice === null) {
+        this.receiveBalanceSymbol.textContent = tokenSymbol;
+        showToast(`${tokenSymbol}/USD price is unavailable`, 2500, 'warning');
+        return;
+      }
 
       if (this.amountInput && this.amountInput.value.trim() !== '') {
         const currentValue = parseFloat(this.amountInput.value);
         if (!isNaN(currentValue)) {
-          if (!isLib) {
-            // now showing USD, convert LIB -> USD
-            this.amountInput.value = (currentValue * stabilityFactor).toString();
+          if (this.receiveBalanceSymbol.textContent === 'USD') {
+            this.amountInput.value = (currentValue * conversionPrice).toString();
           } else {
-            // now showing LIB, convert USD -> LIB
-            this.amountInput.value = (currentValue / stabilityFactor).toString();
+            this.amountInput.value = (currentValue / conversionPrice).toString();
           }
         }
       }
@@ -30824,6 +31190,16 @@ class ReceiveModal {
 
 // initialize the receive modal
 const receiveModal = new ReceiveModal();
+
+evmAssets.configure({
+  getAccount: () => myAccount,
+  getLiberdusAsset: () => myData?.wallet?.assets?.find((asset) => isLibAsset(asset))
+    || myData?.wallet?.assets?.[0]
+    || null,
+  openSend: (options) => sendAssetFormModal.open(options),
+  openReceive: (options) => receiveModal.open(options),
+  showToast,
+});
 
 /**
  * Failed Transaction Modal
@@ -34823,6 +35199,12 @@ function closeTopModal(topModal){
       break;
     case 'menuModal':
       menuModal.close();
+      break;
+    case 'assetsModal':
+      evmAssets.close(modalId);
+      break;
+    case 'assetDetailsModal':
+      evmAssets.close(modalId);
       break;
     case 'daoModal':
       daoModal.close();

@@ -61,11 +61,11 @@
     -->
     <script src="./external/qr.js"></script>
     <script src="./network.js"></script>
-    <link rel="stylesheet" href="./styles.css" />
+    <link rel="stylesheet" href="./styles.css?v=1455-8" />
     <!-- <link rel="manifest" href="./manifest.json" /> -->
   </head>
   <body>
-    <script src="./app.js" type="module"></script>
+    <script src="./app.js?v=1455-12" type="module"></script>
     <script src="./lib.js" type="module"></script>
     <script src="./crypto.js" type="module"></script>
     <div class="container">
@@ -278,6 +278,7 @@
         <div class="modal-content">
           <ul class="menu-list">
             <li class="menu-item" id="openInvite" data-icon="mail">Invite</li>
+            <li class="menu-item" id="openAssets" data-icon="assets">EVM Assets</li>
             <li class="menu-item" id="openFarm" data-icon="trending-up">Farm</li>
             <li class="menu-item" id="openValidator" data-icon="shield">Validator</li>
             <li class="menu-item" id="openDao" data-icon="dao" style="display: none;">DAO</li>
@@ -290,6 +291,113 @@
             <li class="menu-item" id="openAbout" data-icon="info">About</li>
             <li class="menu-item sign-out" id="handleSignOut" data-icon="log-out">Sign Out</li>
           </ul>
+        </div>
+        <a class="last-item" href="#"> </a>
+      </div>
+
+      <!-- Connected EVM Assets Modal -->
+      <div class="modal fixed-header" id="assetsModal">
+        <div class="modal-header">
+          <button class="back-button" id="closeAssetsModal"></button>
+          <div class="modal-title">Assets</div>
+        </div>
+        <div class="modal-content assets-modal-content">
+          <div class="wallet-balance">
+            <div class="balance-label">Total Balance</div>
+            <div class="balance-amount">
+              <span id="assetsTotalBalance">-.--</span>
+              <button class="refresh-button" id="refreshAssetsBalance">↻</button>
+            </div>
+          </div>
+          <div class="wallet-assets assets-portfolio">
+            <div class="section-title assets-section-title">Assets</div>
+            <div class="wallet-network-panel">
+              <div class="wallet-network-heading">
+                <label for="assetsNetwork">Network</label>
+                <span id="assetsConnectionSummary" class="wallet-connection-summary">Connecting wallet networks…</span>
+              </div>
+              <select id="assetsNetwork" class="form-control wallet-network-select">
+                <option value="all">All connected networks</option>
+                <option value="ethereum">Ethereum (ETH)</option>
+                <option value="bsc">BNB Smart Chain (BSC)</option>
+                <option value="polygon">Polygon (POL)</option>
+              </select>
+            </div>
+            <div id="connectedAssetsList">
+              <div class="empty-state">
+                <div></div>
+                <div>No EVM Assets Yet</div>
+                <div>Connected assets will appear here</div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <a class="last-item" href="#"> </a>
+      </div>
+
+      <!-- Connected EVM Asset Details Modal -->
+      <div class="modal fixed-header" id="assetDetailsModal">
+        <div class="modal-header">
+          <button class="back-button" id="closeAssetDetailsModal"></button>
+          <div class="modal-title" id="assetDetailsModalTitle">Asset Details</div>
+        </div>
+        <div class="modal-content asset-details-content">
+          <section class="asset-detail-hero">
+            <div class="asset-detail-symbol" id="assetDetailsSymbol">—</div>
+            <div class="asset-detail-price" id="assetDetailsPrice">Price unavailable</div>
+            <div class="asset-detail-updated" id="assetDetailsUpdated">Updated —</div>
+          </section>
+
+          <div class="wallet-actions asset-detail-actions">
+            <button class="wallet-action-button" id="assetDetailsSend">
+              <span class="action-icon"></span>
+              <span class="action-label">Send</span>
+            </button>
+            <button class="wallet-action-button" id="assetDetailsReceive">
+              <span class="action-icon"></span>
+              <span class="action-label">Receive</span>
+            </button>
+            <button class="wallet-action-button" id="assetDetailsHistory">
+              <span class="action-icon"></span>
+              <span class="action-label">History</span>
+            </button>
+          </div>
+
+          <section class="asset-detail-section">
+            <h2>Your balance</h2>
+            <div class="asset-detail-balance-card">
+              <div class="asset-logo connected-asset-logo" id="assetDetailsLogo"></div>
+              <div class="asset-detail-balance-name">
+                <strong id="assetDetailsName">—</strong>
+                <span id="assetDetailsBalanceSymbol">—</span>
+              </div>
+              <div class="asset-detail-balance-values">
+                <strong id="assetDetailsValue">Value unavailable</strong>
+                <span id="assetDetailsAmount">0</span>
+              </div>
+            </div>
+          </section>
+
+          <section class="asset-detail-section">
+            <h2>Token details</h2>
+            <dl class="asset-detail-list">
+              <div><dt>Network</dt><dd id="assetDetailsNetwork">—</dd></div>
+              <div><dt>Chain ID</dt><dd id="assetDetailsChainId">—</dd></div>
+              <div><dt>Token type</dt><dd id="assetDetailsType">—</dd></div>
+              <div><dt>Decimals</dt><dd id="assetDetailsDecimals">—</dd></div>
+              <div class="asset-detail-address-row"><dt>Contract</dt><dd id="assetDetailsContract">—</dd></div>
+            </dl>
+          </section>
+
+          <section class="asset-detail-section">
+            <h2>Market details</h2>
+            <dl class="asset-detail-list">
+              <div><dt>Token price</dt><dd id="assetDetailsMarketPrice">Price unavailable</dd></div>
+              <div><dt>Your holding value</dt><dd id="assetDetailsHoldingValue">Value unavailable</dd></div>
+              <div><dt>Data source</dt><dd>Multichain RPC</dd></div>
+              <div><dt>Additional market data</dt><dd>Unavailable from RPC</dd></div>
+            </dl>
+          </section>
         </div>
         <a class="last-item" href="#"> </a>
       </div>
@@ -418,14 +526,35 @@
                 <label>Timing</label>
                 <div class="dao-form-grid dao-form-grid--timing">
                   <div class="form-group">
-                    <label for="addProposalStartDelayDays">Review Starts (days)</label>
-                    <input id="addProposalStartDelayDays" class="form-control" type="number" min="0" step="1" value="0" inputmode="numeric" />
-                    <div class="dao-form-help">Days from submission. 0 means now.</div>
+                    <div class="dao-form-label-with-help">
+                      <label for="addProposalReviewStartTime">Review Delay (ms)</label>
+                      <button
+                        type="button"
+                        class="toll-info-icon dao-form-tooltip"
+                        data-icon="info"
+                        data-dao-timing-help
+                        title="How long to wait before proposal review starts. Select a date and time, or use 0 to start immediately."
+                        aria-label="About Review Delay"
+                      ></button>
+                    </div>
+                    <button id="addProposalReviewStartTime" class="form-control dao-review-start-button" type="button" aria-haspopup="dialog" aria-controls="dateTimePickerModal">0</button>
+                    <div class="dao-form-help" id="addProposalReviewStartHelp">Delay: 0 sec</div>
                   </div>
                   <div class="form-group">
-                    <label for="addProposalGracePeriodMs">Grace Period (ms)</label>
-                    <input id="addProposalGracePeriodMs" class="form-control" type="number" min="0" step="1" inputmode="numeric" placeholder="Loading default..." />
-                    <div class="dao-form-help" id="addProposalGracePeriodHelp">Default: loading...</div>
+                    <div class="dao-form-label-with-help">
+                      <label for="addProposalGracePeriodMs">Grace Period (ms)</label>
+                      <button
+                        type="button"
+                        class="toll-info-icon dao-form-tooltip"
+                        data-icon="info"
+                        data-dao-timing-help
+                        title="How long to wait after voting ends before the proposal can be applied. Cannot exceed the DAO grace duration."
+                        aria-label="About Grace Period"
+                      ></button>
+                    </div>
+                    <input id="addProposalGracePeriodMs" class="form-control" type="number" min="0" step="1" inputmode="numeric" placeholder="Loading maximum..." required />
+                    <div class="dao-form-help" id="addProposalGracePeriodHelp">Estimate: loading...</div>
+                    <div class="dao-form-help dao-form-limit hidden" id="addProposalGracePeriodLimit"></div>
                   </div>
                 </div>
               </div>
@@ -736,6 +865,7 @@
                 <a class="about-link" href="index.html.txt" target="_blank">index.html</a>
                 <a class="about-link" href="styles.css" target="_blank">styles.css</a>
                 <a class="about-link" href="app.js" target="_blank">app.js</a>
+                <a class="about-link" href="evm-assets.js" target="_blank">evm-assets.js</a>
                 <br>
                 <a class="about-link" href="crypto.js" target="_blank">crypto.js</a>
                 <a class="about-link" href="lib.js" target="_blank">lib.js</a>
@@ -1439,35 +1569,36 @@
         <a class="last-item" href="#"></a>
       </div>
 
-      <!-- Call Schedule Date Modal -->
-      <div class="modal modal-dialog" id="callScheduleDateModal">
+      <!-- Shared Date and Time Picker Modal -->
+      <div class="modal modal-dialog" id="dateTimePickerModal">
         <div class="dialog-box-content">
           <div class="modal-header">
-            <button class="back-button" id="closeCallScheduleDateModal"></button>
-            <div class="modal-title">Schedule Call</div>
-            <div class="current-time" id="callScheduleCurrentTime" aria-label="Current time"></div>
+            <button class="back-button" id="closeDateTimePickerModal"></button>
+            <div class="modal-title" id="dateTimePickerModalTitle">Select Date and Time</div>
+            <div class="current-time" id="dateTimePickerCurrentTime" aria-label="Current time"></div>
           </div>
           <div class="modal-content">
             <div class="form-container call-invite-modal-container">
-              <form id="callScheduleDateForm" class="form--narrow">
+              <form id="dateTimePickerForm" class="form--narrow">
                 <div class="form-group">
-                  <label for="callScheduleDate">Select date and time</label>
-                  <div class="call-schedule-form-row">
-                    <input id="callScheduleDate" type="date" class="form-control call-schedule-date-input" />
+                  <label for="dateTimePickerDate">Select date and time</label>
+                  <div class="date-time-picker-row">
+                    <input id="dateTimePickerDate" type="date" class="form-control date-time-picker-date-input" />
                   </div>
-                  <div class="call-schedule-form-row">
-                    <select id="callScheduleHour" class="form-control call-schedule-time-select"></select>
-                    <select id="callScheduleMinute" class="form-control call-schedule-time-select"></select>
-                    <select id="callScheduleAmPm" class="form-control call-schedule-time-select">
+                  <div class="date-time-picker-row">
+                    <select id="dateTimePickerHour" class="form-control date-time-picker-time-select" aria-label="Hour"></select>
+                    <select id="dateTimePickerMinute" class="form-control date-time-picker-time-select" aria-label="Minute"></select>
+                    <select id="dateTimePickerAmPm" class="form-control date-time-picker-time-select" aria-label="AM or PM">
                       <option value="AM">AM</option>
                       <option value="PM">PM</option>
                     </select>
                   </div>
                 </div>
                 <div class="form-actions">
-                  <div class="contact-time" id="callScheduleConvertedTime" aria-label="Recipient time"></div>
-                  <button type="submit" id="confirmCallSchedule" class="btn btn--primary btn--pill btn--full">Submit</button>
-                  <button type="button" id="cancelCallScheduleDate" class="btn btn--secondary btn--pill btn--full">Cancel</button>
+                  <div class="contact-time" id="dateTimePickerPreview" aria-label="Selected time"></div>
+                  <button type="submit" id="confirmDateTimePicker" class="btn btn--primary btn--pill btn--full">Submit</button>
+                  <button type="button" id="clearDateTimePicker" class="btn btn--primary btn--pill btn--full hidden">No delay: 0 ms</button>
+                  <button type="button" id="cancelDateTimePicker" class="btn btn--secondary btn--pill btn--full">Cancel</button>
                 </div>
               </form>
             </div>
@@ -1994,6 +2125,16 @@
         </div>
         <div class="modal-content">
           <div class="form-container">
+            <div class="form-group connected-wallet-only" id="receiveNetworkGroup" hidden>
+              <label for="receiveNetwork">Network</label>
+              <select id="receiveNetwork" class="form-control wallet-network-select">
+                <option value="liberdus">Liberdus (LIB)</option>
+                <option value="ethereum">Ethereum (ETH)</option>
+                <option value="bsc">BNB Smart Chain (BSC)</option>
+                <option value="polygon">Polygon (POL)</option>
+              </select>
+              <div id="receiveNetworkStatus" class="wallet-network-hint">The same account address is used across connected EVM networks.</div>
+            </div>
             <div class="form-group">
               <label>Your Address</label>
               <div class="address-container">
@@ -2086,6 +2227,16 @@
         <div class="modal-content">
           <div class="form-container">
             <form id="sendForm" class="form--narrow">
+              <div class="form-group connected-wallet-only" id="sendNetworkGroup" hidden>
+                <label for="sendNetwork">Network</label>
+                <select id="sendNetwork" class="form-control wallet-network-select" required>
+                  <option value="liberdus">Liberdus (LIB)</option>
+                  <option value="ethereum">Ethereum (ETH)</option>
+                  <option value="bsc">BNB Smart Chain (BSC)</option>
+                  <option value="polygon">Polygon (POL)</option>
+                </select>
+                <div id="sendNetworkStatus" class="wallet-network-hint">Liberdus transfers are ready.</div>
+              </div>
               <div class="form-group">
                 <label for="sendAsset">Asset</label>
                 <select id="sendAsset" class="form-control" required></select>
