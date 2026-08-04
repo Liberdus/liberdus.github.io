@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'k'
+const version = 'l'
 const BOOT_SPLASH_HANDOFF_MS = 1000;
 let myVersion = '0';
 async function checkVersion() {
@@ -760,21 +760,21 @@ document.addEventListener('DOMContentLoaded', async () => {
   createAccountModal.load();
 
   // Account Form Modal
-  myProfileModal.load();
+  accountModal.load();
 
-  restoreAccountModal.load();
+  importModal.load();
 
   // Validator Modals
-  validatorStakingModal.load();
+  validatorModal.load();
 
   // Toll Modal
   tollModal.load();
 
   // Stake Modal
-  stakeValidatorModal.load();
+  stakeModal.load();
 
   // Backup Form Modal
-  backupAccountModal.load();
+  backupModal.load();
 
   // Remove Account Modal
   removeAccountModal.load();
@@ -807,13 +807,13 @@ document.addEventListener('DOMContentLoaded', async () => {
   editContactModal.load();
 
   // Scan QR Modal
-  scanQRModal.load();
+  qrScanModal.load();
 
   // Search Messages Modal
-  searchMessagesModal.load();
+  messageSearchModal.load();
 
   // Contact Search Modal
-  searchContactsModal.load();
+  contactSearchModal.load();
 
   // History Modal
   historyModal.load();
@@ -925,7 +925,7 @@ function handleBeforeUnload(e) {
     return;
   }
   // Check if backup is in progress
-  if (backupAccountModal.isUploading) {
+  if (backupModal.isUploading) {
     reactNativeApp.handleNativeAppSubscribe();
     e.preventDefault();
     e.returnValue = 'A backup is currently being uploaded to Google Drive. Leaving the page will interrupt the backup. Are you sure you want to leave?';
@@ -1273,8 +1273,8 @@ class WelcomeScreen {
     }
 
     const now = getCorrectedTimestamp();
-    const lastBackup = backupAccountModal.getGDriveBackupTs();
-    const lastReminder = backupAccountModal.getGDriveReminderTs();
+    const lastBackup = backupModal.getGDriveBackupTs();
+    const lastReminder = backupModal.getGDriveReminderTs();
     const sevenDaysMs = 7 * 24 * 60 * 60 * 1000;
     const threeDaysMs = 3 * 24 * 60 * 60 * 1000;
 
@@ -1288,7 +1288,7 @@ class WelcomeScreen {
 
     const message = 'Click "Menu" and "Backup" to Google drive. You can restore if anything happens to this device.';
     showToast(message, 0, 'warning');
-    backupAccountModal.setGDriveReminderTs(now);
+    backupModal.setGDriveReminderTs(now);
   }
 
   isActive() {
@@ -1352,8 +1352,8 @@ class WelcomeMenuModal {
     this.updateButton = document.getElementById('welcomeOpenUpdate');
     this.helpButton = document.getElementById('welcomeOpenHelp');
 
-    this.backupButton.addEventListener('click', () => backupAccountModal.open());
-    this.restoreButton.addEventListener('click', () => restoreAccountModal.open());
+    this.backupButton.addEventListener('click', () => backupModal.open());
+    this.restoreButton.addEventListener('click', () => importModal.open());
     this.removeButton.addEventListener('click', () => removeAccountsModal.open());
     this.migrateButton.addEventListener('click', () => migrateAccountsModal.open());
     this.aboutButton.addEventListener('click', () => aboutModal.open());
@@ -1644,7 +1644,7 @@ class ChatsScreen {
 
     // Handle search input click that's on the chatsScreen
     this.searchInput.addEventListener('click', () => {
-      searchMessagesModal.open();
+      messageSearchModal.open();
     });
   }
 
@@ -1889,7 +1889,7 @@ class ContactsScreen {
 
     // Handle search input click that's on the contactsScreen
     this.contactSearchInput.addEventListener('click', () => {
-      searchContactsModal.open();
+      contactSearchModal.open();
     });
   }
 
@@ -2320,7 +2320,7 @@ class MenuModal {
     this.closeButton = document.getElementById('closeMenu');
     this.closeButton.addEventListener('click', () => this.close());
     this.validatorButton = document.getElementById('openValidator');
-    this.validatorButton.addEventListener('click', () => validatorStakingModal.open());
+    this.validatorButton.addEventListener('click', () => validatorModal.open());
     this.daoButton = document.getElementById('openDao');
     this.daoButton.style.display = 'flex';
     this.daoButton.addEventListener('click', () => daoModal.open());
@@ -2395,7 +2395,7 @@ class MenuModal {
   
   async handleSignOut() {
     // Check if backup is in progress
-    if (backupAccountModal.isUploading) {
+    if (backupModal.isUploading) {
       showToast('Please wait for the backup to complete before signing out.', 0, 'warning');
       return;
     }
@@ -2414,8 +2414,8 @@ class MenuModal {
     }
     callsModal.stopPeriodicCallsRefresh();
     // Stop camera if it's running
-    if (typeof scanQRModal !== 'undefined' && scanQRModal.camera.scanInterval) {
-      scanQRModal.stopCamera();
+    if (typeof qrScanModal !== 'undefined' && qrScanModal.camera.scanInterval) {
+      qrScanModal.stopCamera();
     }
 
     // Save myData to localStorage if it exists
@@ -2475,8 +2475,10 @@ const menuModal = new MenuModal();
 // DAO proposals are loaded via `daoRepo` and kept in memory (no localStorage persistence).
 setDaoBackendFetcher(createDaoBackendFetcher(queryNetwork, IS_DEV_NETWORK));
 
+const DAO_ALL_FILTER = { key: 'all', label: 'All' };
 const DAO_CLAIMABLE_FILTER = { key: 'claimable', label: 'Claimable' };
-const DAO_FILTER_OPTIONS = [...DAO_STATES, DAO_CLAIMABLE_FILTER];
+const DAO_FILTER_OPTIONS = [DAO_ALL_FILTER, ...DAO_STATES, DAO_CLAIMABLE_FILTER];
+const DAO_FILTER_OVERFLOW_KEYS = ['withheld', 'rejected', 'applied', DAO_ALL_FILTER.key];
 
 function formatDaoTimestamp(ts) {
   const n = Number(ts || 0);
@@ -2530,7 +2532,6 @@ class DaoModal {
   constructor() {
     this.selectedGroupKey = 'active';
     this.selectedFilterKey = 'voting';
-    this._outsideClickHandler = null;
     this.refreshState = 'loading';
     this.refreshSequence = 0;
     this.openRefreshId = 0;
@@ -2541,9 +2542,10 @@ class DaoModal {
     this.modal = document.getElementById('daoModal');
     this.closeButton = document.getElementById('closeDaoModal');
     this.titleEl = document.getElementById('daoModalTitle');
-    this.statusMenuButton = document.getElementById('daoFilterButton');
-    this.statusMenu = document.getElementById('daoStatusContextMenu');
-    this.groupToolbar = this.modal.querySelector('.dao-toolbar');
+    this.filterBar = document.getElementById('daoFilterBar');
+    this.filterOverflow = document.getElementById('daoFilterOverflow');
+    this.filterExpandButton = document.getElementById('daoFilterExpandButton');
+    this.groupToggle = this.modal.querySelector('.dao-group-toggle');
     this.groupActiveButton = document.getElementById('daoGroupActiveButton');
     this.groupArchivedButton = document.getElementById('daoGroupArchivedButton');
     this.list = document.getElementById('daoProposalList');
@@ -2553,41 +2555,32 @@ class DaoModal {
     if (this.closeButton) this.closeButton.addEventListener('click', () => this.close());
     if (this.addButton) this.addButton.addEventListener('click', () => addProposalModal.open());
 
-    if (this.statusMenuButton) {
-      this.statusMenuButton.addEventListener('click', (e) => this.toggleStatusMenu(e));
+    if (this.filterBar) {
+      this.filterBar.addEventListener('click', (e) => {
+        const chip = e.target.closest('.dao-filter-chip');
+        if (!chip) return;
+        const key = chip.dataset.filterKey;
+        if (!key) return;
+        this.setFilter(key);
+      });
+    }
+
+    if (this.filterExpandButton) {
+      this.filterExpandButton.addEventListener('click', () => {
+        this.setFiltersExpanded(this.filterOverflow.hidden);
+      });
     }
 
     if (this.groupActiveButton) {
       this.groupActiveButton.addEventListener('click', () => {
         this.setGroupFilter('active');
       });
-      this.groupActiveButton.setAttribute('role', 'tab');
     }
     if (this.groupArchivedButton) {
       this.groupArchivedButton.addEventListener('click', () => {
         this.setGroupFilter('archived');
       });
-      this.groupArchivedButton.setAttribute('role', 'tab');
     }
-
-    if (this.statusMenu) {
-      this.statusMenu.addEventListener('click', (e) => {
-        const option = e.target.closest('.context-menu-option');
-        if (!option) return;
-        const key = option.dataset.filterKey;
-        if (!key) return;
-        this.setFilter(key);
-      });
-    }
-
-    // Close the DAO menu on outside click
-    this._outsideClickHandler = (e) => {
-      if (!this.statusMenu || this.statusMenu.style.display !== 'block') return;
-      if (this.statusMenu.contains(e.target)) return;
-      if (this.statusMenuButton && this.statusMenuButton.contains(e.target)) return;
-      this.closeStatusMenu();
-    };
-    document.addEventListener('click', this._outsideClickHandler);
   }
 
   open() {
@@ -2629,7 +2622,6 @@ class DaoModal {
 
   close() {
     this.openRefreshId = ++this.refreshSequence;
-    this.closeStatusMenu();
     this.modal.classList.remove('active');
     enterFullscreen();
 
@@ -2684,49 +2676,26 @@ class DaoModal {
     return didRefreshDaoData;
   }
 
-  toggleStatusMenu(e) {
-    e.preventDefault();
-    e.stopPropagation();
-    if (!this.statusMenu) return;
-    if (this.statusMenu.style.display === 'block') {
-      this.closeStatusMenu();
-      return;
+  setFiltersExpanded(expanded) {
+    const overflowFilterSelected = DAO_FILTER_OVERFLOW_KEYS.includes(this.selectedFilterKey);
+    const keepExpanded = expanded || overflowFilterSelected;
+    if (this.filterBar) this.filterBar.classList.toggle('expanded', keepExpanded);
+    if (this.filterOverflow) this.filterOverflow.hidden = !keepExpanded;
+    if (this.filterExpandButton) {
+      this.filterExpandButton.disabled = overflowFilterSelected;
+      this.filterExpandButton.setAttribute('aria-expanded', keepExpanded ? 'true' : 'false');
+      this.filterExpandButton.setAttribute(
+        'aria-label',
+        overflowFilterSelected
+          ? 'Extra filters remain visible while selected'
+          : keepExpanded ? 'Hide extra filters' : 'Show more filters'
+      );
     }
-    this.showStatusMenu();
-  }
-
-  showStatusMenu() {
-    if (!this.statusMenu || !this.statusMenuButton) return;
-    const buttonRect = this.statusMenuButton.getBoundingClientRect();
-    const menuWidth = 176;
-    const approxMenuHeight = 16 + DAO_FILTER_OPTIONS.length * 40; // padding + items
-
-    let left = buttonRect.right - menuWidth;
-    let top = buttonRect.bottom + 8;
-
-    if (left < 10) left = 10;
-    if (top + approxMenuHeight > window.innerHeight - 10) {
-      top = buttonRect.top - approxMenuHeight - 8;
-    }
-
-    Object.assign(this.statusMenu.style, {
-      left: `${left}px`,
-      top: `${top}px`,
-      display: 'block',
-    });
-
-    if (this.statusMenuButton) this.statusMenuButton.setAttribute('aria-expanded', 'true');
-  }
-
-  closeStatusMenu() {
-    if (!this.statusMenu) return;
-    this.statusMenu.style.display = 'none';
-    if (this.statusMenuButton) this.statusMenuButton.setAttribute('aria-expanded', 'false');
   }
 
   setFilter(key) {
     this.selectedFilterKey = key;
-    this.closeStatusMenu();
+    this.setFiltersExpanded(!this.filterOverflow.hidden);
     this.render();
   }
 
@@ -2741,6 +2710,7 @@ class DaoModal {
     const proposalsArchived = hasFreshData ? daoRepo.getProposalsForUi('archived') : [];
     const currentAddress = getDaoCurrentAccountAddress();
     const now = getTransactionTimestamp();
+    const isAllFilter = this.selectedFilterKey === DAO_ALL_FILTER.key;
     const isClaimableFilter = this.selectedFilterKey === DAO_CLAIMABLE_FILTER.key;
     const groupedProposals = this.selectedGroupKey === 'archived' ? proposalsArchived : proposalsActive;
     const claimableProposals = [...proposalsActive, ...proposalsArchived]
@@ -2752,6 +2722,7 @@ class DaoModal {
       const state = getEffectiveDaoState(p);
       if (counts[state] !== undefined) counts[state] += 1;
     }
+    counts[DAO_ALL_FILTER.key] = groupedProposals.length;
     counts[DAO_CLAIMABLE_FILTER.key] = claimableProposals.length;
 
     // Update header title
@@ -2759,27 +2730,34 @@ class DaoModal {
     const label = DAO_FILTER_OPTIONS.find((filter) => filter.key === this.selectedFilterKey)?.label
       || this.selectedFilterKey;
     if (this.titleEl) this.titleEl.textContent = isClaimableFilter ? 'DAO - Claimable' : `DAO - ${groupLabel} - ${label}`;
-    if (this.groupToolbar) this.groupToolbar.classList.toggle('hidden', isClaimableFilter);
+    // Claimable spans both groups, so hide Active/Archived while keeping the filter bar.
+    if (this.groupToggle) this.groupToggle.classList.toggle('hidden', isClaimableFilter);
 
     // Update group toggle labels + selection
-    if (this.groupActiveButton) {
-      this.groupActiveButton.textContent = `Active ${hasFreshData ? proposalsActive.length : '—'}`;
-      this.groupActiveButton.classList.toggle('active', this.selectedGroupKey !== 'archived');
-      this.groupActiveButton.setAttribute('aria-selected', this.selectedGroupKey !== 'archived' ? 'true' : 'false');
-    }
-    if (this.groupArchivedButton) {
-      this.groupArchivedButton.textContent = `Archived ${hasFreshData ? proposalsArchived.length : '—'}`;
-      this.groupArchivedButton.classList.toggle('active', this.selectedGroupKey === 'archived');
-      this.groupArchivedButton.setAttribute('aria-selected', this.selectedGroupKey === 'archived' ? 'true' : 'false');
+    const groups = [
+      { key: 'active', label: 'Active', button: this.groupActiveButton, count: proposalsActive.length },
+      { key: 'archived', label: 'Archived', button: this.groupArchivedButton, count: proposalsArchived.length },
+    ];
+    for (const { key, label: groupName, button, count } of groups) {
+      if (!button) continue;
+      const countEl = button.querySelector('.dao-group-toggle-count');
+      if (countEl) {
+        countEl.textContent = hasFreshData ? String(count) : '—';
+        countEl.setAttribute(
+          'aria-label',
+          hasFreshData ? `${count} ${key} proposals` : `${groupName} count unavailable`
+        );
+      }
+      const selected = this.selectedGroupKey === key;
+      button.classList.toggle('active', selected);
+      button.setAttribute('aria-selected', selected ? 'true' : 'false');
     }
 
     for (const filter of DAO_FILTER_OPTIONS) {
-      const option = this.statusMenu?.querySelector(`[data-filter-key="${filter.key}"]`);
-      const labelEl = option?.querySelector('.dao-status-label');
-      const countEl = option?.querySelector('.dao-status-count');
+      const chip = this.filterBar?.querySelector(`.dao-filter-chip[data-filter-key="${filter.key}"]`);
+      const countEl = chip?.querySelector('.dao-filter-chip-count');
       const count = counts[filter.key] || 0;
 
-      if (labelEl) labelEl.textContent = filter.label;
       if (countEl) {
         countEl.textContent = hasFreshData ? String(count) : '—';
         countEl.setAttribute(
@@ -2787,17 +2765,20 @@ class DaoModal {
           hasFreshData ? `${count} ${filter.label.toLowerCase()} proposals` : `${filter.label} count unavailable`
         );
       }
-      if (option) {
+      if (chip) {
         const selected = filter.key === this.selectedFilterKey;
-        option.classList.toggle('active', selected);
-        option.setAttribute('aria-checked', selected ? 'true' : 'false');
+        chip.classList.toggle('active', selected);
+        chip.setAttribute('aria-selected', selected ? 'true' : 'false');
       }
     }
 
     // Filter + sort (newest entered into state first)
-    const filtered = (isClaimableFilter
+    const matchingProposals = isClaimableFilter
       ? claimableProposals
-      : groupedProposals.filter((proposal) => getEffectiveDaoState(proposal) === this.selectedFilterKey))
+      : groupedProposals.filter((proposal) => (
+        isAllFilter || getEffectiveDaoState(proposal) === this.selectedFilterKey
+      ));
+    const filtered = matchingProposals
       .sort((a, b) => Number(b.stateEnteredAt || b.createdAt || 0) - Number(a.stateEnteredAt || a.createdAt || 0));
 
     // Clear old list items
@@ -3446,7 +3427,7 @@ class AddProposalModal {
         </div>
         <div class="dao-form-change-box">
           <div class="dao-form-change-line">
-            <label for="${configId}">Select</label>
+            <label for="${configId}">Select <span class="dao-form-required" aria-hidden="true">*</span></label>
             <select id="${configId}" class="form-control" data-dao-change-key required>${selectOptions}</select>
           </div>
           <div class="dao-form-change-line">
@@ -3454,7 +3435,7 @@ class AddProposalModal {
             <input id="${currentId}" class="form-control dao-form-current-value" type="text" value="${escapeDaoFormAttribute(option.current)}" readonly />
           </div>
           <div class="dao-form-change-line">
-            <label for="${proposedId}">Enter</label>
+            <label for="${proposedId}">Enter <span class="dao-form-required" aria-hidden="true">*</span></label>
             ${this.renderProposedValueControl(option, row.value, proposedId)}
           </div>
           <div class="dao-form-meta">${escapeHtml(option.path)} · ${escapeHtml(option.valueType)}</div>
@@ -6144,7 +6125,7 @@ class SettingsModal {
     this.chatSettingsButton.addEventListener('click', () => chatSettingsModal.open());
 
     this.profileButton = document.getElementById('openAccountForm');
-    this.profileButton.addEventListener('click', () => myProfileModal.open());
+    this.profileButton.addEventListener('click', () => accountModal.open());
     
     this.tollButton = document.getElementById('openToll');
     this.tollButton.addEventListener('click', () => tollModal.open());
@@ -6153,7 +6134,7 @@ class SettingsModal {
     this.lockButton.addEventListener('click', () => lockModal.open());
     
     this.backupButton = document.getElementById('openBackupForm');
-    this.backupButton.addEventListener('click', () => backupAccountModal.open());
+    this.backupButton.addEventListener('click', () => backupModal.open());
     
     this.removeButton = document.getElementById('openRemoveAccount');
     this.removeButton.addEventListener('click', () => removeAccountModal.open());
@@ -6215,7 +6196,7 @@ class ChatSettingsModal {
     this.fontSizeSlider = document.getElementById('chatSettingsFontSizeSlider');
     this.saveButton = document.getElementById('saveChatSettingsButton');
 
-    this.closeButton.addEventListener('click', () => this.handleClose());
+    this.closeButton.addEventListener('click', () => this.close());
     this.fontSizeSlider.addEventListener('input', () => this.handleSliderInput());
     this.saveButton.addEventListener('click', () => this.save());
 
@@ -6246,7 +6227,7 @@ class ChatSettingsModal {
     localStorage.setItem(this.storageKey, String(this.savedFontSizePx));
     this.applyChatFontSize();
     this.warningShown = false;
-    this.close();
+    this.forceClose();
   }
 
   updatePreview() {
@@ -6294,17 +6275,17 @@ class ChatSettingsModal {
     return this.draftFontSizePx !== this.savedFontSizePx;
   }
 
-  handleClose() {
+  close() {
     if (this.hasUnsavedChanges() && !this.warningShown) {
       this.warningShown = true;
       showToast('Press back again to discard changes.', 5000, 'warning');
       return;
     }
 
-    this.close();
+    this.forceClose();
   }
 
-  close() {
+  forceClose() {
     this.modal.classList.remove('active');
     this.draftFontSizePx = this.savedFontSizePx;
     this.warningShown = false;
@@ -6738,7 +6719,7 @@ class ScanQRModal {
   }
 }
 
-const scanQRModal = new ScanQRModal();
+const qrScanModal = new ScanQRModal();
 
 /**
  * Validate the balance of the user
@@ -6997,14 +6978,7 @@ class SignInModal {
     this.actionRecreateButton.addEventListener('click', runSheetAction((username) => this.openRecreateFlow(username)));
     this.actionRemoveButton.addEventListener('click', runSheetAction((username) => removeAccountModal.removeAccount(username)));
 
-    this.backButton.addEventListener('click', () => {
-      if (this.isCompletingSignIn) return;
-      if (this.actionSheetOverlay.classList.contains('active')) {
-        this.closeActionSheet();
-        return;
-      }
-      this.close();
-    });
+    this.backButton.addEventListener('click', () => this.close());
   }
 
   /** Hide the account error action sheet. */
@@ -7047,7 +7021,7 @@ class SignInModal {
 
     createAccountModal.usernameInput.value = username;
     createAccountModal.privateKeyInput.value = privateKey;
-    this.close();
+    this.forceClose();
     createAccountModal.open();
     createAccountModal.usernameInput.dispatchEvent(new Event('input'));
   }
@@ -7319,7 +7293,7 @@ class SignInModal {
 
       // No accounts on this device — open Create Account instead.
       if (usernames.length === 0) {
-        this.close();
+        this.forceClose();
         createAccountModal.open();
         return;
       }
@@ -7348,6 +7322,16 @@ class SignInModal {
   }
 
   close() {
+    if (this.isCompletingSignIn) return;
+    if (this.actionSheetOverlay.classList.contains('active')) {
+      this.closeActionSheet();
+      return;
+    }
+
+    this.forceClose();
+  }
+
+  forceClose() {
     this.accountClickSeq++;
     this.selectedUsername = null;
     this.setCompletingSignIn(false);
@@ -7423,7 +7407,7 @@ class SignInModal {
     }
 
     // Close modal and proceed to app
-    this.close();
+    this.forceClose();
     welcomeScreen.close();
     
     // Log storage information after successful sign-in
@@ -7558,7 +7542,7 @@ class MyInfoModal {
     this.avatarEditButton.setAttribute('aria-label', 'Edit photo');
 
     this.backButton.addEventListener('click', () => this.close());
-    this.editButton.addEventListener('click', () => myProfileModal.open());
+    this.editButton.addEventListener('click', () => accountModal.open());
 
     // Copy address functionality
     this.copyButton.addEventListener('click', () => this.copyAddress());
@@ -8772,7 +8756,7 @@ class HistoryModal {
     
     const type = item.querySelector('.transaction-type')?.textContent;
     if (type.includes('stake')) {
-      validatorStakingModal.open();
+      validatorModal.open();
       return;
     }
     
@@ -11875,7 +11859,7 @@ class SearchMessagesModal {
   }
 
   load() {
-    this.modal = document.getElementById('searchModal');
+    this.modal = document.getElementById('messageSearchModal');
     this.searchInput = document.getElementById('messageSearch');
     this.closeButton = document.getElementById('closeSearchModal');
     this.searchResults = document.getElementById('searchResults');
@@ -12065,7 +12049,7 @@ class SearchMessagesModal {
   }
 }
 
-const searchMessagesModal = new SearchMessagesModal();
+const messageSearchModal = new SearchMessagesModal();
 
 class SearchContactsModal {
   constructor() {}
@@ -12091,7 +12075,7 @@ class SearchContactsModal {
 
           const results = this.searchContacts(searchText);
           if (results.length === 0) {
-            searchMessagesModal.displayEmptyState('contactSearchResults', 'No contacts found');
+            messageSearchModal.displayEmptyState('contactSearchResults', 'No contacts found');
           } else {
             this.displayContactResults(results, searchText);
           }
@@ -12306,7 +12290,7 @@ class SearchContactsModal {
   }
 }
 
-const searchContactsModal = new SearchContactsModal();
+const contactSearchModal = new SearchContactsModal();
 
 // Create a display info object from a contact object
 function createDisplayInfo(contact) {
@@ -13723,10 +13707,14 @@ function updateUIForConnectivity() {
  * buttons aren't incorrectly enabled if they should remain disabled for other reasons.
  */
 function revalidateButtonStates() {
+  if (typeof createAccountModal !== 'undefined' && createAccountModal.controls) {
+    createAccountModal.refreshControlStates();
+  }
+
   // Check if validator modal is open and refresh it to re-validate all button states
-  if (typeof validatorStakingModal !== 'undefined' && validatorStakingModal.isActive()) {
-    validatorStakingModal.close();
-    validatorStakingModal.open();
+  if (typeof validatorModal !== 'undefined' && validatorModal.isActive()) {
+    validatorModal.close();
+    validatorModal.open();
   }
 
   // Check if friend modal is open and re-validate submit button
@@ -14011,7 +13999,7 @@ class RemoveAccountModal {
     this.modal = document.getElementById('removeAccountModal');
     document.getElementById('closeRemoveAccountModal').addEventListener('click', () => this.close());
     document.getElementById('confirmRemoveAccount').addEventListener('click', () => this.removeAccount());
-    document.getElementById('openBackupFromRemove').addEventListener('click', () => backupAccountModal.open());
+    document.getElementById('openBackupFromRemove').addEventListener('click', () => backupModal.open());
   }
 
   signin() {
@@ -15237,7 +15225,7 @@ class BackupAccountModal {
     this.updateButtonState();
   }
 }
-const backupAccountModal = new BackupAccountModal();
+const backupModal = new BackupAccountModal();
 
 class RestoreAccountModal {
   constructor() {
@@ -15400,7 +15388,7 @@ class RestoreAccountModal {
     try {
       // Start OAuth flow using the backup modal's auth method
       showToast('Approve Drive access in the Google window.', 3000, 'info');
-      const tokenData = await backupAccountModal.startGoogleDriveAuth();
+      const tokenData = await backupModal.startGoogleDriveAuth();
       
       // Show picker modal and load files
       this.pickerModal.classList.add('active');
@@ -16059,7 +16047,7 @@ class RestoreAccountModal {
     }
   }
 }
-const restoreAccountModal = new RestoreAccountModal();
+const importModal = new RestoreAccountModal();
 
 class TollModal {
   constructor() {
@@ -16590,7 +16578,7 @@ class UpdateWarningModal {
 
     // Set up event listeners
     this.closeButton.addEventListener('click', () => this.close());
-    this.backupFirstBtn.addEventListener('click', () => backupAccountModal.open());
+    this.backupFirstBtn.addEventListener('click', () => backupModal.open());
     this.proceedToStoreBtn.addEventListener('click', withButtonCooldown(
       this.proceedToStoreBtn,
       BUTTON_COOLDOWN_MS,
@@ -16911,7 +16899,7 @@ class MyProfileModal {
     }
   }
 }
-const myProfileModal = new MyProfileModal();
+const accountModal = new MyProfileModal();
 
 class ValidatorStakingModal {
   constructor() {
@@ -17528,7 +17516,7 @@ class ValidatorStakingModal {
     return this.modal?.classList.contains('active') || false;
   }
 }
-const validatorStakingModal = new ValidatorStakingModal();
+const validatorModal = new ValidatorStakingModal();
 
 class StakeValidatorModal {
   constructor() {
@@ -17573,7 +17561,7 @@ class StakeValidatorModal {
       this.amountInput.value = normalizeUnsignedFloat(this.amountInput.value);
     });
     this.amountInput.addEventListener('input', this.debouncedValidateStakeInputs);
-    this.scanStakeQRButton.addEventListener('click', () => scanQRModal.open());
+    this.scanStakeQRButton.addEventListener('click', () => qrScanModal.open());
     this.uploadStakeQRButton.addEventListener('click', () => this.stakeQRFileInput.click());
     this.stakeQRFileInput.addEventListener('change', (event) => sendAssetFormModal.handleQRFileSelect(event, this));
     this.faucetButton.addEventListener('click', withButtonCooldown(
@@ -17591,7 +17579,7 @@ class StakeValidatorModal {
     this.modal.classList.add('active');
 
     // Set the correct fill function for the staking context
-    scanQRModal.fillFunction = this.fillFromQR.bind(this);
+    qrScanModal.fillFunction = this.fillFromQR.bind(this);
 
     // Display Available Balance and Fee
     this.updateStakeBalanceDisplay();
@@ -17668,11 +17656,11 @@ class StakeValidatorModal {
 
         showToast('Submitted stake transaction...', 3000, 'loading');
 
-        validatorStakingModal.close();
+        validatorModal.close();
         this.nodeAddressInput.value = ''; // Clear form
         this.amountInput.value = '';
         this.close();
-        validatorStakingModal.open();
+        validatorModal.open();
       }
     } catch (error) {
       console.error('Stake transaction error:', error);
@@ -17890,7 +17878,7 @@ class StakeValidatorModal {
     }
   }
 }
-const stakeValidatorModal = new StakeValidatorModal();
+const stakeModal = new StakeValidatorModal();
 
 const CHAT_REACTION_SHEET_CATEGORY_MAP = new Map(
   CHAT_REACTION_SHEET_CATEGORIES.map((category) => [category.key, category])
@@ -26456,13 +26444,13 @@ class ShareContactsModal {
     this.closeButton = document.getElementById('closeShareContactsModal');
 
     // Event listeners
-    this.closeButton.addEventListener('click', () => this.handleClose());
+    this.closeButton.addEventListener('click', () => this.close());
     this.allNoneButton.addEventListener('click', () => this.toggleAllNone());
     this.doneButton.addEventListener('click', withButtonCooldown(this.doneButton, BUTTON_COOLDOWN_MS, null, () => this.handleDone()));
     this.contactsList.addEventListener('click', (e) => this.handleContactClick(e));
     this.actionButton.addEventListener('click', () => {
       if (this.recipientAddress) {
-        this.close();
+        this.forceClose();
         friendModal.setAddress(this.recipientAddress);
         friendModal.open();
       }
@@ -26748,19 +26736,19 @@ class ShareContactsModal {
   /**
    * Handles back/close button click with warning if contacts are selected
    */
-  handleClose() {
+  close() {
     if (this.selectedContacts.size > 0 && !this.warningShown) {
       this.warningShown = true;
       showToast('You have contacts selected. Click back again to discard.', 0, 'warning');
       return;
     }
-    this.close();
+    this.forceClose();
   }
 
   /**
    * Closes the modal
    */
-  close() {
+  forceClose() {
     this.modal.classList.remove('active');
     // Reset warning state so it can be shown again on next open
     this.warningShown = false;
@@ -26912,7 +26900,7 @@ class ShareContactsModal {
       // Update attachment preview in chat modal
       chatModal.showAttachmentPreview();
 
-      this.close();
+      this.forceClose();
     } catch (err) {
       console.error('Failed to generate/upload VCF:', err);
       showToast('Failed to share contacts', 0, 'error');
@@ -26948,13 +26936,13 @@ class ImportContactsModal {
     this.closeButton = document.getElementById('closeImportContactsModal');
 
     // Event listeners
-    this.closeButton.addEventListener('click', () => this.handleClose());
+    this.closeButton.addEventListener('click', () => this.close());
     this.allNoneButton.addEventListener('click', () => this.toggleAllNone());
     this.doneButton.addEventListener('click', withButtonCooldown(this.doneButton, BUTTON_COOLDOWN_MS, null, () => this.handleDone()));
     this.contactsList.addEventListener('click', (e) => this.handleContactClick(e));
     this.actionButton.addEventListener('click', () => {
       if (this.recipientAddress) {
-        this.close();
+        this.forceClose();
         friendModal.setAddress(this.recipientAddress);
         friendModal.open();
       }
@@ -27037,7 +27025,7 @@ class ImportContactsModal {
       const netId = this.extractNetId(vcfContent);
       if (netId && netId !== network.netid) {
         showToast('Network ID mismatch - contacts are from a different network', 0, 'error');
-        this.close();
+        this.forceClose();
         return;
       }
 
@@ -27068,7 +27056,7 @@ class ImportContactsModal {
       console.error('Failed to load VCF:', err);
       logsModal.log('❌ Failed to load VCF:', err?.message || String(err));
       showToast('Failed to load contacts file', 0, 'error');
-      this.close();
+      this.forceClose();
     }
   }
 
@@ -27468,19 +27456,19 @@ class ImportContactsModal {
   /**
    * Handles back/close button click with warning if contacts are selected
    */
-  handleClose() {
+  close() {
     if (this.selectedContacts.size > 0 && !this.warningShown) {
       this.warningShown = true;
       showToast('You have contacts selected. Click back again to discard.', 0, 'warning');
       return;
     }
-    this.close();
+    this.forceClose();
   }
 
   /**
    * Closes the modal
    */
-  close() {
+  forceClose() {
     this.modal.classList.remove('active');
     this.warningShown = false;
     this.parsedContacts = [];
@@ -27666,7 +27654,7 @@ class ImportContactsModal {
         showToast('Only 20 contacts can be imported at a time. Please import the remaining contacts in another batch.', 0, 'warning');
       }
 
-      this.close();
+      this.forceClose();
 
     } catch (err) {
       console.error('Failed to import contacts:', err);
@@ -27739,12 +27727,10 @@ class CallScheduleChoiceModal {
 
     const onNow = () => this._select('now');
     const onSchedule = () => this._select('schedule');
-    const onCancel = () => this._select(null);
-
     if (this.nowBtn) this.nowBtn.addEventListener('click', withButtonCooldown(this.nowBtn, BUTTON_COOLDOWN_MS, null, onNow));
     if (this.scheduleBtn) this.scheduleBtn.addEventListener('click', withButtonCooldown(this.scheduleBtn, BUTTON_COOLDOWN_MS, null, onSchedule));
-    if (this.cancelBtn) this.cancelBtn.addEventListener('click', onCancel);
-    if (this.closeBtn) this.closeBtn.addEventListener('click', onCancel);
+    if (this.cancelBtn) this.cancelBtn.addEventListener('click', () => this.close());
+    if (this.closeBtn) this.closeBtn.addEventListener('click', () => this.close());
   }
 
   open(onSelect) {
@@ -27759,6 +27745,10 @@ class CallScheduleChoiceModal {
     const cb = this.onSelect;
     this.onSelect = null;
     if (cb) cb(value);
+  }
+
+  close() {
+    this._select(null);
   }
 
   _startRecipientTimeUpdates() {
@@ -27897,6 +27887,10 @@ class DateTimePickerModal {
   }
 
   _onCancel() {
+    this.close();
+  }
+
+  close() {
     this._closeWith(null);
   }
 
@@ -28862,7 +28856,7 @@ class NewChatModal {
     this.recipientInput = document.getElementById('chatRecipient');
     this.submitButton = document.querySelector('#newChatForm button[type="submit"]');
 
-    this.closeNewChatModalButton.addEventListener('click', this.closeNewChatModal.bind(this));
+    this.closeNewChatModalButton.addEventListener('click', this.close.bind(this));
     this.newChatForm.addEventListener('submit', withButtonCooldown(
       this.submitButton,
       BUTTON_COOLDOWN_MS,
@@ -28913,7 +28907,7 @@ class NewChatModal {
    * It will close the modal and reset the form
    * @returns {void}
    */
-  closeNewChatModal() {
+  close() {
     this.modal.classList.remove('active');
     this.newChatForm.reset();
     if (chatsScreen.isActive()) {
@@ -29017,14 +29011,14 @@ class NewChatModal {
     chatsData.contacts[recipientAddress].username = username;
 
     // Close new chat modal and open chat modal
-    this.closeNewChatModal();
+    this.close();
     chatModal.open(recipientAddress);
   }
 
   // Open camera scanner and fill username from scanned QR
   scanUsernameFromQR() {
     try {
-      scanQRModal.fillFunction = (data) => {
+      qrScanModal.fillFunction = (data) => {
         const user = this.parseUsernameFromQRData(data);
         if (user) {
           this.recipientInput.value = normalizeUsername(user);
@@ -29033,7 +29027,7 @@ class NewChatModal {
           showToast('QR does not contain a username', 0, 'error');
         }
       };
-      scanQRModal.open();
+      qrScanModal.open();
     } catch (e) {
       console.error('Error starting QR scan:', e);
       showToast('Unable to start camera for scanning.', 0, 'error');
@@ -29188,6 +29182,7 @@ class CreateAccountModal {
   constructor() {
     this.checkTimeout = null;
     this.isCreatingAccount = false;
+    this.isUsernameAvailable = false;
   }
 
   load() {
@@ -29209,22 +29204,10 @@ class CreateAccountModal {
     this.privateAccountCheckbox = document.getElementById('togglePrivateAccount');
     this.privateAccountHelpButton = document.getElementById('privateAccountHelpButton');
     this.privateAccountTemplate = document.getElementById('privateAccountHelpMessageTemplate');
+    this.controls = this.modal.querySelectorAll('button, input');
 
     // Setup event listeners
-    this.form.addEventListener('submit', withButtonCooldown(
-      [
-        this.submitButton,
-        this.migrateAccountsButton,
-        this.toggleButton,
-        this.usernameInput,
-        this.privateKeyInput,
-        this.backButton,
-        this.privateAccountCheckbox
-      ],
-      BUTTON_COOLDOWN_MS,
-      null,
-      (e) => this.handleSubmit(e)
-    ));
+    this.form.addEventListener('submit', (event) => this.handleSubmit(event));
     this.usernameInput.addEventListener('input', (e) => this.handleUsernameInput(e));
     this.toggleButton.addEventListener('change', () => this.handleTogglePrivateKeyInput());
     this.toggleMoreOptions.addEventListener('change', () => this.handleToggleMoreOptions());
@@ -29247,10 +29230,12 @@ class CreateAccountModal {
       showToast(message, 0, 'info', true);
     });
 
-    this.migrateAccountsButton.addEventListener('click', async () => await migrateAccountsModal.open());
+    this.migrateAccountsButton.addEventListener('click', () => migrateAccountsModal.open());
   }
 
   open() {
+    if (this.isCreatingAccount) return;
+
     if (migrateAccountsModal.hasMigratableAccounts()) {
       this.migrateAccountsSection.style.display = 'block';
     } else {
@@ -29267,12 +29252,16 @@ class CreateAccountModal {
 
   // we still need to keep this since it can be called by other modals
   close() {
+    if (this.isCreatingAccount) return;
+
     // reload the welcome page so that if accounts were migrated the signin button will be shown
     this.modal.classList.remove('active');
   }
 
   // this is called by the back button on the create account modal
   closeWithReload() {
+    if (this.isCreatingAccount) return;
+
     // reload the welcome page so that if accounts were migrated the signin button will be shown
     const newUrl = window.location.href.split('?')[0];
     window.location.replace(newUrl);
@@ -29280,11 +29269,15 @@ class CreateAccountModal {
   }
 
   openWithReset() {
+    if (this.isCreatingAccount) return;
+
     // Clear form fields
     this.usernameInput.value = '';
     this.privateKeyInput.value = '';
     this.usernameAvailable.style.display = 'none';
     this.privateKeyError.style.display = 'none';
+    this.isUsernameAvailable = false;
+    this.refreshSubmitButton();
     
     // Reset More Options section
     this.toggleMoreOptions.checked = false;
@@ -29314,12 +29307,29 @@ class CreateAccountModal {
     return this.modal?.classList.contains('active') || false;
   }
 
-  startAccountCreationUnloadWarning() {
-    this.isCreatingAccount = true;
+  setAccountCreationInProgress(isInProgress) {
+    this.isCreatingAccount = isInProgress;
+    this.refreshControlStates();
   }
 
-  stopAccountCreationUnloadWarning() {
-    this.isCreatingAccount = false;
+  refreshControlStates() {
+    this.controls.forEach((control) => {
+      const requiresConnection = control.hasAttribute('data-requires-connection');
+      const isMigrationBusy =
+        control === this.migrateAccountsButton &&
+        (migrateAccountsModal.isOpening || migrateAccountsModal.isMigrating);
+      control.disabled = this.isCreatingAccount || isMigrationBusy || (requiresConnection && !isOnline);
+    });
+    this.refreshSubmitButton();
+  }
+
+  refreshSubmitButton() {
+    this.submitButton.disabled =
+      this.isCreatingAccount ||
+      migrateAccountsModal.isOpening ||
+      migrateAccountsModal.isMigrating ||
+      !this.isUsernameAvailable ||
+      !isOnline;
   }
 
   handleUsernameInput(e) {
@@ -29333,7 +29343,8 @@ class CreateAccountModal {
 
     // Reset display
     this.usernameAvailable.style.display = 'none';
-    this.submitButton.disabled = true;
+    this.isUsernameAvailable = false;
+    this.refreshSubmitButton();
 
     // Check if username is too short
     if (username.length < 3) {
@@ -29346,22 +29357,25 @@ class CreateAccountModal {
     // Check network availability
     this.checkTimeout = setTimeout(async () => {
       const taken = await checkUsernameAvailability(username);
+      if (username !== normalizeUsername(this.usernameInput.value)) return;
+
       if (taken == 'taken') {
         this.usernameAvailable.textContent = 'taken';
         this.usernameAvailable.style.color = '#dc3545';
         this.usernameAvailable.style.display = 'inline';
-        this.submitButton.disabled = true;
+        this.isUsernameAvailable = false;
       } else if (taken == 'available') {
         this.usernameAvailable.textContent = 'available';
         this.usernameAvailable.style.color = '#28a745';
         this.usernameAvailable.style.display = 'inline';
-        this.submitButton.disabled = false;
+        this.isUsernameAvailable = true;
       } else {
         this.usernameAvailable.textContent = 'network error';
         this.usernameAvailable.style.color = '#dc3545';
         this.usernameAvailable.style.display = 'inline';
-        this.submitButton.disabled = true;
+        this.isUsernameAvailable = false;
       }
+      this.refreshSubmitButton();
     }, 1000);
   }
 
@@ -29426,6 +29440,14 @@ class CreateAccountModal {
 
   async handleSubmit(event) {
     event.preventDefault();
+
+    if (
+      this.isCreatingAccount ||
+      migrateAccountsModal.isOpening ||
+      migrateAccountsModal.isMigrating ||
+      migrateAccountsModal.isActive() ||
+      !this.isUsernameAvailable
+    ) return;
     
     // Validate username at submit time after normalization
     const username = normalizeUsername(this.usernameInput.value);
@@ -29473,8 +29495,6 @@ class CreateAccountModal {
       this.privateKeyError.style.display = 'none'; // Ensure hidden if generated
     }
 
-    this.startAccountCreationUnloadWarning();
-
     // Generate uncompressed public key
     const publicKey = getPublicKey(privateKey);
     const publicKeyHex = bin2hex(publicKey);
@@ -29483,6 +29503,8 @@ class CreateAccountModal {
     // Generate address from public key
     const address = generateAddress(publicKey);
     const addressHex = bin2hex(address);
+
+    this.setAccountCreationInProgress(true);
 
     // If a private key was provided, check if the derived address already exists on the network
     if (providedPrivateKey) {
@@ -29497,7 +29519,7 @@ class CreateAccountModal {
           this.privateKeyError.textContent = 'An account already exists for this private key.';
           this.privateKeyError.style.color = '#dc3545';
           this.privateKeyError.style.display = 'inline';
-          this.stopAccountCreationUnloadWarning();
+          this.setAccountCreationInProgress(false);
           return; // Stop the account creation process
         } else {
           this.privateKeyError.style.display = 'none';
@@ -29507,7 +29529,7 @@ class CreateAccountModal {
         this.privateKeyError.textContent = 'Network error checking key. Please try again.';
         this.privateKeyError.style.color = '#dc3545';
         this.privateKeyError.style.display = 'inline';
-        this.stopAccountCreationUnloadWarning();
+        this.setAccountCreationInProgress(false);
         return; // Stop process on error
       }
     }
@@ -29546,7 +29568,7 @@ class CreateAccountModal {
       if (waitingToastId) hideToast(waitingToastId);
       showToast(`Failed to fetch network parameters, try again later.`, 0, 'error');
       console.error('Failed to fetch network parameters, using defaults:', error);
-      this.stopAccountCreationUnloadWarning();
+      this.setAccountCreationInProgress(false);
       return;
     }
 
@@ -29570,16 +29592,15 @@ class CreateAccountModal {
         await new Promise((resolve) => setTimeout(resolve, 1000));
         if (waitingToastId) hideToast(waitingToastId);
 //        showToast('Account created successfully!', 3000, 'success');
-        this.close();
-        welcomeScreen.close();
         // TODO: may not need to get set since gets set in `getChats`. Need to check signin flow.
         //getChats.lastCall = getCorrectedTimestamp();
         // Store updated accounts back in localStorage
         existingAccounts.netids[netid].usernames[username] = { address: myAccount.keys.address };
         localStorage.setItem('accounts', stringify(existingAccounts));
         saveState();
-        this.stopAccountCreationUnloadWarning();
-
+        this.setAccountCreationInProgress(false);
+        this.close();
+        welcomeScreen.close();
         // Refresh wallet balance immediately after account creation for fee-dependent screens.
         try {
           myData.wallet.timestamp = 0;
@@ -29603,7 +29624,7 @@ class CreateAccountModal {
         }
 
         clearMyData();
-        this.stopAccountCreationUnloadWarning();
+        this.setAccountCreationInProgress(false);
 
         // Note: `checkPendingTransactions` will also remove the item from `myData.pending` if it's rejected by the service.
         return;
@@ -29623,7 +29644,7 @@ class CreateAccountModal {
       }
 
       clearMyData();
-      this.stopAccountCreationUnloadWarning();
+      this.setAccountCreationInProgress(false);
 
       // no toast here since injectTx will show it
       return;
@@ -29719,7 +29740,7 @@ class SendAssetFormModal {
     this.scanQRButton = document.getElementById('scanQRButton');
     this.uploadQRButton = document.getElementById('uploadQRButton');
     this.qrFileInput = document.getElementById('qrFileInput');
-    this.scanQRButton.addEventListener('click', () => scanQRModal.open());
+    this.scanQRButton.addEventListener('click', () => qrScanModal.open());
     this.uploadQRButton.addEventListener('click', () => {this.qrFileInput.click();});
     this.qrFileInput.addEventListener('change', (event) => this.handleQRFileSelect(event, this));
   }
@@ -29746,7 +29767,7 @@ class SendAssetFormModal {
 
     this.usernameAvailable.style.display = 'none';
     this.submitButton.disabled = true;
-    scanQRModal.fillFunction = this.fillFromQR.bind(this); // set function to handle filling the payment form from QR data
+    qrScanModal.fillFunction = this.fillFromQR.bind(this); // set function to handle filling the payment form from QR data
 
     if (this.username) {
       this.usernameInput.value = this.username;
@@ -31482,7 +31503,10 @@ const bridgeModal = new BridgeModal();
  * @description A modal for migrating accounts from different networks
  */
 class MigrateAccountsModal {
-  constructor() { }
+  constructor() {
+    this.isOpening = false;
+    this.isMigrating = false;
+  }
 
   load() {
     this.modal = document.getElementById('migrateAccountsModal');
@@ -31507,11 +31531,23 @@ class MigrateAccountsModal {
   }
 
   async open() {
-    await this.populateAccounts();
-    this.modal.classList.add('active');
+    if (this.isOpening || this.isMigrating || this.isActive() || createAccountModal.isCreatingAccount) return;
+
+    this.isOpening = true;
+    createAccountModal.refreshControlStates();
+    try {
+      await this.populateAccounts();
+      if (createAccountModal.isCreatingAccount) return;
+      this.modal.classList.add('active');
+    } finally {
+      this.isOpening = false;
+      createAccountModal.refreshControlStates();
+    }
   }
 
   close() {
+    if (this.isMigrating) return;
+
     this.modal.classList.remove('active');
     this.clearForm();
   }
@@ -31684,6 +31720,19 @@ class MigrateAccountsModal {
   async handleSubmit(event) {
     event.preventDefault();
 
+    if (this.isMigrating) return;
+
+    this.isMigrating = true;
+    try {
+      createAccountModal.refreshControlStates();
+      await this.migrateSelectedAccounts();
+    } finally {
+      this.isMigrating = false;
+      createAccountModal.refreshControlStates();
+    }
+  }
+
+  async migrateSelectedAccounts() {
     const selectedAccounts = this.accountList.querySelectorAll('input[type="checkbox"]:checked');
   
     const results = {}
@@ -31757,7 +31806,7 @@ class MigrateAccountsModal {
     let fileContent = loadState(username+'_'+netid, true)
   
     // Perform netid substitution
-    let substitutionResult = restoreAccountModal.performStringSubstitution(fileContent, {
+    let substitutionResult = importModal.performStringSubstitution(fileContent, {
       oldString: netid,
       newString: newNetId
     });
@@ -32326,7 +32375,7 @@ class LaunchModal {
       async (event) => await this.handleSubmit(event)
     ));
     this.urlInput.addEventListener('input', () => this.updateButtonState());
-    this.backupButton.addEventListener('click', () => backupAccountModal.open());
+    this.backupButton.addEventListener('click', () => backupModal.open());
 
     document.addEventListener('click', (event) => {
       const target = event.target;
@@ -32337,7 +32386,7 @@ class LaunchModal {
         if (toastElement && toastElement.id) {
           hideToast(toastElement.id);
         }
-        backupAccountModal.open();
+        backupModal.open();
       }
     }, { capture: true });
   }
@@ -33224,8 +33273,8 @@ async function refreshActiveBalanceDisplays(didSettlePendingState) {
     await sendAssetFormModal.updateAvailableBalance();
   }
 
-  if (stakeValidatorModal.isActive()) {
-    await stakeValidatorModal.updateStakeBalanceDisplay();
+  if (stakeModal.isActive()) {
+    await stakeModal.updateStakeBalanceDisplay();
   }
 }
 
@@ -33357,9 +33406,9 @@ async function checkPendingTransactionsOnce() {
           // show toast notification with the success message
           showToast(`${type === 'deposit_stake' ? 'Stake' : 'Unstake'} transaction successful`, 5000, 'success');
           // refresh only if validator modal is open
-          if (validatorStakingModal.isActive()) {
-            validatorStakingModal.close();
-            validatorStakingModal.open();
+          if (validatorModal.isActive()) {
+            validatorModal.close();
+            validatorModal.open();
           }
         }
 
@@ -33487,10 +33536,10 @@ async function checkPendingTransactionsOnce() {
           // remove from wallet history
           myData.wallet.history = myData.wallet.history.filter((tx) => tx.txid !== txid);
 
-          if (validatorStakingModal.isActive()) {
+          if (validatorModal.isActive()) {
             // refresh the validator modal
-            validatorStakingModal.close();
-            validatorStakingModal.open();
+            validatorModal.close();
+            validatorModal.open();
           }
         }
       } else {
@@ -35173,9 +35222,6 @@ function handleBrowserBackButton(event) {
   const topModal = findTopModal();
   
   if (topModal) {
-    const modalId = topModal.id;
-    const modalInstance = window[modalId];
-    
     const closed = closeTopModal(topModal)
     if (closed){
       return true;
@@ -35191,135 +35237,44 @@ function findTopModal() {
   return topModal;
 }
 
-function closeTopModal(topModal){
-  const modalId = topModal.id;
-  switch (modalId) {
-    case 'chatModal':
-      chatModal.close();
-      break;
-    case 'menuModal':
-      menuModal.close();
-      break;
-    case 'assetsModal':
-      evmAssets.close(modalId);
-      break;
-    case 'assetDetailsModal':
-      evmAssets.close(modalId);
-      break;
-    case 'daoModal':
-      daoModal.close();
-      break;
-    case 'addProposalModal':
-      addProposalModal.close();
-      break;
-    case 'confirmProposalModal':
-      confirmProposalModal.close();
-      break;
-    case 'proposalInfoModal':
-      proposalInfoModal.close();
-      break;
-    case 'settingsModal':
-      settingsModal.close();
-      break;
-    case 'chatSettingsModal':
-      chatSettingsModal.handleClose();
-      break;
-    case 'sendAssetFormModal':
-      sendAssetFormModal.close();
-      break;
-    case 'historyModal':
-      historyModal.close();
-      break;
-    case 'scanQRModal':
-      scanQRModal.close();
-      break;
-    case 'newChatModal':
-      newChatModal.close();
-      break;
-    case 'createAccountModal':
-      createAccountModal.close();
-      break;
-    case 'backupAccountModal':
-      backupAccountModal.close();
-      break;
-    case 'restoreAccountModal':
-      restoreAccountModal.close();
-      break;
-    case 'tollModal':
-      tollModal.close();
-      break;
-    case 'inviteModal':
-      inviteModal.close();
-      break;
-    case 'aboutModal':
-      aboutModal.close();
-      break;
-    case 'helpModal':
-      helpModal.close();
-      break;
-    case 'farmModal':
-      farmModal.close();
-      break;
-    case 'logsModal':
-      logsModal.close();
-      break;
-    case 'myProfileModal':
-      myProfileModal.close();
-      break;
-    case 'validatorStakingModal':
-      validatorStakingModal.close();
-      break;
-    case 'stakeValidatorModal':
-      stakeValidatorModal.close();
-      break;
-    case 'contactInfoModal':
-      contactInfoModal.close();
-      break;
-    case 'friendModal':
-      friendModal.close();
-      break;
-    case 'editContactModal':
-      editContactModal.close();
-      break;
-    case 'searchMessagesModal':
-      searchMessagesModal.close();
-      break;
-    case 'searchContactsModal':
-      searchContactsModal.close();
-      break;
-    case 'receiveModal':
-      receiveModal.close();
-      break;
-    case 'sendAssetConfirmModal':
-      sendAssetConfirmModal.close();
-      break;
-    case 'failedTransactionModal':
-      failedTransactionModal.close();
-      break;
-    case 'bridgeModal':
-      bridgeModal.close();
-      break;
-    case 'migrateAccountsModal':
-      migrateAccountsModal.close();
-      break;
-    case 'lockModal':
-      lockModal.close();
-      break;
-    case 'unlockModal':
-      unlockModal.close();
-      break;
-    case 'launchModal':
-      launchModal.close();
-      break;
-    case 'updateWarningModal':
-      updateWarningModal.close();
-      break;
-    case 'removeAccountModal':
-      removeAccountModal.close();
-      break;
-    default:
-      console.warn('Unknown modal:', modalId);
-      return false;
+function createModalCloseHandlers(modals) {
+  return Object.entries(modals).map(([modalId, modal]) => [modalId, () => modal.close()]);
+}
+
+const modalCloseHandlers = new Map([
+  ...createModalCloseHandlers({
+    chatModal, menuModal, daoModal, addProposalModal,
+    confirmProposalModal, proposalInfoModal, settingsModal, manageContactsModal,
+    welcomeMenuModal, sendAssetFormModal, historyModal, newChatModal,
+    createAccountModal, tollModal, inviteModal, aboutModal,
+    sourceModal, helpModal, farmModal, logsModal,
+    signInModal, myInfoModal, contactInfoModal, friendModal,
+    editContactModal, avatarEditModal, receiveModal,
+    failedTransactionModal, bridgeModal, migrateAccountsModal, lockModal,
+    unlockModal, launchModal, updateWarningModal, removeAccountModal,
+    removeAccountsModal, secretModal, callsModal, groupCallParticipantsModal,
+    callScheduleChoiceModal, dateTimePickerModal, callInviteModal, shareAttachmentModal,
+    chatSettingsModal, qrScanModal, backupModal, importModal,
+    accountModal, validatorModal, stakeModal, messageSearchModal, contactSearchModal,
+    importContactsModal, shareContactsModal,
+  }),
+  // Structural exceptions require an id or a controller-specific close method.
+  ['assetsModal', () => evmAssets.close('assetsModal')],
+  ['assetDetailsModal', () => evmAssets.close('assetDetailsModal')],
+  ['sendAssetConfirmModal', () => {
+    evmAssets.confirmationModal.reset();
+    sendAssetConfirmModal.close();
+  }],
+  ['googleDrivePickerModal', () => importModal.closeGoogleDrivePicker()],
+]);
+
+function closeTopModal({ id: modalId }) {
+  const closeModal = modalCloseHandlers.get(modalId);
+  if (!closeModal) {
+    console.warn('Unknown modal:', modalId);
+    return false;
   }
-  return true; // means we closed a modal
+
+  closeModal();
+  return true;
 }

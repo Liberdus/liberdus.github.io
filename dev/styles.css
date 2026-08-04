@@ -1876,6 +1876,12 @@ input[type='file'].form-control::file-selector-button {
   margin: 0;
 }
 
+#addProposalModal .dao-form-required {
+  color: var(--danger-color);
+  font-weight: var(--font-weight-semibold);
+  margin-left: 2px;
+}
+
 #addProposalModal .dao-form-label-with-help {
   align-items: center;
   display: flex;
@@ -7105,26 +7111,6 @@ small {
   min-height: var(--icon-button-height);
 }
 
-/* Filter icon button (funnel) */
-.icon-button.filter-icon {
-  border: none;
-  cursor: pointer;
-  color: var(--primary-color);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background-position: center;
-  background-repeat: no-repeat;
-  background-size: 20px;
-  opacity: 0.7;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M22 3H2l8 9v7l4 2v-9l8-9z'/%3E%3C/svg%3E");
-  width: var(--icon-button-width);
-  height: var(--icon-button-height);
-  padding: 5px;
-  min-width: var(--icon-button-width);
-  min-height: var(--icon-button-height);
-}
-
 .hidden {
   display: none;
 }
@@ -8337,12 +8323,6 @@ small {
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 2l9 5-9 5-9-5 9-5z'/%3E%3Cpath d='M3 7v10l9 5 9-5V7'/%3E%3Cpath d='M12 12v10'/%3E%3C/svg%3E");
 }
 
-/* DAO modal: place the header menu button on the right */
-#daoModal #daoFilterButton {
-  position: absolute;
-  right: 16px;
-}
-
 /* DAO modal: keep the header fixed while the proposal list scrolls. */
 #daoModal .modal-content {
   display: flex;
@@ -8353,53 +8333,190 @@ small {
   position: relative;
 }
 
-/* DAO modal: Active/Archived toggle */
+/* DAO modal: filter bar stays fixed; Active/Archived scrolls with the list. */
 #daoModal .dao-toolbar {
-  padding: 0 16px 10px;
-  position: sticky;
-  top: 0;
-  z-index: 2;
   background: var(--background-color);
+  display: flex;
+  flex-direction: column;
+  flex: 0 0 auto;
+  z-index: 2;
 }
 
-#daoModal .dao-group-toggle {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
+#daoModal .dao-list-pane {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+}
+
+#daoModal .dao-filter-bar {
+  background: rgba(61, 61, 206, 0.14);
+  border-bottom: 1px solid rgba(61, 61, 206, 0.22);
+  border-top: 1px solid rgba(61, 61, 206, 0.22);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 6px 8px;
+  width: 100%;
+}
+
+#daoModal .dao-filter-primary,
+#daoModal .dao-filter-overflow {
+  display: flex;
   gap: 6px;
-  padding: 6px;
-  border: 1px solid var(--border-color, rgba(0,0,0,0.12));
-  border-radius: 8px;
-  background: var(--hover-background-purple);
+  width: 100%;
 }
 
+#daoModal .dao-filter-primary {
+  flex-wrap: wrap;
+  min-width: 0;
+}
+
+#daoModal .dao-filter-overflow {
+  flex-wrap: wrap;
+}
+
+#daoModal .dao-filter-overflow[hidden] {
+  display: none;
+}
+
+#daoModal .dao-filter-chip,
 #daoModal .dao-group-toggle-button {
+  align-items: center;
   appearance: none;
+  background: transparent;
   border: 0;
   border-radius: 6px;
-  padding: 9px 10px;
-  font-family: var(--font-primary);
-  font-size: var(--font-size-sm);
-  font-weight: var(--font-weight-medium);
-  background: transparent;
   color: var(--text-color);
   cursor: pointer;
-  transition: background-color 0.15s ease;
+  display: inline-flex;
+  font-family: var(--font-primary);
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-medium);
+  gap: 6px;
+  justify-content: center;
+  min-height: 36px;
+  overflow: hidden;
+  white-space: nowrap;
 }
 
+#daoModal .dao-filter-chip:hover,
 #daoModal .dao-group-toggle-button:hover {
   background: var(--hover-background-dark);
 }
 
-#daoModal .dao-group-toggle-button.active {
-  background: var(--button-background);
-  color: var(--button-text);
+#daoModal .dao-filter-chip {
+  flex: 1 1 0;
+  line-height: 1.2;
+  min-width: max-content;
+  padding: 8px 6px;
+  transition: background-color 0.15s ease, color 0.15s ease, box-shadow 0.15s ease;
+}
+
+#daoModal .dao-filter-chip.active {
+  background: var(--primary-color);
   box-shadow: var(--elev-1, 0 1px 2px rgba(0,0,0,0.1));
+  color: var(--background-color);
+}
+
+#daoModal .dao-filter-chip-label,
+#daoModal .dao-group-toggle-label {
+  flex: 0 0 auto;
+}
+
+#daoModal .dao-filter-chip-count,
+#daoModal .dao-group-toggle-count {
+  align-items: center;
+  background: var(--hover-background);
+  border: 1px solid var(--border-color);
+  border-radius: 999px;
+  color: var(--secondary-text-color);
+  display: inline-flex;
+  flex: 0 0 auto;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  font-weight: var(--font-weight-semibold);
+  justify-content: center;
+  min-height: 20px;
+  min-width: 22px;
+  padding: 2px 6px;
+}
+
+#daoModal .dao-filter-chip.active .dao-filter-chip-count {
+  background: rgba(255, 255, 255, 0.18);
+  border-color: rgba(255, 255, 255, 0.28);
+  color: var(--background-color);
+}
+
+#daoModal .dao-filter-expand {
+  appearance: none;
+  background-color: transparent;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='%23666' stroke-width='2.25' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='9 18 15 12 9 6'/%3E%3C/svg%3E");
+  background-position: center;
+  background-repeat: no-repeat;
+  background-size: 16px;
+  border: 0;
+  border-radius: 6px;
+  cursor: pointer;
+  flex: 0 0 36px;
+  margin-left: auto;
+  min-height: 36px;
+  padding: 0;
+  transition: background-color 0.2s ease, transform 0.2s ease;
+  width: 36px;
+}
+
+#daoModal .dao-filter-expand:not(:disabled):hover {
+  background-color: var(--hover-background-dark);
+}
+
+#daoModal .dao-filter-expand:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+
+#daoModal .dao-filter-bar.expanded .dao-filter-expand {
+  transform: rotate(90deg);
+}
+
+@media (max-width: 400px) {
+  #daoModal .dao-filter-expand {
+    display: none;
+  }
+
+  #daoModal .dao-filter-overflow[hidden] {
+    display: flex;
+  }
+}
+
+#daoModal .dao-group-toggle {
+  background: var(--input-background);
+  border: 1px solid var(--border-color, rgba(0,0,0,0.12));
+  border-radius: 8px;
+  display: grid;
+  gap: 4px;
+  grid-template-columns: 1fr 1fr;
+  margin: 10px 16px;
+  padding: 4px;
+}
+
+#daoModal .dao-group-toggle-button {
+  padding: 8px 10px;
+  transition: background-color 0.15s ease, color 0.15s ease;
+}
+
+#daoModal .dao-group-toggle-button.active {
+  background: var(--hover-background-dark);
+}
+
+#daoModal .dao-group-toggle-button.active .dao-group-toggle-count {
+  background: rgba(0, 0, 0, 0.08);
+  border-color: rgba(0, 0, 0, 0.1);
 }
 
 #daoModal #daoProposalList {
-  flex: 1 1 auto;
   min-height: 0;
-  overflow-y: auto;
+  overflow: visible;
   padding-bottom: calc(160px + env(safe-area-inset-bottom, 0px));
 }
 
@@ -8537,52 +8654,6 @@ small {
 #daoModal .dao-row-preview--emergency {
   background: rgba(239, 108, 0, 0.12);
   border-color: rgba(239, 108, 0, 0.32);
-}
-
-#daoStatusContextMenu {
-  background: var(--background-color);
-  border: 1px solid var(--border-color, rgba(0,0,0,0.1));
-  border-radius: 12px;
-  box-shadow: var(--overlay-shadow-large);
-  max-width: calc(100vw - 24px);
-  min-width: 176px;
-  padding: 8px;
-  width: 176px;
-}
-
-#daoStatusContextMenu .dao-status-option {
-  border-radius: 8px;
-  gap: 12px;
-  justify-content: space-between;
-  min-height: 40px;
-  padding: 8px 10px;
-}
-
-#daoStatusContextMenu .dao-status-option:hover,
-#daoStatusContextMenu .dao-status-option.active {
-  background: var(--hover-background-purple);
-}
-
-#daoStatusContextMenu .dao-status-label {
-  flex: 1 1 auto;
-  min-width: 0;
-}
-
-#daoStatusContextMenu .dao-status-count {
-  align-items: center;
-  background: var(--hover-background);
-  border: 1px solid var(--border-color);
-  border-radius: 999px;
-  color: var(--secondary-text-color);
-  display: inline-flex;
-  flex: 0 0 auto;
-  font-family: var(--font-primary);
-  font-size: 12px;
-  font-weight: var(--font-weight-semibold);
-  justify-content: center;
-  min-height: 20px;
-  min-width: 28px;
-  padding: 2px 8px;
 }
 
 #lockModal p {
