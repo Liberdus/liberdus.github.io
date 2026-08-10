@@ -1,6 +1,6 @@
 # DAO (Proposals) UI
 
-This document describes the DAO / proposals feature as currently implemented in the web client, and what remains after the proposal list query integration.
+This document describes the DAO / proposals feature as currently implemented in the web client.
 
 ## What’s implemented (current behavior)
 
@@ -12,9 +12,8 @@ This document describes the DAO / proposals feature as currently implemented in 
 
 1. **DAO Modal**
    - Shows a list of proposals.
-   - Includes an **Active / Archived** segmented toggle.
-   - Includes a **Status filter** that filters by proposal status and shows **counts**.
-   - The **All** status filter displays every proposal in the selected Active / Archived group.
+   - Includes a **Status filter** for server-provided proposal statuses and their **counts**.
+   - The **All** status filter displays every proposal returned by the server summary.
    - The proposal list is filtered by the selected option.
    - List ordering is **newest to enter the selected state first** (sort by `stateEnteredAt` descending, falling back to `createdAt`).
    - Clicking a proposal opens the Proposal Info modal.
@@ -25,8 +24,9 @@ This document describes the DAO / proposals feature as currently implemented in 
      - Title
      - Summary
      - Type
-     - Type-specific fields (minimal dynamic fields)
-   - Proposal creation is present in the UI shell but is not connected to a backend transaction yet.
+     - A required **No change** option plus one or more options with parameter changes
+     - A separate type-specific change set for each option
+   - The UI validates and renders the nested proposal shape in the review modal, then signs and submits the nested proposal transaction.
 
 3. **Proposal Info Modal**
    - Displays proposal:
@@ -35,7 +35,7 @@ This document describes the DAO / proposals feature as currently implemented in 
      - Type label
      - State + timestamp + created-by
      - Summary
-     - Type-specific fields
+     - A card for every option, with each action option displaying only its matching nested parameter change set and its current/proposed values
    - Shows voting controls only when the proposal is in **Voting** state.
    - Voting is **Yes/No**, tracked per “voter id” derived from the current account:
      - `myAccount.address` / `myData.account.address` → fallback to username → fallback to `anon`.
@@ -51,21 +51,11 @@ The UI uses these statuses:
 - `accepted`
 - `applied`
 
-### Archived is a group, not a status
-
-- “Archived” is a **category/group** in the UI (Active vs Archived), not a status.
-- Archived proposals keep their underlying status (e.g. `applied`) and can still be filtered by status.
-- Auto-archiving rule:
-  - Proposals in these statuses are eligible to be auto-archived after 30 days in that state:
-    - `withheld`, `rejected`, `accepted`, `applied`
-
 ## Data model used by the UI
 
 The UI consumes an in-memory “store” shape:
 
-- `meta`: `{ count, active, archived }`
-- `activeProposals`: list of lightweight proposal metadata
-- `archivedProposals`: list of lightweight proposal metadata
+- `meta`: `{ count }`
 - `proposals`: map of `proposalId -> full proposal`
 
 Identifiers:
@@ -84,11 +74,17 @@ Full proposal fields (current shape in memory):
 - `fields` (type-specific)
 - `votes`: `{ yes, no, by: Record<voterId, 'yes'|'no'> }`
 
+For current multi-option proposals:
+
+- `options[0]` is the negative/no-change choice.
+- Each later option is mapped positionally to the selected type payload's nested change sets: `options[1]` → `changes[0]`, `options[2]` → `changes[1]`, and so on.
+- The creation UI produces this nested `changes: ParamChange[][]` shape rather than the deprecated flat change list.
+
 ## Where the code lives
 
 - DAO UI implementation: [app.js](app.js)
-- In-memory repository abstraction: [dao.repo.js](dao.repo.js)
-- Shared constants/helpers (states, type labels, archiving constants): [dao.repo.js](dao.repo.js)
+- In-memory repository abstraction: [dao.js](dao.js)
+- Shared constants/helpers (states and type labels): [dao.js](dao.js)
 
 Important implementation detail:
 
@@ -97,66 +93,42 @@ Important implementation detail:
 
 ## Backend Data Boundary
 
-- `app.js` registers `setDaoBackendFetcher(createDaoBackendFetcher(queryNetwork, IS_DEV_NETWORK))`.
-- `dao.repo.js` keeps endpoint querying and backend-to-UI mapping behind the repository boundary.
+- `app.js` registers `setDaoBackendFetcher(createDaoBackendFetcher(queryNetwork))`.
+- `dao.js` keeps endpoint querying and backend-to-UI mapping behind the repository boundary.
 - Proposal list loading uses the current server DAO query shape:
-  - `GET /dao/proposals/meta` for `meta.count`
-  - `GET /dao/proposals/:number` for each proposal number from `1..count`
-- On Devnet, proposal numbers `1`, `3`, `4`, `5`, `6`, and `31` are removed from the query list before proposal details are fetched.
-- The fetcher skips missing numbered proposals so nodes that have not yet surfaced an account do not block the whole list.
+  - `GET /dao/proposals/summary` for the recent-activity index and total count
+  - `GET /dao/proposals/:number` for each indexed proposal's details
+- The fetcher skips an unavailable detail response so it does not block the remaining indexed proposals from rendering.
 
 ## What must change for a live backend
 
 This section is the remaining integration checklist after moving the DAO list to real proposal query endpoints.
 
-### 1) Keep backend fetch in `dao.repo.js`
+### 1) Keep backend fetch in `dao.js`
 
 `daoRepo` uses an injected fetcher and otherwise returns an empty store.
 
-The app passes `queryNetwork` and its Devnet flag into `createDaoBackendFetcher(...)`; the repository maps backend `DaoProposalAccount` payloads into the store shape the UI expects.
+The app passes `queryNetwork` into `createDaoBackendFetcher(...)`; the repository maps the summary index and `DaoProposalAccount` payloads into the store shape the UI expects.
 
 ### 2) Define backend endpoints / payloads
 
 Known read endpoints:
 
-- `GET /dao/proposals/meta`
+- `GET /dao/proposals/summary`
 - `GET /dao/proposals/:number`
 
 Still needed for later phases:
 
-- Create proposal endpoint/action
 - Cast vote endpoint/action
 - Proposal detail capability data for review, reward, and ready actions
 
 ### 3) Wire create + vote to backend
 
-Currently these operations are placeholders until their backend transactions are wired:
+`daoRepo.createProposal(...)` builds the nested proposal transaction, and the Proposal Review modal signs and injects it. The transaction contains exactly one type payload matching `proposalType`, with a nested change set for each action option.
 
-- `daoRepo.createProposal(...)`
-- `daoRepo.castVote(...)`
+For production, cast-vote submission should refresh the proposal or patch vote totals from the server response.
 
-For production you likely want:
-
-- `createProposal` to POST to backend and then either:
-  - refresh the store, or
-  - insert the created proposal returned by the backend.
-
-- `castVote` to POST to backend and then either:
-  - refresh the proposal, or
-  - patch the vote totals from server response.
-
-### 4) Decide how “Archived” is represented server-side
-
-The UI rule is “Archived is a group, not a status.”
-
-Options:
-
-- Server only stores status + timestamps; client derives archived group via the 30-day rule.
-- Server stores an explicit archived flag / archivedAt; client uses it.
-
-If you choose server-side archiving, update `normalizeDaoStore()` accordingly.
-
-### 5) Loading / errors / pagination
+### 4) Loading / errors / pagination
 
 The UI already shows a basic loading empty-state while `daoRepo.refresh()` is running.
 
@@ -166,7 +138,7 @@ For production, consider adding:
 - Incremental refresh (don’t blow away list on refresh)
 - Better error states (retry button)
 
-### 6) Auth / permissions
+### 5) Auth / permissions
 
 The UI derives a `voterId` from the account in memory, but a real backend will likely require:
 
