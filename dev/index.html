@@ -451,16 +451,6 @@
             </div>
           </div>
           <div class="dao-list-pane">
-            <div class="dao-group-toggle" role="tablist" aria-label="Proposal group">
-              <button class="dao-group-toggle-button" id="daoGroupActiveButton" type="button" role="tab" aria-selected="true">
-                <span class="dao-group-toggle-label">Active</span>
-                <span class="dao-group-toggle-count" aria-label="0 active proposals">0</span>
-              </button>
-              <button class="dao-group-toggle-button" id="daoGroupArchivedButton" type="button" role="tab" aria-selected="false">
-                <span class="dao-group-toggle-label">Archived</span>
-                <span class="dao-group-toggle-count" aria-label="0 archived proposals">0</span>
-              </button>
-            </div>
             <ul class="chat-list" id="daoProposalList">
               <div class="empty-state" id="daoProposalEmptyState">
                 <div></div>
@@ -516,24 +506,15 @@
               </div>
               <div class="form-group dao-form-section">
                 <div class="dao-form-section-header">
-                  <label>Parameter Changes</label>
+                  <label>Options and Parameter Changes <span class="dao-form-required" aria-hidden="true">*</span></label>
                 </div>
-                <div class="dao-form-list" id="addProposalChangesList"></div>
-                <button type="button" class="btn btn--secondary dao-form-add-button" id="addProposalChangeButton">
-                  <span class="dao-form-add-icon" aria-hidden="true"><span class="plus-glyph">+</span></span>
-                  <span>Add parameter change</span>
-                </button>
-              </div>
-              <div class="form-group dao-form-section">
-                <div class="dao-form-section-header">
-                  <label>Options <span class="dao-form-required" aria-hidden="true">*</span></label>
-                </div>
+                <div class="dao-form-help">No change is always the first option. Choose parameters in Option 1; later options provide alternative values for the same parameters.</div>
                 <div class="dao-form-list" id="addProposalOptionsList"></div>
                 <button type="button" class="btn btn--secondary dao-form-add-button" id="addProposalOptionButton">
                   <span class="dao-form-add-icon" aria-hidden="true"><span class="plus-glyph">+</span></span>
                   <span>Add option</span>
                 </button>
-                <div class="dao-form-help">2 to 10 options. The first option must be yes, accept, or approve.</div>
+                <div class="dao-form-help">2 to 10 total options. Emergency proposals allow one additional option.</div>
               </div>
               <div class="form-group dao-form-section">
                 <label>Timing</label>
@@ -2739,6 +2720,16 @@
           <div class="modal-title">Validator Staking</div>
         </div>
         <div class="modal-content">
+          <!-- Pending stake/unstake status -->
+          <div
+            id="pending-nominee-skeleton-1"
+            class="validator-pending-status"
+            role="status"
+            aria-live="polite"
+          >
+            <span id="pending-tx-text-in-bar"></span>
+          </div>
+
           <!-- Loading State -->
           <div id="validator-loading" style="text-align: center; padding: 1rem; display: none">
             <div class="spinner"></div>
@@ -2768,33 +2759,6 @@
             <!-- Your Stake Info - only shown when a nominee exists -->
             <div id="validator-stake-info" class="info-section">
               <h4>Your Stake Info</h4>
-              <!-- New Skeleton Bars for Pending Nominee Info -->
-              <div
-                class="skeleton-item"
-                id="pending-nominee-skeleton-1"
-                style="
-                  display: none;
-                  height: 22px;
-                  width: 100%;
-                  margin-top: 4px;
-                  margin-bottom: 8px;
-                  background-color: #e0e0e0;
-                  padding: 0 5px;
-                  box-sizing: border-box;
-                "
-              >
-                <span
-                  id="pending-tx-text-in-bar"
-                  style="
-                    display: none;
-                    font-size: 0.75em;
-                    color: #333;
-                    line-height: 22px;
-                    width: 100%;
-                    text-align: center;
-                  "
-                ></span>
-              </div>
               <div class="info-item vertical-layout">
                 <span class="info-label" id="validator-nominee-label">Nominated Validator:</span>
                 <span class="info-value code" id="validator-nominee"></span>

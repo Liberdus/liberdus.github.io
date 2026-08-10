@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'n'
+const version = 'o'
 const BOOT_SPLASH_HANDOFF_MS = 1000;
 let myVersion = '0';
 async function checkVersion() {
@@ -38,7 +38,7 @@ async function checkVersion() {
       'styles.css',
       'app.js',
       'evm-assets.js',
-      'dao.repo.js',
+      'dao.js',
       'data/emoji-picker-data.js',
       'lib.js',
       'network.js',
@@ -78,7 +78,6 @@ async function forceReload(urls) {
 import { stringify, parse } from './external/stringify-shardus.js';
 
 import {
-  buildDaoProposalCreateDraft,
   createDaoBackendFetcher,
   DAO_ACTION_TYPES,
   DAO_CONFIG_CHANGE_OPTIONS,
@@ -86,6 +85,7 @@ import {
   DAO_PROPOSAL_DAY_MS,
   DAO_PROPOSAL_GRACE_PERIOD_MAX_MS,
   DAO_PROPOSAL_TITLE_MAX_LENGTH,
+  buildDaoProposalCreateDraft,
   daoRepo,
   DAO_STATES,
   getDaoTransactionMessage,
@@ -102,7 +102,7 @@ import {
   normalizeDaoAddress,
   parseDaoUnsignedBigInt,
   setDaoBackendFetcher,
-} from './dao.repo.js';
+} from './dao.js';
 
 // Import crypto functions from crypto.js
 import {
@@ -2473,7 +2473,7 @@ const menuModal = new MenuModal();
 // =====================
 
 // DAO proposals are loaded via `daoRepo` and kept in memory (no localStorage persistence).
-setDaoBackendFetcher(createDaoBackendFetcher(queryNetwork, IS_DEV_NETWORK));
+setDaoBackendFetcher(createDaoBackendFetcher(queryNetwork));
 
 const DAO_ALL_FILTER = { key: 'all', label: 'All' };
 const DAO_CLAIMABLE_FILTER = { key: 'claimable', label: 'Claimable' };
@@ -2530,7 +2530,6 @@ function formatDaoProposalTitle(proposal) {
 
 class DaoModal {
   constructor() {
-    this.selectedGroupKey = 'active';
     this.selectedFilterKey = 'voting';
     this.refreshState = 'loading';
     this.refreshSequence = 0;
@@ -2545,15 +2544,20 @@ class DaoModal {
     this.filterBar = document.getElementById('daoFilterBar');
     this.filterOverflow = document.getElementById('daoFilterOverflow');
     this.filterExpandButton = document.getElementById('daoFilterExpandButton');
-    this.groupToggle = this.modal.querySelector('.dao-group-toggle');
-    this.groupActiveButton = document.getElementById('daoGroupActiveButton');
-    this.groupArchivedButton = document.getElementById('daoGroupArchivedButton');
     this.list = document.getElementById('daoProposalList');
     this.emptyState = document.getElementById('daoProposalEmptyState');
     this.addButton = document.getElementById('daoAddProposalButton');
 
     if (this.closeButton) this.closeButton.addEventListener('click', () => this.close());
-    if (this.addButton) this.addButton.addEventListener('click', () => addProposalModal.open());
+    if (this.addButton) {
+      this.addButton.addEventListener('click', () => {
+        if (hasPendingDaoProposalCreation()) {
+          showToast('Wait for your pending proposal to confirm before creating another.', 3000, 'info');
+          return;
+        }
+        addProposalModal.open();
+      });
+    }
 
     if (this.filterBar) {
       this.filterBar.addEventListener('click', (e) => {
@@ -2568,17 +2572,6 @@ class DaoModal {
     if (this.filterExpandButton) {
       this.filterExpandButton.addEventListener('click', () => {
         this.setFiltersExpanded(this.filterOverflow.hidden);
-      });
-    }
-
-    if (this.groupActiveButton) {
-      this.groupActiveButton.addEventListener('click', () => {
-        this.setGroupFilter('active');
-      });
-    }
-    if (this.groupArchivedButton) {
-      this.groupArchivedButton.addEventListener('click', () => {
-        this.setGroupFilter('archived');
       });
     }
   }
@@ -2602,7 +2595,6 @@ class DaoModal {
 
     // Default filter is Voting
     this.selectedFilterKey = this.selectedFilterKey || 'voting';
-    this.selectedGroupKey = this.selectedGroupKey || 'active';
     this.render();
 
     try {
@@ -2699,59 +2691,28 @@ class DaoModal {
     this.render();
   }
 
-  setGroupFilter(key) {
-    this.selectedGroupKey = key;
-    this.render();
-  }
-
   render() {
     const hasFreshData = this.refreshState === 'ready';
-    const proposalsActive = hasFreshData ? daoRepo.getProposalsForUi('active') : [];
-    const proposalsArchived = hasFreshData ? daoRepo.getProposalsForUi('archived') : [];
+    const proposals = hasFreshData ? daoRepo.getProposalsForUi() : [];
     const currentAddress = getDaoCurrentAccountAddress();
     const now = getTransactionTimestamp();
     const isAllFilter = this.selectedFilterKey === DAO_ALL_FILTER.key;
     const isClaimableFilter = this.selectedFilterKey === DAO_CLAIMABLE_FILTER.key;
-    const groupedProposals = this.selectedGroupKey === 'archived' ? proposalsArchived : proposalsActive;
-    const claimableProposals = [...proposalsActive, ...proposalsArchived]
-      .filter((proposal) => isDaoProposalClaimable(proposal, currentAddress, now));
+    const claimableProposals = proposals.filter(
+      (proposal) => isDaoProposalClaimable(proposal, currentAddress, now)
+    );
 
-    // State counts follow the selected group; Claimable spans both groups.
     const counts = Object.fromEntries(DAO_FILTER_OPTIONS.map((filter) => [filter.key, 0]));
-    for (const p of groupedProposals) {
+    for (const p of proposals) {
       const state = getEffectiveDaoState(p);
       if (counts[state] !== undefined) counts[state] += 1;
     }
-    counts[DAO_ALL_FILTER.key] = groupedProposals.length;
+    counts[DAO_ALL_FILTER.key] = proposals.length;
     counts[DAO_CLAIMABLE_FILTER.key] = claimableProposals.length;
 
-    // Update header title
-    const groupLabel = this.selectedGroupKey === 'archived' ? 'Archived' : 'Active';
     const label = DAO_FILTER_OPTIONS.find((filter) => filter.key === this.selectedFilterKey)?.label
       || this.selectedFilterKey;
-    if (this.titleEl) this.titleEl.textContent = isClaimableFilter ? 'DAO - Claimable' : `DAO - ${groupLabel} - ${label}`;
-    // Claimable spans both groups, so hide Active/Archived while keeping the filter bar.
-    if (this.groupToggle) this.groupToggle.classList.toggle('hidden', isClaimableFilter);
-
-    // Update group toggle labels + selection
-    const groups = [
-      { key: 'active', label: 'Active', button: this.groupActiveButton, count: proposalsActive.length },
-      { key: 'archived', label: 'Archived', button: this.groupArchivedButton, count: proposalsArchived.length },
-    ];
-    for (const { key, label: groupName, button, count } of groups) {
-      if (!button) continue;
-      const countEl = button.querySelector('.dao-group-toggle-count');
-      if (countEl) {
-        countEl.textContent = hasFreshData ? String(count) : '—';
-        countEl.setAttribute(
-          'aria-label',
-          hasFreshData ? `${count} ${key} proposals` : `${groupName} count unavailable`
-        );
-      }
-      const selected = this.selectedGroupKey === key;
-      button.classList.toggle('active', selected);
-      button.setAttribute('aria-selected', selected ? 'true' : 'false');
-    }
+    if (this.titleEl) this.titleEl.textContent = `DAO - ${label}`;
 
     for (const filter of DAO_FILTER_OPTIONS) {
       const chip = this.filterBar?.querySelector(`.dao-filter-chip[data-filter-key="${filter.key}"]`);
@@ -2775,7 +2736,7 @@ class DaoModal {
     // Filter + sort (newest entered into state first)
     const matchingProposals = isClaimableFilter
       ? claimableProposals
-      : groupedProposals.filter((proposal) => (
+      : proposals.filter((proposal) => (
         isAllFilter || getEffectiveDaoState(proposal) === this.selectedFilterKey
       ));
     const filtered = matchingProposals
@@ -2789,13 +2750,11 @@ class DaoModal {
     const hasAny = filtered.length > 0;
     if (this.emptyState) this.emptyState.style.display = hasAny ? 'none' : 'block';
 
-    // Update empty state copy based on group.
     if (this.emptyState && !hasAny) {
       const lines = Array.from(this.emptyState.querySelectorAll('div'));
       // Structure is: [0]=spacer, [1]=headline, [2]=subline, [3]=optional third line.
       const headlineEl = lines[1] || null;
       const sublineEl = lines[2] || null;
-      const isArchived = this.selectedGroupKey === 'archived';
 
       if (this.refreshState === 'loading') {
         if (headlineEl) headlineEl.textContent = 'Loading proposals…';
@@ -2807,12 +2766,8 @@ class DaoModal {
         if (headlineEl) headlineEl.textContent = 'No claimable proposals found';
         if (sublineEl) sublineEl.textContent = 'You have no voter rewards ready to claim';
       } else {
-        if (headlineEl) headlineEl.textContent = isArchived ? 'No archived proposals found' : 'No proposals found';
-        if (sublineEl) {
-          sublineEl.textContent = isArchived
-            ? 'Archived proposals appear here after they age out'
-            : 'Proposal data appears here when available';
-        }
+        if (headlineEl) headlineEl.textContent = 'No proposals found';
+        if (sublineEl) sublineEl.textContent = 'Proposal data appears here when available';
       }
     }
 
@@ -2852,7 +2807,18 @@ class DaoModal {
 
     // Show + button when modal is active
     if (this.addButton) {
+      const proposalCreationPending = hasPendingDaoProposalCreation(currentAddress);
       this.addButton.classList.toggle('visible', hasFreshData && this.isActive());
+      this.addButton.disabled = proposalCreationPending;
+      this.addButton.title = proposalCreationPending
+        ? 'Wait for your pending proposal to confirm before creating another.'
+        : 'Add proposal';
+      this.addButton.setAttribute(
+        'aria-label',
+        proposalCreationPending
+          ? 'Add proposal unavailable while your pending proposal confirms'
+          : 'Add proposal'
+      );
     }
   }
 
@@ -2990,8 +2956,6 @@ class AddProposalModal {
     this.proposalFeeInput = document.getElementById('addProposalFee');
     this.optionsList = document.getElementById('addProposalOptionsList');
     this.addOptionButton = document.getElementById('addProposalOptionButton');
-    this.changesList = document.getElementById('addProposalChangesList');
-    this.addChangeButton = document.getElementById('addProposalChangeButton');
     this.emergencySelect = document.getElementById('addProposalEmergency');
     this.reviewStartButton = document.getElementById('addProposalReviewStartTime');
     this.reviewStartHelp = document.getElementById('addProposalReviewStartHelp');
@@ -3003,8 +2967,7 @@ class AddProposalModal {
 
     if (this.closeButton) this.closeButton.addEventListener('click', () => this.close());
     if (this.cancelButton) this.cancelButton.addEventListener('click', () => this.close());
-    if (this.addOptionButton) this.addOptionButton.addEventListener('click', () => this.addOptionRow());
-    if (this.addChangeButton) this.addChangeButton.addEventListener('click', () => this.addParameterChangeRow());
+    if (this.addOptionButton) this.addOptionButton.addEventListener('click', () => this.addOption());
 
     if (this.form && this.submitButton) {
       this.form.addEventListener('submit', withButtonCooldown(
@@ -3020,12 +2983,16 @@ class AddProposalModal {
 
     if (this.typeSelect) {
       this.typeSelect.addEventListener('change', () => {
+        this.options = this.options.map((proposalOption) => ({ ...proposalOption, changes: [] }));
         this.refreshSelectedConfigOptions();
       });
     }
 
     if (this.emergencySelect) {
-      this.emergencySelect.addEventListener('change', () => this.renderProposalFee());
+      this.emergencySelect.addEventListener('change', () => {
+        this.renderProposalFee();
+        this.renderOptions();
+      });
     }
     if (this.reviewStartButton) this.reviewStartButton.addEventListener('click', () => this.openReviewStartPicker());
     if (this.gracePeriodInput) {
@@ -3037,12 +3004,9 @@ class AddProposalModal {
     }
 
     if (this.optionsList) {
-      this.optionsList.addEventListener('click', (event) => this.handleOptionListClick(event));
-    }
-
-    if (this.changesList) {
-      this.changesList.addEventListener('click', (event) => this.handleChangeListClick(event));
-      this.changesList.addEventListener('change', (event) => this.handleChangeListChange(event));
+      this.optionsList.addEventListener('click', (event) => this.handleOptionsClick(event));
+      this.optionsList.addEventListener('input', (event) => this.handleOptionsInput(event));
+      this.optionsList.addEventListener('change', (event) => this.handleOptionsChange(event));
     }
   }
 
@@ -3062,7 +3026,8 @@ class AddProposalModal {
       this.gracePeriodInput.value = '';
       this.gracePeriodInput.removeAttribute('max');
     }
-    this.renderOptions(['yes', 'no']);
+    this.options = [this.createOption()];
+    this.renderOptions('Loading current DAO config values...');
     this.renderGracePeriodLimitHint();
     this.refreshProposalDefaults();
     this.refreshSelectedConfigOptions();
@@ -3095,17 +3060,11 @@ class AddProposalModal {
   }
 
   renderConfigLoadingState() {
-    if (this.changesList) {
-      this.changesList.innerHTML = '<div class="dao-form-help">Loading current DAO config values...</div>';
-    }
-    if (this.addChangeButton) this.addChangeButton.disabled = true;
+    this.renderOptions('Loading current DAO config values...');
   }
 
   renderConfigUnavailableState() {
-    if (this.changesList) {
-      this.changesList.innerHTML = '<div class="dao-form-help">Current DAO config values are unavailable. Try again when the network responds.</div>';
-    }
-    if (this.addChangeButton) this.addChangeButton.disabled = true;
+    this.renderOptions('Current DAO config values are unavailable. Try again when the network responds.');
   }
 
   renderProposalFee() {
@@ -3208,7 +3167,7 @@ class AddProposalModal {
   }
 
   getValidationHighlight(target) {
-    return target?.closest?.('.dao-form-change-box, .dao-form-row-controls, .form-group') || target || null;
+    return target?.closest?.('.dao-form-change-box, .dao-form-row-controls, .dao-form-option, .form-group') || target || null;
   }
 
   showValidationError(error) {
@@ -3241,8 +3200,8 @@ class AddProposalModal {
       return;
     }
 
-    if (this.addChangeButton) this.addChangeButton.disabled = false;
-    this.renderParameterChanges([{ key: options[0].key, value: '' }]);
+    this.synchronizeOptions();
+    this.renderOptions();
   }
 
   async loadConfigOptions(proposalType) {
@@ -3327,108 +3286,123 @@ class AddProposalModal {
     return this.fetchNetworkAccountConfig();
   }
 
-  getOptionValues() {
-    return this.getOptionInputs().map((input) => input.value);
+  createOption() {
+    return { changes: [] };
   }
 
-  getOptionInputs() {
-    return Array.from(this.optionsList?.querySelectorAll('[data-dao-option-input]') || []);
+  getOptionLabel(optionIndex) {
+    return `Option ${optionIndex + 1}`;
   }
 
-  renderOptions(values) {
-    if (!this.optionsList) return;
-    this.optionsList.innerHTML = values.map((value, index) => {
-      const id = `addProposalOption${index + 1}`;
-      const disabled = values.length <= 2 ? 'disabled' : '';
-      return `
-        <div class="dao-form-row" data-dao-option-row>
-          <div class="dao-form-row-controls">
-            <span class="dao-form-index">${index + 1}</span>
-            <input id="${id}" class="form-control" data-dao-option-input type="text" maxlength="80" value="${escapeDaoFormAttribute(value)}" aria-label="Option ${index + 1}" required />
-            <button type="button" class="btn btn--secondary dao-form-remove-button" data-dao-remove-option="${index}" ${disabled}>Remove</button>
-          </div>
-        </div>
-      `;
-    }).join('');
-  }
+  synchronizeOptions() {
+    const configOptions = this.getConfigOptions();
+    if (configOptions.length === 0) return;
 
-  addOptionRow() {
-    const values = this.getOptionValues();
-    if (values.length >= 10) {
-      showToast('DAO proposals can have at most 10 options', 2500, 'warning');
-      return;
-    }
-    this.renderOptions([...values, '']);
-    this.optionsList?.querySelector('[data-dao-option-row]:last-child input')?.focus();
-  }
+    const validKeys = new Set(configOptions.map((option) => option.key));
+    const templateChanges = this.options[0].changes.filter((change) => validKeys.has(change.key));
+    const changes = templateChanges.length ? templateChanges : [{ key: configOptions[0].key, value: '' }];
 
-  handleOptionListClick(event) {
-    const removeButton = event.target.closest('[data-dao-remove-option]');
-    if (!removeButton) return;
+    this.options = this.options.map((proposalOption, optionIndex) => {
+      if (optionIndex === 0) return { ...proposalOption, changes };
 
-    const values = this.getOptionValues();
-    if (values.length <= 2) {
-      showToast('DAO proposals need at least 2 options', 2500, 'warning');
-      return;
-    }
-
-    const index = Number(removeButton.dataset.daoRemoveOption);
-    values.splice(index, 1);
-    this.renderOptions(values);
-  }
-
-  getParameterChanges() {
-    return Array.from(this.changesList?.querySelectorAll('[data-dao-change-row]') || [])
-      .map((row) => ({
-        key: row.querySelector('[data-dao-change-key]')?.value || '',
-        value: row.querySelector('[data-dao-change-value]')?.value || '',
-      }));
+      const valuesByKey = new Map(proposalOption.changes.map((change) => [change.key, change.value]));
+      return {
+        ...proposalOption,
+        changes: changes.map((change) => ({ key: change.key, value: valuesByKey.get(change.key) ?? '' })),
+      };
+    });
   }
 
   getConfigOption(key) {
     return this.getConfigOptions().find((option) => option.key === key) || null;
   }
 
-  renderParameterChanges(rows) {
-    if (!this.changesList) return;
+  renderOptions(unavailableMessage = '') {
+    if (!this.optionsList) return;
 
-    const options = this.getConfigOptions();
-    const validRows = rows
-      .filter((row) => options.some((option) => option.key === row.key))
-      .map((row) => ({ key: row.key, value: row.value }));
+    const configOptions = this.getConfigOptions();
+    this.optionsList.innerHTML = [
+      `
+        <div class="dao-form-option dao-form-option--no-change">
+          <div class="dao-form-row-title"><label>Option: No change</label></div>
+          <div class="dao-form-row-controls">
+            <span class="dao-form-index">1</span>
+            <div class="form-control dao-form-current-value">No change</div>
+          </div>
+          <p class="dao-form-help">This required first option makes no parameter changes.</p>
+        </div>
+      `,
+      ...this.options.map((proposalOption, index) => (
+        this.renderOption(proposalOption, index, configOptions, unavailableMessage)
+      )),
+    ].join('');
 
-    if (validRows.length === 0 && options[0]) {
-      validRows.push({ key: options[0].key, value: '' });
+    if (this.addOptionButton) {
+      const isEmergency = this.emergencySelect?.value === 'true';
+      this.addOptionButton.disabled = configOptions.length === 0 || isEmergency || this.options.length >= 9;
     }
-
-    this.changesList.innerHTML = validRows
-      .map((row, index) => this.renderParameterChangeRow(row, index, validRows.length))
-      .join('');
   }
 
-  renderParameterChangeRow(row, index, rowCount) {
-    const options = this.getConfigOptions();
-    const option = this.getConfigOption(row.key) || options[0];
+  renderOption(proposalOption, optionIndex, configOptions, unavailableMessage) {
+    const label = this.getOptionLabel(optionIndex);
+    const removeDisabled = this.options.length <= 1 ? 'disabled' : '';
+    const isTemplate = optionIndex === 0;
+    const changesHtml = configOptions.length
+      ? this.renderOptionChanges(optionIndex, proposalOption.changes, configOptions, isTemplate)
+      : `<p class="dao-form-help">${escapeHtml(unavailableMessage || 'Current DAO config values are unavailable.')}</p>`;
+    const addChangeDisabled = configOptions.length === 0 ? 'disabled' : '';
+
+    return `
+      <section class="dao-form-option" data-dao-option="${optionIndex}">
+        <div class="dao-form-row-title">
+          <label>${label}</label>
+          <button type="button" class="btn btn--secondary dao-form-remove-button" data-dao-remove-option="${optionIndex}" ${removeDisabled}>Remove option</button>
+        </div>
+        <div class="dao-form-section-header"><label>Parameter Changes</label></div>
+        <div class="dao-form-list">${changesHtml}</div>
+        ${isTemplate ? `
+        <button type="button" class="btn btn--secondary dao-form-add-button" data-dao-add-parameter-change="${optionIndex}" ${addChangeDisabled}>
+          <span class="dao-form-add-icon" aria-hidden="true"><span class="plus-glyph">+</span></span>
+          <span>Add parameter change</span>
+        </button>` : ''}
+      </section>
+    `;
+  }
+
+  renderOptionChanges(optionIndex, changes, configOptions, isTemplate) {
+    return changes.map((change, changeIndex) => (
+      this.renderOptionChange(optionIndex, change, changeIndex, changes.length, configOptions, isTemplate)
+    )).join('');
+  }
+
+  renderOptionChange(optionIndex, change, changeIndex, changeCount, configOptions, isTemplate) {
+    const option = configOptions.find((item) => item.key === change.key) || configOptions[0];
     if (!option) return '';
 
-    const configId = `addProposalConfig${index + 1}`;
-    const currentId = `addProposalCurrent${index + 1}`;
-    const proposedId = `addProposalProposed${index + 1}`;
-    const removeDisabled = rowCount <= 1 ? 'disabled' : '';
-    const selectOptions = options.map((item) => `
+    const optionNumber = optionIndex + 1;
+    const changeNumber = changeIndex + 1;
+    const configId = `addProposalOption${optionNumber}Config${changeNumber}`;
+    const currentId = `addProposalOption${optionNumber}Current${changeNumber}`;
+    const proposedId = `addProposalOption${optionNumber}Proposed${changeNumber}`;
+    const removeDisabled = changeCount <= 1 ? 'disabled' : '';
+    const dataAttributes = `data-dao-change-value data-dao-option-index="${optionIndex}" data-dao-change-index="${changeIndex}"`;
+    const selectOptions = isTemplate ? configOptions.map((item) => `
       <option value="${escapeHtml(item.key)}" ${item.key === option.key ? 'selected' : ''}>${escapeHtml(item.label)}</option>
-    `).join('');
+    `).join('') : '';
+    const parameterControl = isTemplate
+      ? `<select id="${configId}" class="form-control" data-dao-change-key data-dao-option-index="${optionIndex}" data-dao-change-index="${changeIndex}" required>${selectOptions}</select>`
+      : `<input id="${configId}" class="form-control dao-form-current-value" type="text" value="${escapeDaoFormAttribute(option.label)}" readonly />`;
 
     return `
       <div class="dao-form-row dao-form-row--change" data-dao-change-row>
         <div class="dao-form-row-title">
-          <label>Parameter change ${index + 1}</label>
-          <button type="button" class="btn btn--secondary dao-form-remove-button" data-dao-remove-change="${index}" ${removeDisabled}>Remove</button>
+          <label>Parameter change ${changeNumber}</label>
+          ${isTemplate ? `<button type="button" class="btn btn--secondary dao-form-remove-button" data-dao-remove-change="${optionIndex}:${changeIndex}" ${removeDisabled}>Remove</button>` : ''}
         </div>
         <div class="dao-form-change-box">
           <div class="dao-form-change-line">
-            <label for="${configId}">Select <span class="dao-form-required" aria-hidden="true">*</span></label>
-            <select id="${configId}" class="form-control" data-dao-change-key required>${selectOptions}</select>
+            <label for="${configId}">${isTemplate ? 'Select' : 'Parameter'}${isTemplate ? ' <span class="dao-form-required" aria-hidden="true">*</span>' : ''}</label>
+            ${parameterControl}
           </div>
           <div class="dao-form-change-line">
             <label for="${currentId}">Current</label>
@@ -3436,7 +3410,7 @@ class AddProposalModal {
           </div>
           <div class="dao-form-change-line">
             <label for="${proposedId}">Enter <span class="dao-form-required" aria-hidden="true">*</span></label>
-            ${this.renderProposedValueControl(option, row.value, proposedId)}
+            ${this.renderProposedValueControl(option, change.value, proposedId, dataAttributes)}
           </div>
           <div class="dao-form-meta">${escapeHtml(option.path)} · ${escapeHtml(option.valueType)}</div>
         </div>
@@ -3444,10 +3418,10 @@ class AddProposalModal {
     `;
   }
 
-  renderProposedValueControl(option, value, id) {
+  renderProposedValueControl(option, value, id, dataAttributes) {
     if (option.valueType === 'boolean') {
       return `
-        <select id="${id}" class="form-control" data-dao-change-value required>
+        <select id="${id}" class="form-control" ${dataAttributes} required>
           <option value="">Select value</option>
           <option value="true" ${value === 'true' ? 'selected' : ''}>True</option>
           <option value="false" ${value === 'false' ? 'selected' : ''}>False</option>
@@ -3457,49 +3431,99 @@ class AddProposalModal {
 
     const step = option.valueType === 'integer' ? '1' : 'any';
     const inputmode = option.valueType === 'integer' ? 'numeric' : 'decimal';
-    return `<input id="${id}" class="form-control" data-dao-change-value type="number" step="${step}" inputmode="${inputmode}" value="${escapeDaoFormAttribute(value)}" required />`;
+    return `<input id="${id}" class="form-control" ${dataAttributes} type="number" step="${step}" inputmode="${inputmode}" value="${escapeDaoFormAttribute(value)}" required />`;
   }
 
-  addParameterChangeRow() {
-    const rows = this.getParameterChanges();
-    const usedKeys = new Set(rows.map((row) => row.key));
+  addOption() {
+    if (this.emergencySelect?.value === 'true') {
+      showToast('Emergency proposals allow one additional option', 2500, 'warning');
+      return;
+    }
+    if (this.options.length >= 9) {
+      showToast('DAO proposals can have at most 10 options', 2500, 'warning');
+      return;
+    }
+    if (this.getConfigOptions().length === 0) {
+      showToast('Current DAO config values are not loaded yet', 2500, 'warning');
+      return;
+    }
+
+    this.options.push(this.createOption());
+    this.synchronizeOptions();
+    this.renderOptions();
+    this.optionsList?.querySelector(`[data-dao-option="${this.options.length - 1}"] [data-dao-change-value]`)?.focus();
+  }
+
+  addParameterChange(optionIndex) {
+    if (optionIndex !== 0) return;
+
+    const template = this.options[0];
+    if (!template) return;
+
+    const usedKeys = new Set(template.changes.map((change) => change.key));
     const nextOption = this.getConfigOptions().find((option) => !usedKeys.has(option.key));
-
     if (!nextOption) {
-      const message = this.getConfigOptions().length === 0
-        ? 'Current DAO config values are not loaded yet'
-        : 'All available configs are already selected';
-      showToast(message, 2500, 'warning');
+      showToast('All available configs are already selected for Option 1', 2500, 'warning');
       return;
     }
 
-    this.renderParameterChanges([...rows, { key: nextOption.key, value: '' }]);
-    this.changesList?.querySelector('[data-dao-change-row]:last-child select')?.focus();
+    template.changes.push({ key: nextOption.key, value: '' });
+    this.synchronizeOptions();
+    this.renderOptions();
+    this.optionsList?.querySelector(`[data-dao-option="${optionIndex}"] [data-dao-change-row]:last-child [data-dao-change-key]`)?.focus();
   }
 
-  handleChangeListClick(event) {
-    const removeButton = event.target.closest('[data-dao-remove-change]');
-    if (!removeButton) return;
-
-    const rows = this.getParameterChanges();
-    if (rows.length <= 1) {
-      showToast('Add at least one parameter change', 2500, 'warning');
+  handleOptionsClick(event) {
+    const addChangeButton = event.target.closest('[data-dao-add-parameter-change]');
+    if (addChangeButton) {
+      this.addParameterChange(Number(addChangeButton.dataset.daoAddParameterChange));
       return;
     }
 
-    rows.splice(Number(removeButton.dataset.daoRemoveChange), 1);
-    this.renderParameterChanges(rows);
+    const removeOptionButton = event.target.closest('[data-dao-remove-option]');
+    if (removeOptionButton) {
+      this.options.splice(Number(removeOptionButton.dataset.daoRemoveOption), 1);
+      this.renderOptions();
+      return;
+    }
+
+    const removeChangeButton = event.target.closest('[data-dao-remove-change]');
+    if (!removeChangeButton) return;
+
+    const [optionIndex, changeIndex] = removeChangeButton.dataset.daoRemoveChange.split(':').map(Number);
+    if (optionIndex !== 0) return;
+
+    const template = this.options[0];
+    if (!template || template.changes.length <= 1) return;
+    template.changes.splice(changeIndex, 1);
+    this.synchronizeOptions();
+    this.renderOptions();
   }
 
-  handleChangeListChange(event) {
+  handleOptionsInput(event) {
+    const optionIndex = Number(event.target.dataset.daoOptionIndex);
+    const proposalOption = this.options[optionIndex];
+    if (!proposalOption) return;
+
+    if (event.target.matches('[data-dao-change-value]')) {
+      const change = proposalOption.changes[Number(event.target.dataset.daoChangeIndex)];
+      if (change) change.value = event.target.value;
+    }
+  }
+
+  handleOptionsChange(event) {
     if (!event.target.matches('[data-dao-change-key]')) return;
 
-    const rowEl = event.target.closest('[data-dao-change-row]');
-    const rowEls = Array.from(this.changesList.querySelectorAll('[data-dao-change-row]'));
-    const index = rowEls.indexOf(rowEl);
-    const rows = this.getParameterChanges();
-    if (rows[index]) rows[index].value = '';
-    this.renderParameterChanges(rows);
+    const optionIndex = Number(event.target.dataset.daoOptionIndex);
+    if (optionIndex !== 0) return;
+
+    const proposalOption = this.options[optionIndex];
+    const change = proposalOption?.changes[Number(event.target.dataset.daoChangeIndex)];
+    if (!change) return;
+    change.key = event.target.value;
+    change.value = '';
+    this.synchronizeOptions();
+    this.renderOptions();
   }
 
   getIntegerValue(input, label, unit = '') {
@@ -3590,61 +3614,72 @@ class AddProposalModal {
   }
 
   getValidatedOptions() {
-    const inputs = this.getOptionInputs();
-    const options = inputs.map((input) => input.value.trim());
-    if (options.length < 2 || options.length > 10) {
-      throw this.createValidationError('DAO proposals need 2 to 10 options', this.optionsList);
-    }
-    const emptyIndex = options.findIndex((option) => !option);
-    if (emptyIndex !== -1) {
-      throw this.createValidationError('Every option needs text', inputs[emptyIndex]);
-    }
-
-    const firstOption = options[0].toLowerCase();
-    if (!['yes', 'accept', 'approve'].includes(firstOption)) {
-      throw this.createValidationError('The first option must be yes, accept, or approve', inputs[0]);
-    }
-    return options;
-  }
-
-  getValidatedChanges() {
-    const rowEls = Array.from(this.changesList?.querySelectorAll('[data-dao-change-row]') || []);
-    const rows = this.getParameterChanges();
     if (this.getConfigOptions().length === 0) {
-      throw this.createValidationError('Current DAO config values are not loaded yet', this.changesList);
+      throw this.createValidationError('Current DAO config values are not loaded yet', this.optionsList);
     }
-    if (rows.length === 0) throw this.createValidationError('Add at least one parameter change', this.changesList);
+    if (this.options.length < 1 || this.options.length > 9) {
+      throw this.createValidationError('DAO proposals need 1 to 9 additional options', this.optionsList);
+    }
+    if (this.emergencySelect?.value === 'true' && this.options.length !== 1) {
+      throw this.createValidationError('Emergency proposals need exactly one additional option', this.optionsList);
+    }
 
-    const seenKeys = new Set();
-    return rows.map((row, index) => {
-      const rowEl = rowEls[index];
-      const keyInput = rowEl?.querySelector('[data-dao-change-key]');
-      const valueInput = rowEl?.querySelector('[data-dao-change-value]');
-      const option = this.getConfigOption(row.key);
-      if (!option) throw this.createValidationError('Select a config for every parameter change', keyInput);
-      if (seenKeys.has(option.key)) {
-        throw this.createValidationError(`Remove the duplicate ${option.label} change`, keyInput);
-      }
-      seenKeys.add(option.key);
+    const templateChanges = this.options[0].changes;
+    const changes = this.options.map((proposalOption, optionIndex) => {
+      const optionEl = this.optionsList?.querySelector(`[data-dao-option="${optionIndex}"]`);
+      const label = this.getOptionLabel(optionIndex);
 
-      const value = String(row.value || '').trim();
-      if (!value) throw this.createValidationError(`Enter a proposed value for ${option.label}`, valueInput);
-      if (option.valueType === 'boolean' && value !== 'true' && value !== 'false') {
-        throw this.createValidationError(`${option.label} must be true or false`, valueInput);
+      if (proposalOption.changes.length === 0) {
+        throw this.createValidationError(`Add a parameter change for ${label}`, optionEl);
       }
-      if (option.valueType === 'integer' && !Number.isInteger(Number(value))) {
-        throw this.createValidationError(`${option.label} must be a whole number`, valueInput);
-      }
-      if (option.valueType === 'float' && !Number.isFinite(Number(value))) {
-        throw this.createValidationError(`${option.label} must be a number`, valueInput);
+      if (optionIndex > 0 && (
+        proposalOption.changes.length !== templateChanges.length
+        || proposalOption.changes.some((change, changeIndex) => change.key !== templateChanges[changeIndex].key)
+      )) {
+        throw this.createValidationError(`${label} must use the same parameters as Option 1`, optionEl);
       }
 
-      return {
-        key: option.key,
-        value,
-        current: String(option.current),
-      };
+      const seenKeys = new Set();
+      const optionChanges = proposalOption.changes.map((change, changeIndex) => {
+        const keyInput = optionEl?.querySelector(
+          `[data-dao-change-key][data-dao-change-index="${changeIndex}"]`
+        );
+        const valueInput = optionEl?.querySelector(
+          `[data-dao-change-value][data-dao-change-index="${changeIndex}"]`
+        );
+        const option = this.getConfigOption(change.key);
+        if (!option) throw this.createValidationError('Select a config for every parameter change', keyInput);
+        if (seenKeys.has(option.key)) {
+          throw this.createValidationError(`Remove the duplicate ${option.label} change`, keyInput);
+        }
+        seenKeys.add(option.key);
+
+        const value = String(change.value || '').trim();
+        if (!value) throw this.createValidationError(`Enter a proposed value for ${option.label}`, valueInput);
+        if (option.valueType === 'boolean' && value !== 'true' && value !== 'false') {
+          throw this.createValidationError(`${option.label} must be true or false`, valueInput);
+        }
+        if (option.valueType === 'integer' && !Number.isInteger(Number(value))) {
+          throw this.createValidationError(`${option.label} must be a whole number`, valueInput);
+        }
+        if (option.valueType === 'float' && !Number.isFinite(Number(value))) {
+          throw this.createValidationError(`${option.label} must be a number`, valueInput);
+        }
+
+        return {
+          key: option.key,
+          value,
+          current: String(option.current),
+        };
+      });
+
+      return { label, changes: optionChanges };
     });
+
+    return {
+      options: ['no', ...changes.map((proposalOption) => proposalOption.label)],
+      changes: changes.map((proposalOption) => proposalOption.changes),
+    };
   }
 
   async handleCreate() {
@@ -3671,8 +3706,7 @@ class AddProposalModal {
     }
 
     try {
-      const options = this.getValidatedOptions();
-      const changes = this.getValidatedChanges();
+      const { options, changes } = this.getValidatedOptions();
       const reviewStartTimeMs = this.getReviewStartTimeMs();
       const gracePeriodMs = this.getMillisecondsValue(this.gracePeriodInput, 'Grace period', this.maxGracePeriodMs);
       const emergency = this.emergencySelect?.value === 'true';
@@ -3775,14 +3809,19 @@ function renderDaoProposalSection(title, rows) {
 }
 
 function renderDaoProposalOptions(proposal) {
-  const optionCards = getDaoProposalOptions(proposal)
-    .map((option, index) => `
-      <div class="proposal-option-card">
-        <span class="proposal-option-card-number">${index + 1}</span>
-        <span class="proposal-option-card-label">${escapeHtml(option)}</span>
+  const options = getDaoProposalOptions(proposal);
+  const changeSets = proposal?.[proposal?.proposalType]?.changes;
+  const optionCards = options.map((option, index) => {
+    return `
+      <div class="proposal-option-card proposal-option-card--changes">
+        <div class="proposal-option-card-header">
+          <span class="proposal-option-card-number">${index + 1}</span>
+          <span class="proposal-option-card-label">${escapeHtml(option)}</span>
+        </div>
+        ${renderDaoProposalOptionDetails(index, changeSets)}
       </div>
-    `)
-    .join('');
+    `;
+  }).join('');
 
   return `
     <section class="proposal-info-section">
@@ -3792,46 +3831,30 @@ function renderDaoProposalOptions(proposal) {
   `;
 }
 
-function renderDaoProposalChanges(proposal) {
-  const payloadHtml = ['governance', 'economic', 'protocol']
-    .map((key) => [key, proposal[key]])
-    .filter(([, payload]) => payload && typeof payload === 'object')
-    .map(([key, payload]) => {
-      const rows = renderDaoProposalPayloadRows(payload, getDaoTypeLabel(key) || key);
-      if (!rows) return '';
-
-      return `
-      <div class="proposal-payload">
-        ${rows}
-      </div>
-    `;
-    })
-    .join('');
-
-  if (!payloadHtml) {
-    return '<section class="proposal-info-section"><h3>Parameter Changes</h3><p class="proposal-info-muted">No parameter changes are available.</p></section>';
+function renderDaoProposalOptionDetails(optionIndex, changeSets) {
+  if (optionIndex === 0) {
+    return '<p class="proposal-info-muted">No parameter changes.</p>';
   }
 
-  return `
-    <section class="proposal-info-section">
-      <h3>Parameter Changes</h3>
-      ${payloadHtml}
-    </section>
-  `;
+  const changes = Array.isArray(changeSets) ? changeSets[optionIndex - 1] : null;
+  if (!Array.isArray(changes)) {
+    return '<div class="proposal-option-card-changes"><p class="proposal-info-muted">Parameter changes are unavailable.</p></div>';
+  }
+  if (changes.length === 0) {
+    return '<div class="proposal-option-card-changes"><p class="proposal-info-muted">No parameter changes.</p></div>';
+  }
+
+  return `<div class="proposal-option-card-changes">${renderDaoProposalChangeRows(changes)}</div>`;
 }
 
-function renderDaoProposalPayloadRows(payload, payloadTitle) {
-  const titleHtml = `<div class="proposal-payload-title">${escapeHtml(payloadTitle)}</div>`;
-
-  if (Array.isArray(payload?.changes)) {
-    return payload.changes
-      .map((change) => {
-        const key = change?.key || 'Unknown key';
-        const current = formatDaoDetailValue(change?.current);
-        const next = formatDaoDetailValue(change?.value);
-        return `
+function renderDaoProposalChangeRows(changes) {
+  return changes
+    .map((change) => {
+      const key = change?.key || 'Unknown key';
+      const current = formatDaoDetailValue(change?.current);
+      const next = formatDaoDetailValue(change?.value);
+      return `
         <div class="proposal-change-row">
-          ${titleHtml}
           <span>${escapeHtml(key)}</span>
           <div class="proposal-change-values">
             <small><span>Current:</span><strong>${escapeHtml(current)}</strong></small>
@@ -3840,23 +3863,6 @@ function renderDaoProposalPayloadRows(payload, payloadTitle) {
           </div>
         </div>
       `;
-      })
-      .join('');
-  }
-
-  const entries = Object.entries(payload)
-    .filter(([, value]) => value !== undefined && value !== null && String(value).length > 0);
-
-  return entries
-    .map(([key, value]) => {
-      const displayValue = formatDaoDetailValue(value);
-      return `
-      <div class="proposal-change-row">
-        ${titleHtml}
-        <span>${escapeHtml(key)}</span>
-        <strong>${escapeHtml(displayValue)}</strong>
-      </div>
-    `;
     })
     .join('');
 }
@@ -3912,12 +3918,26 @@ class ConfirmProposalModal {
       showToast('Proposal draft is unavailable', 3000, 'warning');
       return;
     }
+    if (hasPendingDaoProposalCreation(this.currentDraft.transaction.from)) {
+      showToast('Wait for your pending proposal to confirm before creating another.', 3000, 'info');
+      return;
+    }
 
     this.setSubmitting(true);
     let loadingToastId = showToast('Submitting proposal...', 0, 'loading');
 
     try {
-      const { maxGracePeriodMs, proposalDurations } = await addProposalModal.loadDaoProposalDefaults({ refresh: true });
+      const { proposalFeeUsdStr, maxGracePeriodMs, proposalDurations } = await addProposalModal.loadDaoProposalDefaults({ refresh: true });
+      const refreshedProposalFeeUsdStr = this.currentDraft.transaction.emergency ? '0' : proposalFeeUsdStr;
+      if (refreshedProposalFeeUsdStr !== this.currentDraft.proposalFeeUsdStr) {
+        this.currentDraft = {
+          ...this.currentDraft,
+          proposalFeeUsdStr: refreshedProposalFeeUsdStr,
+        };
+        this.render();
+        showToast('Proposal fee changed. Review the updated amount and sign again.', 4000, 'info');
+        return;
+      }
       const result = await daoRepo.createProposal({
         draft: this.currentDraft,
         timestamp: getTransactionTimestamp(),
@@ -3955,6 +3975,7 @@ class ConfirmProposalModal {
           action: '',
         });
       }
+      if (daoModal.isActive()) daoModal.render();
 
       if (loadingToastId) {
         hideToast(loadingToastId);
@@ -3993,12 +4014,11 @@ class ConfirmProposalModal {
     this.setTitle('Review Proposal');
     this.content.innerHTML = [
       renderDaoProposalHeading(tx),
-      renderDaoProposalChanges(tx),
       renderDaoProposalOptions(tx),
       renderDaoProposalSection('Overview', [
         ['Type', getDaoTypeLabel(tx.proposalType)],
         ['Proposal fee', `${draft.proposalFeeUsdStr || '0'} USD`],
-        ['Initial state', 'Review after signing'],
+        ['Initial state', 'Review after submission'],
       ]),
       renderDaoProposalSection('Review Timeline', [
         ['Scheduled review start', draft.reviewStartTimeMs
@@ -4039,6 +4059,13 @@ const DAO_VOTE_HELP = {
 
 function getDaoCurrentAccountAddress() {
   return myAccount?.keys?.address ? longAddress(myAccount.keys.address) : '';
+}
+
+function hasPendingDaoProposalCreation(from = getDaoCurrentAccountAddress()) {
+  if (!from || !Array.isArray(myData?.pending)) return false;
+  return myData.pending.some((pendingTx) => (
+    pendingTx?.type === DAO_PROPOSAL_CREATE_TYPE && pendingTx.from === from
+  ));
 }
 
 function getDaoProposalReviewWindow(proposal, now = getTransactionTimestamp()) {
@@ -4194,7 +4221,9 @@ function formatDaoBigIntPercent(part, total) {
 }
 
 function getDaoProposalOptions(proposal) {
-  return proposal.options.map((option) => String(option));
+  return proposal.options.map((option, index) => (
+    index === 0 && String(option).toLowerCase() === 'no' ? 'No change' : String(option)
+  ));
 }
 
 function getDaoVoteTotals(proposal) {
@@ -4717,10 +4746,9 @@ class ProposalInfoModal {
     if (this.content) {
       this.content.innerHTML = [
         renderDaoProposalHeading(proposal),
-        renderDaoProposalChanges(proposal),
+        renderDaoProposalOptions(proposal),
         state === 'voting' ? this.renderCurrentVoteTotals(proposal) : '',
         this.renderProposalResults(resultSummary, committeeReview, currentAddress),
-        state === 'review' ? renderDaoProposalOptions(proposal) : '',
         state === 'review'
           ? this.renderCommitteeReviewStatus(committeeReview, reviewWindow, currentAddress)
           : '',
@@ -5149,7 +5177,6 @@ class ProposalInfoModal {
       ]),
       committeeReviewSection,
       state === 'voting' ? this.renderVotingDetails(proposal) : '',
-      state === 'review' ? '' : renderDaoProposalOptions(proposal),
       this.renderProposalRewards(rewardSummary),
     ].filter(Boolean);
 
@@ -5167,7 +5194,6 @@ class ProposalInfoModal {
   getProposalDetailsSummary(state, rewardSummary) {
     const parts = ['Overview', 'review timeline'];
     if (state === 'review') parts.push('committee review');
-    if (state !== 'review') parts.push('proposal options');
     if (state === 'voting') parts.push('voting totals');
     if (rewardSummary) parts.push('reward accounting');
     return parts.join(', ');
@@ -17080,7 +17106,7 @@ class ValidatorStakingModal {
     this.learnMoreButton = document.getElementById('validator-learn-more');
     this.rewardsEstimateElement = document.getElementById('validator-rewards-estimate');
 
-    // Skeleton bar elements
+    // Pending transaction status elements
     this.pendingSkeletonBar = document.getElementById('pending-nominee-skeleton-1');
     this.pendingTxTextInBar = document.getElementById('pending-tx-text-in-bar');
 
@@ -17096,7 +17122,7 @@ class ValidatorStakingModal {
     this.unstakeButton.addEventListener('click', withButtonCooldown(
       [this.unstakeButton, this.backButton, this.stakeButton],
       BUTTON_COOLDOWN_MS,
-      null,
+      () => this.revalidateActionButtons(),
       () => this.handleUnstake()
     ));
     this.backButton.addEventListener('click', () => this.close());
@@ -17105,6 +17131,44 @@ class ValidatorStakingModal {
     if (this.learnMoreButton) {
       this.learnMoreButton.addEventListener('click', this.handleLearnMoreClick.bind(this));
     }
+  }
+
+  getCurrentPendingStakeTx() {
+    return myData?.pending?.find(
+      (tx) => tx.type === 'deposit_stake' || tx.type === 'withdraw_stake'
+    ) || null;
+  }
+
+  revalidateActionButtons() {
+    const currentPendingTx = this.getCurrentPendingStakeTx();
+    const nominee = this.nomineeValueElement.textContent.trim() || null;
+    this.backButton.disabled = false;
+    this.stakeButton.disabled = Boolean(currentPendingTx);
+    this.updateUnstakeLockUI({ nominee, currentPendingTx });
+  }
+
+  updatePendingTxUi(currentPendingTx) {
+    this.nomineeValueElement.style.display = '';
+    this.pendingTxTextInBar.textContent = '';
+    this.pendingSkeletonBar.style.display = 'none';
+    this.stakeButton.disabled = Boolean(currentPendingTx);
+
+    if (!currentPendingTx) return;
+
+    this.pendingTxTextInBar.textContent =
+      currentPendingTx.type === 'withdraw_stake'
+        ? 'Unstake submitted — pending confirmation'
+        : 'Stake submitted — pending confirmation';
+    this.pendingSkeletonBar.style.display = 'flex';
+  }
+
+  /**
+   * Refresh staking details in place when the modal is already open.
+   * Never opens the modal if it is closed.
+   */
+  async refreshIfOpen() {
+    if (!this.isActive()) return;
+    await this.open();
   }
 
   async open() {
@@ -17136,28 +17200,7 @@ class ValidatorStakingModal {
     // Show the modal
     this.modal.classList.add('active');
 
-    // logic for text in skeleton bar
-    // Pending Transaction UI
-    this.nomineeValueElement.style.display = ''; // as in the original code
-    this.pendingTxTextInBar.style.display = 'none';
-    this.pendingSkeletonBar.style.display = 'none';
-
-    let currentPendingTx = null;
-    if (myData && myData.pending && Array.isArray(myData.pending) && myData.pending.length > 0) {
-      currentPendingTx = myData.pending.find((tx) => tx.type === 'deposit_stake' || tx.type === 'withdraw_stake');
-    }
-
-    if (currentPendingTx) {
-      this.detailsElement.style.display = 'block';
-      this.pendingSkeletonBar.style.display = 'flex';
-      this.pendingTxTextInBar.textContent =
-        currentPendingTx.type === 'withdraw_stake' ? 'Pending Unstake Transaction' : 'Pending Stake Transaction';
-      this.pendingTxTextInBar.style.display = 'block';
-
-      if (currentPendingTx.type === 'deposit_stake') {
-        this.stakeButton.disabled = true;
-      }
-    }
+    this.updatePendingTxUi(this.getCurrentPendingStakeTx());
 
     let nominee = null;
 
@@ -17312,6 +17355,10 @@ class ValidatorStakingModal {
         this.lockInfo = null;
       }
 
+      // Re-read pending so settlement changes are reflected after refresh
+      const latestPendingTx = this.getCurrentPendingStakeTx();
+      this.updatePendingTxUi(latestPendingTx);
+      this.updateUnstakeLockUI({ nominee, currentPendingTx: latestPendingTx });
       this.detailsElement.style.display = 'block'; // Or 'flex' if it's a flex container
     } catch (error) {
       console.error('Error fetching validator details:', error);
@@ -17325,8 +17372,6 @@ class ValidatorStakingModal {
     } finally {
       // Hide loading indicator regardless of success or failure
       this.loadingElement.style.display = 'none';
-      // Apply final UI state for Unstake (considers nominee, pending tx, and lockInfo)
-      this.updateUnstakeLockUI({ nominee, currentPendingTx });
     }
   }
 
@@ -17397,7 +17442,7 @@ class ValidatorStakingModal {
     }
 
     // If there is a pending stake/unstake tx, do not proceed (same condition that disables the button in the UI)
-    const currentPendingTx = myData.pending?.find((tx) => tx.type === 'deposit_stake' || tx.type === 'withdraw_stake');
+    const currentPendingTx = this.getCurrentPendingStakeTx();
     if (currentPendingTx) {
       showToast('A stake or unstake transaction is already pending.', 0, 'error');
       return;
@@ -17420,14 +17465,12 @@ class ValidatorStakingModal {
     // Confirmation dialog
     const confirmationMessage = `Are you sure you want to unstake from validator: ${nominee}?`;
     if (window.confirm(confirmationMessage)) {
-      //console.log(`User confirmed unstake from: ${nominee}`);
-      showToast('Submitting unstake transaction...', 3000, 'loading');
-      // Call the function to handle the actual transaction submission
       await this.submitUnstakeTransaction(nominee);
     }
   }
 
   async submitUnstakeTransaction(nodeAddress) {
+    let loadingToastId = showToast('Submitting unstake transaction...', 0, 'loading');
     try {
       const response = await this.postUnstake(nodeAddress);
       if (response && response.result && response.result.success) {
@@ -17441,8 +17484,18 @@ class ValidatorStakingModal {
           txid: response.txid,
         });
 
-        this.close();
-        this.open();
+        hideToast(loadingToastId);
+        loadingToastId = null;
+        showToast('Unstake submitted—pending confirmation', 5000, 'info');
+
+        if (this.isActive()) {
+          const currentPendingTx = this.getCurrentPendingStakeTx();
+          this.updatePendingTxUi(currentPendingTx);
+          this.updateUnstakeLockUI({
+            nominee: nodeAddress,
+            currentPendingTx,
+          });
+        }
       } else {
         // not showing toast since shown in injectTx
         console.error('Unstake failed. API Response:', response);
@@ -17451,6 +17504,8 @@ class ValidatorStakingModal {
       console.error('Error submitting unstake transaction:', error);
       // Provide a user-friendly error message
       showToast('Unstake transaction failed. Network or server error.', 0, 'error');
+    } finally {
+      if (loadingToastId) hideToast(loadingToastId);
     }
   }
 
@@ -33128,7 +33183,7 @@ class ReactNativeApp {
         let addresses = [];
         if (netidAccounts?.usernames) {
           // Get addresses from all stored accounts and convert to long format
-          addresses = Object.values(netidAccounts.usernames).map(account => longAddress(account.address));
+          addresses = (netidAccounts[SIGN_IN_USERNAME_ORDER_KEY]?.public || []).map(username => longAddress(netidAccounts.usernames[username].address));
         }
 
         if (addresses.length < 1) return;
@@ -33209,7 +33264,7 @@ class ReactNativeApp {
     const netidAccounts = existingAccounts.netids[netid];
     let allStoredAddresses = [];
     if (netidAccounts?.usernames) {
-      allStoredAddresses = Object.values(netidAccounts.usernames).map(account => longAddress(account.address));
+      allStoredAddresses = (netidAccounts[SIGN_IN_USERNAME_ORDER_KEY]?.public || []).map(username => longAddress(netidAccounts.usernames[username].address));
     }
 
     // Create a list of addresses to keep subscribed, excluding the current user.
@@ -33498,6 +33553,12 @@ async function checkPendingTransactionsOnce() {
         if (!removePendingTransaction(txid)) continue;
         didMutatePendingState = true;
 
+        if (type === 'withdraw_stake') {
+          myData.wallet.history = myData.wallet.history.filter((tx) => tx.txid !== txid);
+          showToast('Unstake confirmation timed out. Please try again.', 0, 'warning');
+          await validatorModal.refreshIfOpen();
+        }
+
         if (pendingTxInfo.editPending) {
           reconcilePendingMessageEdit(pendingTxInfo);
           showToast('Edit timed out and was reverted', 0, 'error');
@@ -33547,10 +33608,11 @@ async function checkPendingTransactionsOnce() {
           }
         }
 
-        if (type === 'deposit_stake' || type === 'withdraw_stake') {
-          // show toast notification with the success message
-          showToast(`${type === 'deposit_stake' ? 'Stake' : 'Unstake'} transaction successful`, 5000, 'success');
-          // refresh only if validator modal is open
+        if (type === 'withdraw_stake') {
+          showToast('Unstake transaction confirmed', 5000, 'success');
+          await validatorModal.refreshIfOpen();
+        } else if (type === 'deposit_stake') {
+          showToast('Stake transaction successful', 5000, 'success');
           if (validatorModal.isActive()) {
             validatorModal.close();
             validatorModal.open();
@@ -33678,13 +33740,12 @@ async function checkPendingTransactionsOnce() {
           showToast(`${failureMessage}: ${userFailureReason}`, 0, 'error');
         }
 
-        // refresh the validator modal if this is a withdraw_stake/deposit_stake and validator modal is open
         if (type === 'withdraw_stake' || type === 'deposit_stake') {
-          // remove from wallet history
           myData.wallet.history = myData.wallet.history.filter((tx) => tx.txid !== txid);
 
-          if (validatorModal.isActive()) {
-            // refresh the validator modal
+          if (type === 'withdraw_stake') {
+            await validatorModal.refreshIfOpen();
+          } else if (validatorModal.isActive()) {
             validatorModal.close();
             validatorModal.open();
           }
