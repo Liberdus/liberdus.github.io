@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'u'
+const version = 'v'
 const BOOT_SPLASH_HANDOFF_MS = 1000;
 let myVersion = '0';
 async function checkVersion() {
@@ -2525,7 +2525,7 @@ function formatDaoReadyAtLabel(ts, now) {
 
 function formatDaoProposalTitle(proposal) {
   const title = String(proposal.title || '').trim() || 'Proposal';
-  return proposal.number ? `#${proposal.number}: ${title}` : title;
+  return proposal.number ? `${proposal.number}: ${title}` : title;
 }
 
 class DaoModal {
