@@ -2223,16 +2223,15 @@ input[type='file'].form-control::file-selector-button {
 
 #confirmProposalModal .proposal-option-section,
 #proposalInfoModal .proposal-option-section {
-  background: transparent;
+  background: rgba(61, 61, 206, 0.055);
   border: 0;
-  border-bottom: 1px solid var(--border-color);
   border-radius: 0;
   box-shadow: none;
   display: grid;
   gap: 2px;
   grid-template-columns: minmax(0, 1fr);
   min-width: 0;
-  padding: 0 0 10px;
+  padding: 8px 10px 10px;
   text-align: left;
 }
 
@@ -2280,7 +2279,6 @@ input[type='file'].form-control::file-selector-button {
 #confirmProposalModal .proposal-info-row,
 #proposalInfoModal .proposal-info-row {
   background: rgba(255, 255, 255, 0.92);
-  border: 1px solid var(--border-color);
   box-shadow: 0 1px 2px rgba(28, 28, 33, 0.05);
 }
 
@@ -2682,6 +2680,7 @@ input[type='file'].form-control::file-selector-button {
 
 #confirmProposalModal .proposal-option-section--no-change .proposal-info-muted,
 #proposalInfoModal .proposal-option-section--no-change .proposal-info-muted {
+  align-self: center;
   align-items: center;
   color: var(--text-color);
   display: flex;
@@ -2691,6 +2690,12 @@ input[type='file'].form-control::file-selector-button {
   justify-self: end;
   padding: 4px 0;
   text-align: right;
+}
+
+#confirmProposalModal .proposal-option-section--no-change,
+#proposalInfoModal .proposal-option-section--no-change {
+  grid-template-rows: auto minmax(0, 1fr);
+  min-height: 110px;
 }
 
 #confirmProposalModal .proposal-option-section--no-change .proposal-change-arrow,
@@ -2990,12 +2995,8 @@ input[type='file'].form-control::file-selector-button {
   background: var(--input-background);
   border-radius: 8px;
   display: grid;
-  gap: 8px;
-  padding: 10px;
-}
-
-#proposalInfoModal .proposal-vote-preview {
-  padding: 8px;
+  gap: 4px;
+  padding: 8px 10px;
 }
 
 #proposalInfoModal .proposal-vote-preview--message {
@@ -3004,9 +3005,8 @@ input[type='file'].form-control::file-selector-button {
 }
 
 #proposalInfoModal .proposal-vote-option span,
-#proposalInfoModal .proposal-vote-preview-total span,
-#proposalInfoModal .proposal-vote-preview-row span,
-#proposalInfoModal .proposal-vote-preview-note {
+#proposalInfoModal .proposal-vote-preview-total > span:first-child,
+#proposalInfoModal .proposal-vote-preview-row span {
   color: var(--secondary-text-color);
   font-size: 12px;
   font-weight: var(--font-weight-medium);
@@ -3042,14 +3042,14 @@ input[type='file'].form-control::file-selector-button {
   text-align: center;
 }
 
-#proposalInfoModal .proposal-vote-weight-label,
+#proposalInfoModal .proposal-vote-multiple-label,
 #proposalInfoModal .proposal-vote-requirement-label {
   align-items: center;
   display: inline-flex;
   gap: 4px;
 }
 
-#proposalInfoModal .proposal-vote-weight-label {
+#proposalInfoModal .proposal-vote-multiple-label {
   justify-content: center;
   justify-self: center;
 }
@@ -3089,52 +3089,25 @@ input[type='file'].form-control::file-selector-button {
   white-space: nowrap;
 }
 
-#proposalInfoModal .proposal-vote-option,
-#proposalInfoModal .proposal-vote-spend-row {
+#proposalInfoModal .proposal-vote-option {
   align-items: center;
   display: grid;
   gap: 8px;
-}
-
-#proposalInfoModal .proposal-vote-option {
   grid-template-columns: minmax(0, 1fr) 52px 92px;
 }
 
-#proposalInfoModal .proposal-vote-spend-row {
-  grid-template-columns: minmax(0, 1fr) auto;
-}
-
-#proposalInfoModal .proposal-vote-weight-percent {
+#proposalInfoModal .proposal-vote-multiple-percent {
   font-variant-numeric: tabular-nums;
   justify-self: center;
   text-align: center;
   white-space: nowrap;
 }
 
-#proposalInfoModal .proposal-vote-spend-row .form-group {
-  align-items: center;
-  display: grid;
-  gap: 8px;
-  grid-template-columns: auto minmax(0, 1fr);
-}
-
-#proposalInfoModal .proposal-vote-spend-row label {
-  margin: 0;
-  white-space: nowrap;
-}
-
-#proposalInfoModal .proposal-vote-spend-row > span {
-  color: var(--secondary-text-color);
-  font-size: 13px;
-  font-weight: var(--font-weight-semibold);
-  line-height: 40px;
-}
-
 #proposalInfoModal .proposal-vote-preview-total,
 #proposalInfoModal .proposal-vote-preview-row {
-  align-items: center;
+  align-items: start;
   display: grid;
-  gap: 10px;
+  gap: 8px;
   grid-template-columns: minmax(0, 1fr) auto;
 }
 
@@ -3152,54 +3125,25 @@ input[type='file'].form-control::file-selector-button {
   text-align: right;
 }
 
-#proposalInfoModal .proposal-vote-power-help {
+#proposalInfoModal .proposal-vote-preview-value {
+  align-items: end;
+  display: grid;
+  gap: 0;
+  justify-items: end;
+}
+
+#proposalInfoModal .proposal-vote-preview-value small {
   color: var(--secondary-text-color);
   font-size: 12px;
+  font-weight: var(--font-weight-medium);
   line-height: 1.35;
-}
-
-#proposalInfoModal .proposal-vote-power-help summary {
-  align-items: center;
-  cursor: pointer;
-  display: inline-flex;
-  gap: 6px;
-  list-style: none;
-}
-
-#proposalInfoModal .proposal-vote-power-help summary::-webkit-details-marker {
-  display: none;
-}
-
-#proposalInfoModal .proposal-vote-power-help summary::before {
-  background-image: var(--icon-info);
-  background-position: center;
-  background-repeat: no-repeat;
-  background-size: 16px 16px;
-  content: "";
-  height: 16px;
-  width: 16px;
-}
-
-#proposalInfoModal .proposal-vote-power-help p {
-  margin: 6px 0 0;
-}
-
-#proposalInfoModal .proposal-vote-preview-meter {
-  background: var(--border-color);
-  border-radius: 999px;
-  height: 8px;
-  overflow: hidden;
-}
-
-#proposalInfoModal .proposal-vote-preview-meter span {
-  background: var(--primary-color);
-  display: block;
-  height: 100%;
+  text-align: right;
 }
 
 #proposalInfoModal .proposal-vote-preview-options {
   display: grid;
-  gap: 6px;
+  gap: 4px;
+  padding-top: 2px;
 }
 
 #proposalInfoModal .proposal-vote-preview-message {
@@ -8311,8 +8255,6 @@ small {
 
 #daoModal .dao-filter-bar {
   background: rgba(61, 61, 206, 0.14);
-  border-bottom: 1px solid rgba(61, 61, 206, 0.22);
-  border-top: 1px solid rgba(61, 61, 206, 0.22);
   display: grid;
   gap: 6px;
   grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -8362,7 +8304,6 @@ small {
 #daoModal .dao-filter-chip-count {
   align-items: center;
   background: var(--hover-background);
-  border: 1px solid var(--border-color);
   border-radius: 999px;
   color: var(--secondary-text-color);
   display: inline-flex;
@@ -8379,7 +8320,6 @@ small {
 
 #daoModal .dao-filter-chip.active .dao-filter-chip-count {
   background: rgba(255, 255, 255, 0.18);
-  border-color: rgba(255, 255, 255, 0.28);
   color: var(--background-color);
 }
 
