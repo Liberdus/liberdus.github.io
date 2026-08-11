@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'q'
+const version = 'r'
 const BOOT_SPLASH_HANDOFF_MS = 1000;
 let myVersion = '0';
 async function checkVersion() {
@@ -3785,12 +3785,10 @@ function renderDaoProposalOptions(proposal) {
   const options = getDaoProposalOptions(proposal);
   const changeSets = proposal?.[proposal?.proposalType]?.changes;
   const optionCards = options.map((option, index) => {
+    const noChangeClass = index === 0 ? ' proposal-option-section--no-change' : '';
     return `
-      <div class="proposal-option-card proposal-option-card--changes">
-        <div class="proposal-option-card-header">
-          <span class="proposal-option-card-number">${index + 1}</span>
-          <span class="proposal-option-card-label">${escapeHtml(option)}</span>
-        </div>
+      <div class="proposal-option-section${noChangeClass}">
+        <span class="proposal-option-label">${escapeHtml(option)}</span>
         ${renderDaoProposalOptionDetails(index, changeSets)}
       </div>
     `;
@@ -3806,18 +3804,18 @@ function renderDaoProposalOptions(proposal) {
 
 function renderDaoProposalOptionDetails(optionIndex, changeSets) {
   if (optionIndex === 0) {
-    return '<p class="proposal-info-muted">No parameter changes.</p>';
+    return '<p class="proposal-info-muted"><span class="proposal-change-arrow" aria-hidden="true">&rarr;</span> No parameter changes.</p>';
   }
 
   const changes = Array.isArray(changeSets) ? changeSets[optionIndex - 1] : null;
   if (!Array.isArray(changes)) {
-    return '<div class="proposal-option-card-changes"><p class="proposal-info-muted">Parameter changes are unavailable.</p></div>';
+    return '<div class="proposal-option-changes"><p class="proposal-info-muted">Parameter changes are unavailable.</p></div>';
   }
   if (changes.length === 0) {
-    return '<div class="proposal-option-card-changes"><p class="proposal-info-muted">No parameter changes.</p></div>';
+    return '<div class="proposal-option-changes"><p class="proposal-info-muted">No parameter changes.</p></div>';
   }
 
-  return `<div class="proposal-option-card-changes">${renderDaoProposalChangeRows(changes)}</div>`;
+  return `<div class="proposal-option-changes">${renderDaoProposalChangeRows(changes)}</div>`;
 }
 
 function renderDaoProposalChangeRows(changes) {
@@ -4133,6 +4131,21 @@ function getDaoVoteTimeMultiplier(now, start, end) {
 function formatDaoDetailTimestamp(ts) {
   const formatted = formatDaoTimestamp(ts);
   return formatted ? formatted.replace(', ', '\n') : 'Unavailable';
+}
+
+function formatDaoCompactTimestamp(ts) {
+  const n = Number(ts || 0);
+  if (!n) return '';
+  try {
+    return new Date(n).toLocaleString(undefined, {
+      month: 'short',
+      day: 'numeric',
+      hour: 'numeric',
+      minute: '2-digit',
+    });
+  } catch {
+    return '';
+  }
 }
 
 function formatDaoShortNumber(value, decimals = 6) {
@@ -4765,33 +4778,18 @@ class ProposalInfoModal {
     const winnerIndex = totalWeight > 0n
       ? totals.reduce((winner, row, index) => (row.total > totals[winner].total ? index : winner), 0)
       : -1;
-    const rows = totals.map((row, index) => {
-      const power = formatDaoVotingPower(row.total);
-      const percent = formatDaoBigIntPercent(row.total, totalWeight);
-      const valueLabel = totalWeight > 0n ? `${percent} (${power})` : power;
-      const title = totalWeight > 0n
-        ? `${row.option}: ${percent}, ${power}`
-        : `${row.option}: ${power}`;
+    const meter = this.renderVoteResultMeter(totals, totalWeight, winnerIndex, 'Current vote breakdown');
+    const deadlineText = formatDaoCompactTimestamp(votingWindow.end);
 
-      return {
-        isEmpty: row.total === 0n,
-        isWinner: index === winnerIndex,
-        label: row.option,
-        title,
-        tone: '',
-        units: this.getCurrentVoteSegmentUnits(row.total, totalWeight),
-        valueLabel,
-      };
-    });
-
-    return this.renderCurrentTallySection({
-      ariaLabel: 'Current vote totals',
-      deadline: votingWindow.end,
-      deadlineLabel: 'Voting ends',
-      footerHtml: '',
-      heading: 'Current Vote',
-      rows,
-    });
+    return `
+      <section class="proposal-info-section proposal-vote-current-section">
+        <div class="proposal-vote-current-heading">
+          <h3>Current Vote</h3>
+          ${deadlineText ? `<span title="${escapeDaoFormAttribute(`Voting ends: ${formatDaoTimestamp(votingWindow.end)}`)}">${escapeHtml(`Voting ends: ${deadlineText}`)}</span>` : ''}
+        </div>
+        ${meter}
+      </section>
+    `;
   }
 
   getCurrentVoteTotalRows(proposal) {
@@ -4803,23 +4801,51 @@ class ProposalInfoModal {
     }));
   }
 
-  getCurrentVoteSegmentUnits(part, total) {
-    if (typeof part !== 'bigint' || typeof total !== 'bigint' || total <= 0n) return 1;
-    if (part <= 0n) return 0;
-    const units = Number((part * 1000n) / total);
-    return Math.max(1, units);
+  renderVoteResultMeter(totals, totalWeight, winnerPosition, ariaLabel) {
+    const labels = totals.map((row, position) => {
+      const power = formatDaoVotingPower(row.total);
+      const displayPower = power.endsWith(' power') ? power.slice(0, -6) : power;
+      const percent = formatDaoBigIntPercent(row.total, totalWeight);
+      const labelPosition = position === 0 ? 'start' : position === totals.length - 1 ? 'end' : 'center';
+      const label = `${row.option}: ${percent}, ${power}`;
+      return `
+        <div
+          class="proposal-result-meter-label proposal-result-meter-label--${labelPosition} proposal-result-meter-label--palette-${position % 6}${position === winnerPosition ? ' proposal-result-meter-label--winner' : ''}"
+          title="${escapeDaoFormAttribute(label)}"
+          aria-label="${escapeDaoFormAttribute(label)}"
+        >
+          <span>${escapeHtml(row.option)}</span>
+          <small>${escapeHtml(percent)} (${escapeHtml(displayPower)})</small>
+        </div>
+      `;
+    }).join('');
+    const bars = totals.map((row, position) => {
+      const style = `--result-segment-units: ${this.getResultSegmentUnits(row.total, totalWeight)};`;
+      return `
+        <span
+          class="proposal-result-meter-segment proposal-result-meter-segment--palette-${position % 6}${row.total === 0n ? ' proposal-result-meter-segment--empty' : ''}"
+          style="${escapeDaoFormAttribute(style)}"
+        ></span>
+      `;
+    }).join('');
+
+    return `
+      <div class="proposal-result-meter" aria-label="${escapeDaoFormAttribute(ariaLabel)}">
+        <div class="proposal-result-meter-labels">${labels}</div>
+        <div class="proposal-result-meter-track" aria-hidden="true">${bars}</div>
+      </div>
+    `;
   }
 
-  renderCurrentTallySection({ ariaLabel, deadline, deadlineLabel, footerHtml, heading, rows }) {
+  renderCommitteeResultMeter(rows, ariaLabel, winnerTone = '') {
     const labels = rows
       .map((row, index) => {
-        const position = index === 0 ? 'start' : index === rows.length - 1 ? 'end' : 'center';
-        const toneClass = row.tone ? ` proposal-vote-current-label--${row.tone}` : '';
-        const winnerClass = row.isWinner ? ' proposal-vote-current-label--winner' : '';
+        const position = index === 0 ? 'start' : 'end';
+        const winnerClass = row.tone === winnerTone ? ' proposal-result-meter-label--winner' : '';
 
         return `
           <div
-            class="proposal-vote-current-label proposal-vote-current-label--${position}${toneClass}${winnerClass}"
+            class="proposal-result-meter-label proposal-result-meter-label--${position} proposal-result-meter-label--${row.tone}${winnerClass}"
             title="${escapeDaoFormAttribute(row.title)}"
             aria-label="${escapeDaoFormAttribute(row.title)}"
           >
@@ -4831,62 +4857,40 @@ class ProposalInfoModal {
       .join('');
     const segments = rows
       .map((row) => {
-        const toneClass = row.tone ? ` proposal-vote-current-segment--${row.tone}` : '';
-        const winnerClass = row.isWinner ? ' proposal-vote-current-segment--winner' : '';
-        const emptyClass = row.isEmpty ? ' proposal-vote-current-segment--empty' : '';
+        const emptyClass = row.isEmpty ? ' proposal-result-meter-segment--empty' : '';
 
         return `
           <span
-            class="proposal-vote-current-segment${toneClass}${winnerClass}${emptyClass}"
-            style="--vote-total-segment-units: ${row.units};"
+            class="proposal-result-meter-segment proposal-result-meter-segment--${row.tone}${emptyClass}"
+            style="--result-segment-units: ${row.units};"
           ></span>
         `;
       })
       .join('');
 
     return `
-      <section class="proposal-info-section proposal-vote-current-section">
-        <h3>${escapeHtml(heading)}</h3>
-        <div class="proposal-vote-current-meter" aria-label="${escapeDaoFormAttribute(ariaLabel)}">
-          <div class="proposal-vote-current-labels">${labels}</div>
-          <div class="proposal-vote-current-track" aria-hidden="true">${segments}</div>
-        </div>
-        <div class="proposal-vote-status-grid proposal-vote-status-grid--current">
-          <div class="proposal-vote-status-card proposal-vote-status-card--deadline">
-            <span>${escapeHtml(deadlineLabel)}</span>
-            <strong>${escapeHtml(formatDaoDetailTimestamp(deadline))}</strong>
-          </div>
-        </div>
-        ${footerHtml}
-      </section>
+      <div class="proposal-result-meter" aria-label="${escapeDaoFormAttribute(ariaLabel)}">
+        <div class="proposal-result-meter-labels">${labels}</div>
+        <div class="proposal-result-meter-track" aria-hidden="true">${segments}</div>
+      </div>
     `;
   }
 
   renderCommitteeReviewStatus(committeeReview, reviewWindow, currentAddress) {
     const { acceptCount, withholdCount } = committeeReview;
-    const submittedCount = acceptCount + withholdCount;
-    const rows = this.getCommitteeTallyRows(acceptCount, withholdCount)
-      .map((row) => {
-        const valueLabel = submittedCount > 0 ? row.shareLabel : row.countLabel;
-        return {
-          isEmpty: row.count === 0,
-          isWinner: false,
-          label: row.label,
-          title: `${row.label}: ${valueLabel}`,
-          tone: row.tone,
-          units: row.units,
-          valueLabel,
-        };
-      });
+    const rows = this.getCommitteeTallyRows(acceptCount, withholdCount);
+    const deadlineText = formatDaoCompactTimestamp(reviewWindow.end);
 
-    return this.renderCurrentTallySection({
-      ariaLabel: 'Committee review vote totals',
-      deadline: reviewWindow.end,
-      deadlineLabel: 'Review ends',
-      footerHtml: this.renderCommitteeVoteList(committeeReview, currentAddress),
-      heading: 'Committee Review',
-      rows,
-    });
+    return `
+      <section class="proposal-info-section proposal-vote-current-section">
+        <div class="proposal-vote-current-heading">
+          <h3>Committee Review</h3>
+          ${deadlineText ? `<span title="${escapeDaoFormAttribute(`Review ends: ${formatDaoTimestamp(reviewWindow.end)}`)}">${escapeHtml(`Review ends: ${deadlineText}`)}</span>` : ''}
+        </div>
+        ${this.renderCommitteeResultMeter(rows, 'Committee review vote totals')}
+        ${this.renderCommitteeVoteList(committeeReview, currentAddress)}
+      </section>
+    `;
   }
 
   getCommitteeTallyRows(acceptCount, withholdCount) {
@@ -4897,11 +4901,13 @@ class ProposalInfoModal {
     ].map((row) => {
       const countLabel = `${row.count} ${row.count === 1 ? 'vote' : 'votes'}`;
       const percent = this.formatCountPercent(row.count, submittedCount);
+      const valueLabel = submittedCount > 0 ? `${percent} (${countLabel})` : countLabel;
       return {
         ...row,
-        countLabel,
-        shareLabel: `${percent} (${countLabel})`,
         units: this.getCountSegmentUnits(row.count, submittedCount),
+        isEmpty: row.count === 0,
+        title: `${row.label}: ${valueLabel}`,
+        valueLabel,
       };
     });
   }
@@ -4962,52 +4968,13 @@ class ProposalInfoModal {
 
     const winnerLabel = result.winner ? `${result.winner.option} (${result.outcome})` : 'Unavailable';
     const totalLabel = result.totalWeight > 0n ? formatDaoVotingPower(result.totalWeight) : 'No votes yet';
-    const labelLayout = result.totals.length === 2 ? 'balanced' : 'segmented';
-    const segments = result.totals
-      .map((row, rowPosition) => {
-        const isWinner = result.winner?.index === row.index;
-        const paletteClass = result.totals.length > 1
-          ? ` proposal-result-meter-label--palette-${rowPosition % 6}`
-          : '';
-        const units = this.getResultSegmentUnits(row.total, result.totalWeight);
-        const power = formatDaoVotingPower(row.total);
-        const displayPower = power.endsWith(' power') ? power.slice(0, -6) : power;
-        const percent = formatDaoBigIntPercent(row.total, result.totalWeight);
-        const position = rowPosition === 0
-          ? 'start'
-          : rowPosition === result.totals.length - 1
-            ? 'end'
-            : 'center';
-        const style = `--result-segment-units: ${units};`;
-        const label = `${row.option}: ${percent}, ${power}`;
-        return `
-          <div
-            class="proposal-result-meter-label proposal-result-meter-label--${position}${paletteClass}${isWinner ? ' proposal-result-meter-label--winner' : ''}"
-            style="${escapeDaoFormAttribute(style)}"
-            title="${escapeDaoFormAttribute(label)}"
-            aria-label="${escapeDaoFormAttribute(label)}"
-          >
-            <span>${escapeHtml(row.option)}</span>
-            <small>${escapeHtml(percent)} (${escapeHtml(displayPower)})</small>
-          </div>
-        `;
-      })
-      .join('');
-    const bars = result.totals
-      .map((row, rowPosition) => {
-        const paletteClass = result.totals.length > 1
-          ? ` proposal-result-meter-segment--palette-${rowPosition % 6}`
-          : ' proposal-result-meter-segment--palette-0';
-        const units = this.getResultSegmentUnits(row.total, result.totalWeight);
-        const style = `--result-segment-units: ${units};`;
-        return `
-          <span
-            class="proposal-result-meter-segment${paletteClass}${row.total === 0n ? ' proposal-result-meter-segment--empty' : ''}"
-            style="${escapeDaoFormAttribute(style)}"
-          ></span>
-        `;
-      })
-      .join('');
+    const winnerPosition = result.totals.findIndex((row) => row.index === result.winner?.index);
+    const meter = this.renderVoteResultMeter(
+      result.totals,
+      result.totalWeight,
+      winnerPosition,
+      'Vote result breakdown'
+    );
 
     return `
       <section class="proposal-info-section">
@@ -5022,10 +4989,7 @@ class ProposalInfoModal {
             <span class="proposal-result-value">${escapeHtml(totalLabel)}</span>
           </div>
         </div>
-        <div class="proposal-result-meter" aria-label="Vote result breakdown">
-          <div class="proposal-result-meter-labels proposal-result-meter-labels--${labelLayout}">${segments}</div>
-          <div class="proposal-result-meter-track" aria-hidden="true">${bars}</div>
-        </div>
+        ${meter}
       </section>
     `;
   }
@@ -5042,31 +5006,7 @@ class ProposalInfoModal {
       winnerTone = 'withhold';
     }
     const rows = this.getCommitteeTallyRows(acceptCount, withholdCount);
-    const labels = rows
-      .map((row, index) => {
-        const position = index === 0 ? 'start' : 'end';
-        const winnerClass = row.tone === winnerTone ? ' proposal-result-meter-label--winner' : '';
-        return `
-          <div
-            class="proposal-result-meter-label proposal-result-meter-label--${position} proposal-result-meter-label--${row.tone}${winnerClass}"
-            style="--result-segment-units: ${row.units};"
-            title="${escapeDaoFormAttribute(`${row.label}: ${row.shareLabel}`)}"
-            aria-label="${escapeDaoFormAttribute(`${row.label}: ${row.shareLabel}`)}"
-          >
-            <span>${escapeHtml(row.label)}</span>
-            <small>${escapeHtml(row.shareLabel)}</small>
-          </div>
-        `;
-      })
-      .join('');
-    const segments = rows
-      .map((row) => `
-        <span
-          class="proposal-result-meter-segment proposal-result-meter-segment--${row.tone}${row.count === 0 ? ' proposal-result-meter-segment--empty' : ''}"
-          style="--result-segment-units: ${row.units};"
-        ></span>
-      `)
-      .join('');
+    const meter = this.renderCommitteeResultMeter(rows, 'Committee result breakdown', winnerTone);
 
     return `
       <section class="proposal-info-section">
@@ -5081,10 +5021,7 @@ class ProposalInfoModal {
             <span class="proposal-result-value">${escapeHtml(committeeSizeLabel)}</span>
           </div>
         </div>
-        <div class="proposal-result-meter" aria-label="Committee result breakdown">
-          <div class="proposal-result-meter-labels proposal-result-meter-labels--balanced">${labels}</div>
-          <div class="proposal-result-meter-track" aria-hidden="true">${segments}</div>
-        </div>
+        ${meter}
         ${this.renderCommitteeVoteList(committeeReview, currentAddress)}
       </section>
     `;
