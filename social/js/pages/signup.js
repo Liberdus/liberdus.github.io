@@ -558,7 +558,7 @@ function createProviderLink(provider, link) {
       markManualClaim(link.manualClaimKey);
     }
     if (provider.onLinkClick) {
-      provider.onLinkClick({ runtime, link });
+      provider.onLinkClick({ runtime, link, syncUi, showMessage });
     }
     if (link.manualClaimKey || provider.onLinkClick) syncUi();
   });
@@ -626,7 +626,7 @@ function renderProviderRows() {
       authButton.textContent = "Sign in";
       authButton.disabled = true;
     }
-    if (provider.id === "github" || provider.id === "youtube") {
+    if (provider.recheck || provider.id === "github" || provider.id === "youtube") {
       verifyButton = document.createElement("button");
       verifyButton.id = `${provider.id}VerifyButton`;
       verifyButton.type = "button";
@@ -1639,14 +1639,15 @@ function bindEvents() {
       });
     }
 
-    if (elements?.verifyButton && provider.start) {
+    if (elements?.verifyButton && (provider.recheck || provider.start)) {
       elements.verifyButton.addEventListener("click", async () => {
         let startedRedirect = false;
         try {
           if (provider.connectingKey) runtime[provider.connectingKey] = true;
           syncUi();
           runtime.isAuthRedirecting = true;
-          const result = await provider.start({ runtime, syncUi, showMessage });
+          const action = provider.recheck || provider.start;
+          const result = await action({ runtime, syncUi, showMessage });
           startedRedirect = Boolean(result?.redirecting);
           if (startedRedirect) return;
         } catch (error) {

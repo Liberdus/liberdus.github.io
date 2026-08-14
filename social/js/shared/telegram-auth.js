@@ -129,6 +129,22 @@ export async function fetchTelegramSession(config = {}, { required = false } = {
   return payload;
 }
 
+export async function recheckTelegramMembership(config = {}) {
+  const backendUrl = getBackendUrl(config);
+  if (!backendUrl) throw new Error("Telegram sign-in is not configured.");
+
+  const response = await fetch(`${backendUrl}/api/telegram/recheck`, {
+    method: "POST",
+    credentials: "include",
+    cache: "no-store",
+    headers: { "Content-Type": "application/json" },
+    body: "{}",
+  });
+  const payload = await parseJsonResponse(response);
+  if (!response.ok) throw new Error(`Telegram membership check failed: ${describeErrorPayload(payload)}`);
+  return payload;
+}
+
 export async function logoutTelegramSession(config = {}) {
   const backendUrl = getBackendUrl(config);
   if (!backendUrl) return;

@@ -52,7 +52,7 @@ export async function startGitHubLogin(config = {}) {
 
   const startUrl = new URL(`${backendUrl}/api/github/start`);
   startUrl.searchParams.set("return_uri", config?.xAuth?.redirectUri || `${window.location.origin}${window.location.pathname}`);
-  window.location.assign(startUrl.toString());
+  window.open(startUrl.toString(), "_blank", "noopener,noreferrer");
 }
 
 export async function fetchGitHubSession(config = {}, { required = false } = {}) {
