@@ -256,7 +256,7 @@ export async function startXLogin(config = {}) {
 
   const startUrl = new URL(`${xAuth.backendUrl}/api/x/start`);
   startUrl.searchParams.set("return_uri", xAuth.redirectUri);
-  window.location.assign(startUrl.toString());
+  window.open(startUrl.toString(), "_blank", "noopener,noreferrer");
 }
 
 export async function logoutXSession(config = {}, session = getXSession()) {

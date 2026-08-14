@@ -9,11 +9,11 @@
     "enabled": true,
     "botUsername": "",
     "botId": "",
-    "membershipConfigured": false
+    "membershipConfigured": true
   },
   "discordAuth": {
     "enabled": true,
-    "membershipConfigured": false
+    "membershipConfigured": true
   },
   "linkedinAuth": {
     "enabled": true
@@ -31,7 +31,7 @@
   },
   "socialLinks": {
     "x": "https://x.com/liberdus",
-    "telegram": "https://t.me/LiberdusOfficial",
+    "telegram": "https://t.me/liberdusofficial",
     "discord": "https://liberdus.com/discord",
     "linkedin": "https://www.linkedin.com/company/liberdus",
     "github": "https://github.com/Liberdus",

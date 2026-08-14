@@ -95,7 +95,8 @@ fix_wallet_import_paths() {
     echo "Error: Missing $wallet_js after sync"
     exit 1
   fi
-  sed -i 's|\.\./\.\./\.\./vendor/|../../vendor/|g' "$wallet_js"
+  sed -i.wallet-path-backup 's|\.\./\.\./\.\./vendor/|../../vendor/|g' "$wallet_js"
+  rm -f "$wallet_js.wallet-path-backup"
 }
 
 init_source_submodules

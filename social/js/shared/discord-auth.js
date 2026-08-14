@@ -50,7 +50,7 @@ export async function startDiscordLogin(config = {}) {
 
   const startUrl = new URL(`${backendUrl}/api/discord/start`);
   startUrl.searchParams.set("return_uri", config?.xAuth?.redirectUri || `${window.location.origin}${window.location.pathname}`);
-  window.location.assign(startUrl.toString());
+  window.open(startUrl.toString(), "_blank", "noopener,noreferrer");
 }
 
 export async function fetchDiscordSession(config = {}, { required = false } = {}) {
