@@ -423,7 +423,7 @@
                 <span class="dao-filter-chip-label">Accepted</span>
                 <span class="dao-filter-chip-count" aria-label="0 accepted proposals">0</span>
               </button>
-              <button class="dao-filter-chip" type="button" role="tab" data-filter-key="claimable" aria-selected="false">
+              <button class="dao-filter-chip" type="button" role="tab" data-filter-key="claimable" aria-selected="false" title="View proposals with rewards ready to claim">
                 <span class="dao-filter-chip-label">Claim</span>
                 <span class="dao-filter-chip-count" aria-label="0 claimable proposals">0</span>
               </button>
@@ -453,6 +453,7 @@
                 <div>Proposal data appears here when available</div>
               </div>
             </ul>
+            <button class="btn btn--secondary dao-load-more" id="daoLoadMoreButton" type="button" hidden>Load more</button>
           </div>
           <button class="floating-button" id="daoAddProposalButton" aria-label="Add proposal"><span class="plus-glyph" aria-hidden="true">+</span></button>
         </div>
@@ -2515,7 +2516,10 @@
                 />
               </div>
               <div class="form-actions">
-                <button type="submit" class="btn btn--primary btn--pill btn--full">Save Data</button>
+                <button type="submit" class="btn btn--primary btn--pill btn--full backup-submit-button">
+                  <span class="backup-submit-spinner" aria-hidden="true"></span>
+                  <span>Save Data</span>
+                </button>
               </div>
             </form>
           </div>

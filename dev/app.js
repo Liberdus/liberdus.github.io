@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'y'
+const version = 'z'
 const BOOT_SPLASH_HANDOFF_MS = 1000;
 let myVersion = '0';
 async function checkVersion() {
@@ -79,6 +79,7 @@ import { stringify, parse } from './external/stringify-shardus.js';
 
 import {
   createDaoBackendFetcher,
+  createDaoProposalVoteTracker,
   DAO_ACTION_TYPES,
   DAO_CONFIG_CHANGE_OPTIONS,
   DAO_PROPOSAL_CREATE_TYPE,
@@ -89,6 +90,7 @@ import {
   daoRepo,
   DAO_STATES,
   getDaoTransactionMessage,
+  getDaoTrackedProposalMetadataEntries,
   getDaoProposalClaimWindow,
   getDaoPendingFinalizationOutcome,
   getDaoProposalTimeline,
@@ -98,7 +100,6 @@ import {
   getDaoTypeLabel,
   getEffectiveDaoState,
   hasPendingDaoAction,
-  isDaoProposalClaimable,
   isDaoTransactionType,
   normalizeDaoAddress,
   parseDaoUnsignedBigInt,
@@ -154,6 +155,7 @@ import {
   FAUCET_COOLDOWN_MS,
   truncateMessage,
   normalizeUnsignedFloat,
+  getVerifiedUsername,
   EthNum,
 } from './lib.js';
 
@@ -402,6 +404,7 @@ function newDataRecord(myAccount) {
       defaultGatewayIndex: -1, // -1 means use random selection
     },
     contacts: {},
+    daoUserVotes: {},
     chats: [],
     wallet: {
       networth: 0.0,
@@ -451,6 +454,7 @@ function clearMyData() {
   myData = null;
   myAccount = null;
   evmAssets.reset();
+  daoRepo.reset();
 }
 
 /**
@@ -2473,9 +2477,16 @@ const menuModal = new MenuModal();
 // DAO / Proposals
 // =====================
 
-// DAO proposals are loaded via `daoRepo` and kept in memory (no localStorage persistence).
 setDaoBackendFetcher(createDaoBackendFetcher(queryNetwork));
+const daoProposalVoteTracker = createDaoProposalVoteTracker({
+  getDaoUserVotes: () => myData?.daoUserVotes,
+  setDaoUserVotes: (votes) => {
+    if (!myData) return;
+    myData.daoUserVotes = votes;
+  },
+});
 
+const DAO_PROPOSAL_PAGE_SIZE = 10;
 const DAO_ALL_FILTER = { key: 'all', label: 'All' };
 const DAO_CLAIMABLE_FILTER = { key: 'claimable', label: 'Claimable' };
 const DAO_FILTER_OPTIONS = [DAO_ALL_FILTER, ...DAO_STATES, DAO_CLAIMABLE_FILTER];
@@ -2535,6 +2546,9 @@ class DaoModal {
     this.refreshSequence = 0;
     this.openRefreshId = 0;
     this.lastSuccessfulRefreshId = 0;
+    this.visibleProposalCount = DAO_PROPOSAL_PAGE_SIZE;
+    this.detailsRequest = null;
+    this.proposalOpenSequence = 0;
   }
 
   load() {
@@ -2544,9 +2558,11 @@ class DaoModal {
     this.filterBar = document.getElementById('daoFilterBar');
     this.list = document.getElementById('daoProposalList');
     this.emptyState = document.getElementById('daoProposalEmptyState');
+    this.loadMoreButton = document.getElementById('daoLoadMoreButton');
     this.addButton = document.getElementById('daoAddProposalButton');
 
     if (this.closeButton) this.closeButton.addEventListener('click', () => this.close());
+    if (this.loadMoreButton) this.loadMoreButton.addEventListener('click', () => this.loadMore());
     if (this.addButton) {
       this.addButton.addEventListener('click', () => {
         if (hasPendingDaoProposalCreation()) {
@@ -2576,6 +2592,7 @@ class DaoModal {
   async _open() {
     const refreshId = ++this.refreshSequence;
     this.openRefreshId = refreshId;
+    this.proposalOpenSequence += 1;
     this.refreshState = 'loading';
 
     // Close the main menu if opened from it
@@ -2587,13 +2604,21 @@ class DaoModal {
 
     // Default filter is Voting
     this.selectedFilterKey = this.selectedFilterKey || 'voting';
+    this.visibleProposalCount = DAO_PROPOSAL_PAGE_SIZE;
     this.render();
 
     try {
       await daoRepo.refresh({ force: true });
-      this.lastSuccessfulRefreshId = Math.max(this.lastSuccessfulRefreshId, refreshId);
+      if (!this.isActive() || refreshId !== this.openRefreshId) return;
+      const refreshedClaimProposalNumbers = await this.syncTrackedClaimWindows();
       if (!this.isActive() || refreshId !== this.openRefreshId) return;
       this.refreshState = 'ready';
+      await this.loadSelectedFilter({
+        reset: true,
+        reuseProposalNumbers: refreshedClaimProposalNumbers,
+      });
+      this.lastSuccessfulRefreshId = Math.max(this.lastSuccessfulRefreshId, refreshId);
+      if (!this.isActive() || refreshId !== this.openRefreshId) return;
     } catch (e) {
       if (refreshId !== this.openRefreshId || this.lastSuccessfulRefreshId > refreshId) return;
       this.refreshState = 'error';
@@ -2606,6 +2631,8 @@ class DaoModal {
 
   close() {
     this.openRefreshId = ++this.refreshSequence;
+    this.proposalOpenSequence += 1;
+    this.detailsRequest = null;
     this.modal.classList.remove('active');
     enterFullscreen();
 
@@ -2624,11 +2651,109 @@ class DaoModal {
     return this.modal.classList.contains('active');
   }
 
+  getClaimCandidateMetadataEntries(entries, now = getTransactionTimestamp()) {
+    const proposalNumbers = daoProposalVoteTracker.getOpenClaimProposalNumbers(now);
+    return getDaoTrackedProposalMetadataEntries(entries, proposalNumbers);
+  }
+
+  async syncTrackedClaimWindows() {
+    const refreshedProposalNumbers = new Set();
+    const accountData = myData;
+    const pendingProposalNumbers = daoProposalVoteTracker.getPendingClaimProposalNumbers();
+    if (pendingProposalNumbers.length === 0) return refreshedProposalNumbers;
+
+    const entries = getDaoTrackedProposalMetadataEntries(
+      daoRepo.getProposalMetaForUi(),
+      pendingProposalNumbers,
+    ).filter((entry) => isDaoFinalResultState(entry.status));
+
+    const proposals = await Promise.all(entries.map(async (entry) => {
+      try {
+        return await daoRepo.refreshProposal(entry.proposal);
+      } catch (error) {
+        console.warn(`Failed to refresh tracked DAO proposal #${entry.proposal}:`, error);
+        return null;
+      }
+    }));
+
+    if (accountData !== myData) return refreshedProposalNumbers;
+    for (const proposal of proposals) {
+      if (!proposal || !Number(proposal.votingEndedAt)) continue;
+      const claimWindow = getDaoProposalClaimWindow(proposal);
+      daoProposalVoteTracker.setAuthoritativeClaimWindow(
+        proposal.number,
+        claimWindow.start,
+        claimWindow.end,
+      );
+      refreshedProposalNumbers.add(proposal.number);
+    }
+    return refreshedProposalNumbers;
+  }
+
+  getSelectedMetadataEntries(entries) {
+    if (this.selectedFilterKey === DAO_ALL_FILTER.key) return entries;
+    if (this.selectedFilterKey === DAO_CLAIMABLE_FILTER.key) return this.getClaimCandidateMetadataEntries(entries);
+    return entries.filter((entry) => entry.status === this.selectedFilterKey);
+  }
+
+  async loadSelectedFilter({ reset, reuseProposalNumbers = new Set() }) {
+    const entries = this.getSelectedMetadataEntries(daoRepo.getProposalMetaForUi());
+
+    if (reset) this.visibleProposalCount = DAO_PROPOSAL_PAGE_SIZE;
+    const pageStart = reset ? 0 : Math.max(this.visibleProposalCount - DAO_PROPOSAL_PAGE_SIZE, 0);
+    const entriesToLoad = entries.slice(pageStart, this.visibleProposalCount);
+    const entriesToFetch = entriesToLoad.filter((entry) => !reuseProposalNumbers.has(entry.proposal));
+    const reusedFreshDetails = entriesToFetch.length < entriesToLoad.length;
+
+    const request = daoRepo.loadProposalEntries(entriesToFetch, { append: !reset || reusedFreshDetails });
+    this.detailsRequest = request;
+    this.render();
+
+    try {
+      await request;
+    } finally {
+      if (this.detailsRequest === request) this.detailsRequest = null;
+    }
+    if (this.detailsRequest || !this.isActive()) return;
+
+    this.render();
+  }
+
+  async loadMore() {
+    if (this.detailsRequest) return;
+    this.visibleProposalCount += DAO_PROPOSAL_PAGE_SIZE;
+
+    try {
+      await this.loadSelectedFilter({ reset: false });
+    } catch (error) {
+      this.visibleProposalCount -= DAO_PROPOSAL_PAGE_SIZE;
+      console.warn('Failed to load more DAO proposals:', error);
+      showToast('Failed to load more proposals', 2500, 'error');
+      this.render();
+    }
+  }
+
   async refreshAfterDaoSettlement(pendingTxInfo, outcome) {
     const refreshId = ++this.refreshSequence;
+    daoProposalVoteTracker.handleSettlement({
+      type: pendingTxInfo?.type,
+      outcome,
+      proposalNumber: pendingTxInfo?.proposalNumber,
+    });
+
     let didRefreshDaoData = false;
     try {
       await daoRepo.refresh({ force: true });
+      const refreshedClaimProposalNumbers = await this.syncTrackedClaimWindows();
+      if (this.isActive()) {
+        await this.loadSelectedFilter({
+          reset: true,
+          reuseProposalNumbers: refreshedClaimProposalNumbers,
+        });
+      }
+      if (!daoRepo.getProposalById(pendingTxInfo?.proposalStoreId)) {
+        await daoRepo.refreshProposal(pendingTxInfo?.proposalNumber);
+      }
       didRefreshDaoData = true;
     } catch (error) {
       console.warn('DAO settlement refresh failed:', error);
@@ -2660,33 +2785,44 @@ class DaoModal {
     return didRefreshDaoData;
   }
 
-  setFilter(key) {
+  async setFilter(key) {
+    if (key === this.selectedFilterKey || this.detailsRequest) return;
+    this.proposalOpenSequence += 1;
     this.selectedFilterKey = key;
-    this.render();
+    try {
+      await this.loadSelectedFilter({ reset: true });
+    } catch (error) {
+      console.warn('Failed to load DAO proposal filter:', error);
+      showToast('Failed to load proposals', 2500, 'error');
+      this.render();
+    }
   }
 
   render() {
     const hasFreshData = this.refreshState === 'ready';
     const proposals = hasFreshData ? daoRepo.getProposalsForUi() : [];
+    const metadataEntries = hasFreshData ? daoRepo.getProposalMetaForUi() : [];
     const currentAddress = getDaoCurrentAccountAddress();
     const now = getTransactionTimestamp();
-    const isAllFilter = this.selectedFilterKey === DAO_ALL_FILTER.key;
     const isClaimableFilter = this.selectedFilterKey === DAO_CLAIMABLE_FILTER.key;
-    const claimableProposals = proposals.filter(
-      (proposal) => isDaoProposalClaimable(proposal, currentAddress, now)
-    );
+    const detailsLoading = Boolean(this.detailsRequest);
+    const claimCandidateMetadataEntries = this.getClaimCandidateMetadataEntries(metadataEntries, now);
+    const selectedMetadataEntries = isClaimableFilter
+      ? claimCandidateMetadataEntries
+      : this.getSelectedMetadataEntries(metadataEntries);
 
     const counts = Object.fromEntries(DAO_FILTER_OPTIONS.map((filter) => [filter.key, 0]));
-    for (const p of proposals) {
-      const state = getEffectiveDaoState(p);
-      if (counts[state] !== undefined) counts[state] += 1;
+    for (const entry of metadataEntries) {
+      if (counts[entry.status] !== undefined) counts[entry.status] += 1;
     }
-    counts[DAO_ALL_FILTER.key] = proposals.length;
-    counts[DAO_CLAIMABLE_FILTER.key] = claimableProposals.length;
+    counts[DAO_ALL_FILTER.key] = metadataEntries.length;
+    counts[DAO_CLAIMABLE_FILTER.key] = claimCandidateMetadataEntries.length;
 
     const label = DAO_FILTER_OPTIONS.find((filter) => filter.key === this.selectedFilterKey)?.label
       || this.selectedFilterKey;
-    if (this.titleEl) this.titleEl.textContent = `DAO - ${label}`;
+    if (this.titleEl) {
+      this.titleEl.textContent = isClaimableFilter ? `DAO - ${label} (this account)` : `DAO - ${label}`;
+    }
 
     for (const filter of DAO_FILTER_OPTIONS) {
       const chip = this.filterBar?.querySelector(`.dao-filter-chip[data-filter-key="${filter.key}"]`);
@@ -2695,10 +2831,13 @@ class DaoModal {
 
       if (countEl) {
         countEl.textContent = hasFreshData ? String(count) : '—';
-        countEl.setAttribute(
-          'aria-label',
-          hasFreshData ? `${count} ${filter.label.toLowerCase()} proposals` : `${filter.label} count unavailable`
-        );
+        let countAriaLabel = `${filter.label} count unavailable`;
+        if (hasFreshData) {
+          countAriaLabel = filter.key === DAO_CLAIMABLE_FILTER.key
+            ? `${count} tracked claim candidates`
+            : `${count} ${filter.label.toLowerCase()} proposals`;
+        }
+        countEl.setAttribute('aria-label', countAriaLabel);
       }
       if (chip) {
         const selected = filter.key === this.selectedFilterKey;
@@ -2707,14 +2846,15 @@ class DaoModal {
       }
     }
 
-    // Filter + sort (newest entered into state first)
-    const matchingProposals = isClaimableFilter
-      ? claimableProposals
-      : proposals.filter((proposal) => (
-        isAllFilter || getEffectiveDaoState(proposal) === this.selectedFilterKey
-      ));
-    const filtered = matchingProposals
-      .sort((a, b) => Number(b.stateEnteredAt || b.createdAt || 0) - Number(a.stateEnteredAt || a.createdAt || 0));
+    // Metadata establishes filter membership and recent-transition ordering.
+    const proposalOrder = new Map(selectedMetadataEntries.map((entry, index) => [entry.proposal, index]));
+    const filtered = proposals
+      .filter((proposal) => proposalOrder.has(proposal.number))
+      .filter((proposal) => (
+        !isClaimableFilter || getDaoRewardClaimStatus(proposal, currentAddress, now) === 'Claimable'
+      ))
+      .sort((a, b) => proposalOrder.get(a.number) - proposalOrder.get(b.number))
+      .slice(0, this.visibleProposalCount);
 
     // Clear old list items
     if (this.list) {
@@ -2730,7 +2870,7 @@ class DaoModal {
       const headlineEl = lines[1] || null;
       const sublineEl = lines[2] || null;
 
-      if (this.refreshState === 'loading') {
+      if (this.refreshState === 'loading' || detailsLoading) {
         if (headlineEl) headlineEl.textContent = 'Loading proposals…';
         if (sublineEl) sublineEl.textContent = 'Please wait';
       } else if (this.refreshState === 'error') {
@@ -2738,7 +2878,7 @@ class DaoModal {
         if (sublineEl) sublineEl.textContent = 'Close and reopen the DAO to retry';
       } else if (isClaimableFilter) {
         if (headlineEl) headlineEl.textContent = 'No claimable proposals found';
-        if (sublineEl) sublineEl.textContent = 'You have no voter rewards ready to claim';
+        if (sublineEl) sublineEl.textContent = 'Claimable proposals appear here when available';
       } else {
         if (headlineEl) headlineEl.textContent = 'No proposals found';
         if (sublineEl) sublineEl.textContent = 'Proposal data appears here when available';
@@ -2777,6 +2917,14 @@ class DaoModal {
         this.openProposal(p);
       });
       this.list.appendChild(li);
+    }
+
+    if (this.loadMoreButton) {
+      const total = selectedMetadataEntries.length;
+      const hasMore = this.visibleProposalCount < total;
+      this.loadMoreButton.hidden = !hasMore;
+      this.loadMoreButton.disabled = detailsLoading;
+      this.loadMoreButton.textContent = detailsLoading ? 'Loading…' : 'Load more';
     }
 
     // Show + button when modal is active
@@ -2905,8 +3053,18 @@ class DaoModal {
     `;
   }
 
-  openProposal(proposal) {
-    proposalInfoModal.open(proposal.id);
+  async openProposal(proposal) {
+    const openId = ++this.proposalOpenSequence;
+    try {
+      const refreshed = await daoRepo.refreshProposal(proposal.number);
+      if (openId !== this.proposalOpenSequence || !this.isActive()) return;
+      if (!refreshed) throw new Error(`Proposal #${proposal.number} is unavailable`);
+      proposalInfoModal.open(proposal.id);
+    } catch (error) {
+      if (openId !== this.proposalOpenSequence || !this.isActive()) return;
+      console.warn('Failed to refresh DAO proposal:', error);
+      showToast('Failed to load proposal', 2500, 'error');
+    }
   }
 }
 
@@ -3751,7 +3909,12 @@ function formatDaoDurationEstimate(ms) {
 
 function renderDaoProposalHeading(proposal) {
   const title = formatDaoProposalTitle(proposal);
-  const emergencyLabel = proposal.emergency === true ? 'Emergency proposal' : 'Standard proposal';
+  const proposalKind = proposal.emergency === true ? 'Emergency' : 'Standard';
+  const proposalIndicator = [
+    proposalKind,
+    getDaoTypeLabel(proposal.proposalType),
+    'proposal',
+  ].filter(Boolean).join(' ');
   const emergencyClass = proposal.emergency === true ? ' proposal-type-indicator--emergency' : '';
   const descriptionHtml = proposal.description
     ? `<p class="proposal-info-description">${escapeHtml(proposal.description)}</p>`
@@ -3760,7 +3923,7 @@ function renderDaoProposalHeading(proposal) {
   return `
     <div class="proposal-info-heading">
       <h2 class="proposal-info-title">${escapeHtml(title)}</h2>
-      <p class="proposal-type-indicator${emergencyClass}">${escapeHtml(emergencyLabel)}</p>
+      <p class="proposal-type-indicator${emergencyClass}">${escapeHtml(proposalIndicator)}</p>
       ${descriptionHtml}
     </div>
   `;
@@ -5679,6 +5842,7 @@ class ProposalInfoModal {
       proposalId: proposal.accountId,
       proposalNumber: proposal.number,
       from: result.transaction.from,
+      networkId: result.transaction.networkId,
     });
   }
 
@@ -8304,6 +8468,7 @@ class FriendModal {
       chatId: chatId_,
       required: requiredNum,
       previousRequired: previousRequiredNum,
+      username: myAccount.username,
       type: 'update_toll_required',
       timestamp: getTransactionTimestamp(),
       networkId: network.netid,
@@ -10727,6 +10892,14 @@ async function processChats(chats, keys) {
           }
 
           const statusContact = myData.contacts[statusContactAddress];
+          if (txFrom !== currentUserAddress && !statusContact.username && tx.username) {
+            const verifiedUsername = await getVerifiedUsername(tx.username, txFrom, getUsernameAddress);
+            if (verifiedUsername) {
+              statusContact.username = verifiedUsername;
+            } else {
+              console.warn(`Ignoring unverified username on update_toll_required from ${tx.from}`);
+            }
+          }
           const statusHistoryItem = buildUpdateTollRequiredHistoryItem(tx, txidHex, currentUserAddress);
           const didInsertStatusHistory = insertUpdateTollRequiredHistoryItem(statusContact, statusHistoryItem);
           if (didInsertStatusHistory) {
@@ -11108,15 +11281,12 @@ async function processChats(chats, keys) {
               // if we already have the username, we can use it
               contact.senderInfo.username = contact.username;
             } else if (contact.senderInfo.username) {
-              // check if the username given with the message maps to the address of this contact
-              const usernameAddress = await getUsernameAddress(contact.senderInfo.username);
-              if (usernameAddress && normalizeAddress(usernameAddress) === normalizeAddress(tx.from)) {
-                contact.username = contact.senderInfo.username;
-              } else {
-                // username doesn't match address so skipping this message
+              const verifiedUsername = await getVerifiedUsername(contact.senderInfo.username, tx.from, getUsernameAddress);
+              if (!verifiedUsername) {
                 console.error(`Username: ${contact.senderInfo.username} does not match address ${tx.from}`);
                 continue;
               }
+              contact.username = verifiedUsername;
             } else {
               console.error(`Username not provided in senderInfo.`)
               continue
@@ -11258,15 +11428,12 @@ async function processChats(chats, keys) {
               // if we already have the username, we can use it
               contact.senderInfo.username = contact.username;
             } else if (contact.senderInfo.username) {
-              // check if the username given with the message maps to the address of this contact
-              const usernameAddress = await getUsernameAddress(contact.senderInfo.username);
-              if (usernameAddress && normalizeAddress(usernameAddress) === normalizeAddress(tx.from)) {
-                contact.username = contact.senderInfo.username;
-              } else {
-                // username doesn't match address so skipping this message
+              const verifiedUsername = await getVerifiedUsername(contact.senderInfo.username, tx.from, getUsernameAddress);
+              if (!verifiedUsername) {
                 console.error(`Username: ${contact.senderInfo.username} does not match address ${tx.from}`);
                 continue;
               }
+              contact.username = verifiedUsername;
             } else {
               console.error(`Username not provided in senderInfo.`)
               continue
@@ -15057,16 +15224,28 @@ class BackupAccountModal {
       return;
     }
 
-    const isGoogleDrive = this.storageLocationSelect.value === 'google-drive';
+    this.setPreparingState(true);
+    // Allow the browser to paint the loading state before backup preparation begins.
+    await new Promise(resolve => setTimeout(resolve, 0));
+    try {
+      const isGoogleDrive = this.storageLocationSelect.value === 'google-drive';
 
-    // Determine which backup method to use
-    if (myData && !this.backupAllAccountsCheckbox.checked) {
-      // User is signed in and wants to backup only current account
-      await this.handleSubmitOne(isGoogleDrive);
-    } else {
-      // User wants to backup all accounts (either not signed in or checkbox checked)
-      await this.handleSubmitAll(isGoogleDrive);
+      // Determine which backup method to use
+      if (myData && !this.backupAllAccountsCheckbox.checked) {
+        // User is signed in and wants to backup only current account
+        await this.handleSubmitOne(isGoogleDrive);
+      } else {
+        // User wants to backup all accounts (either not signed in or checkbox checked)
+        await this.handleSubmitAll(isGoogleDrive);
+      }
+    } finally {
+      this.setPreparingState(false);
     }
+  }
+
+  setPreparingState(isPreparing) {
+    this.submitButton.classList.toggle('is-preparing', isPreparing);
+    this.submitButton.setAttribute('aria-busy', String(isPreparing));
   }
 
   /**

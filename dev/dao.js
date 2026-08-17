@@ -661,7 +661,7 @@ async function submitDaoProposalAction({
 
 function createEmptyDaoStore() {
   return {
-    meta: { count: 0 },
+    meta: { count: 0, proposals: [] },
     proposals: {},
   };
 }
@@ -718,6 +718,136 @@ export function normalizeDaoAddress(value) {
   const address = String(value || '').trim();
   if (!/^(?:0x)?[0-9a-fA-F]{40}(?:0{24})?$/.test(address)) return '';
   return normalizeAddress(address);
+}
+
+function normalizeDaoUserVotes(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
+
+  const normalized = {};
+  for (const [proposalKey, entry] of Object.entries(value)) {
+    const proposalNumber = normalizeDaoPositiveInteger(proposalKey);
+    if (!proposalNumber || !entry || typeof entry !== 'object' || Array.isArray(entry)) continue;
+
+    const claimStart = normalizeDaoTimestamp(entry.claimStart);
+    const claimEnd = normalizeDaoTimestamp(entry.claimEnd);
+    normalized[proposalNumber] = claimStart && claimEnd >= claimStart
+      ? { claimStart, claimEnd }
+      : {};
+  }
+  return normalized;
+}
+
+function hasDaoUserVoteClaimWindow(entry) {
+  return Boolean(entry?.claimStart && entry.claimEnd >= entry.claimStart);
+}
+
+export function createDaoProposalVoteTracker({
+  getDaoUserVotes,
+  setDaoUserVotes,
+}) {
+  if (typeof getDaoUserVotes !== 'function' || typeof setDaoUserVotes !== 'function') {
+    throw new TypeError('DAO vote tracker requires account vote state accessors');
+  }
+
+  function readVotes() {
+    try {
+      return normalizeDaoUserVotes(getDaoUserVotes());
+    } catch {
+      return {};
+    }
+  }
+
+  function writeVotes(votes) {
+    try {
+      setDaoUserVotes(votes);
+    } catch {
+      // Vote history is optional; account-state failures must not block DAO actions.
+    }
+  }
+
+  function getPendingClaimProposalNumbers() {
+    return Object.entries(readVotes())
+      .filter(([, entry]) => !hasDaoUserVoteClaimWindow(entry))
+      .map(([proposalNumber]) => Number(proposalNumber));
+  }
+
+  function getOpenClaimProposalNumbers(now = Date.now()) {
+    const timestamp = normalizeDaoTimestamp(now);
+    if (!timestamp) return [];
+
+    const votes = readVotes();
+    const unexpiredVotes = Object.fromEntries(
+      Object.entries(votes).filter(([, entry]) => (
+        !hasDaoUserVoteClaimWindow(entry) || timestamp <= entry.claimEnd
+      )),
+    );
+    if (Object.keys(unexpiredVotes).length !== Object.keys(votes).length) {
+      writeVotes(unexpiredVotes);
+    }
+
+    return Object.entries(unexpiredVotes)
+      .filter(([, entry]) => (
+        hasDaoUserVoteClaimWindow(entry)
+        && timestamp >= entry.claimStart
+      ))
+      .map(([proposalNumber]) => Number(proposalNumber));
+  }
+
+  function setAuthoritativeClaimWindow(proposalNumber, claimStart, claimEnd) {
+    const number = normalizeDaoPositiveInteger(proposalNumber);
+    const normalizedClaimStart = normalizeDaoTimestamp(claimStart);
+    const normalizedClaimEnd = normalizeDaoTimestamp(claimEnd);
+    if (!number || !normalizedClaimStart || normalizedClaimEnd < normalizedClaimStart) return;
+
+    const current = readVotes();
+    if (!Object.prototype.hasOwnProperty.call(current, number)) return;
+
+    const currentWindow = current[number];
+    if (currentWindow.claimStart === normalizedClaimStart
+      && currentWindow.claimEnd === normalizedClaimEnd) return;
+
+    writeVotes({
+      ...current,
+      [number]: {
+        claimStart: normalizedClaimStart,
+        claimEnd: normalizedClaimEnd,
+      },
+    });
+  }
+
+  function handleSettlement({
+    type,
+    outcome,
+    proposalNumber,
+  }) {
+    if (outcome !== 'success') return;
+    if (type !== DAO_ACTION_TYPES.VOTE && type !== DAO_ACTION_TYPES.CLAIM_REWARD) return;
+
+    const number = normalizeDaoPositiveInteger(proposalNumber);
+    if (!number) return;
+
+    const current = readVotes();
+    const isTracked = Object.prototype.hasOwnProperty.call(current, number);
+
+    if (type === DAO_ACTION_TYPES.VOTE) {
+      if (isTracked) return;
+      writeVotes({ ...current, [number]: {} });
+      return;
+    }
+
+    if (isTracked) {
+      const next = { ...current };
+      delete next[number];
+      writeVotes(next);
+    }
+  }
+
+  return Object.freeze({
+    getPendingClaimProposalNumbers,
+    getOpenClaimProposalNumbers,
+    handleSettlement,
+    setAuthoritativeClaimWindow,
+  });
 }
 
 export function parseDaoUnsignedBigInt(value) {
@@ -828,11 +958,7 @@ export function getDaoRewardClaimStatus(proposal, currentAddress, now = Date.now
   return 'Claimable';
 }
 
-export function isDaoProposalClaimable(proposal, currentAddress, now = Date.now()) {
-  return getDaoRewardClaimStatus(proposal, currentAddress, now) === 'Claimable';
-}
-
-function normalizeDaoProposalSummaryEntry(entry) {
+function normalizeDaoProposalMetadataEntry(entry) {
   if (!entry || typeof entry !== 'object') return null;
 
   const proposal = normalizeDaoPositiveInteger(entry.proposal);
@@ -848,7 +974,40 @@ function normalizeDaoProposalSummaryEntry(entry) {
   };
 }
 
-function mapBackendProposalToStoreProposal(proposal, summaryEntry) {
+function normalizeDaoProposalIndexEntries(entries) {
+  return (Array.isArray(entries) ? entries : [])
+    .map(normalizeDaoProposalMetadataEntry)
+    .filter(Boolean);
+}
+
+export function getDaoTrackedProposalMetadataEntries(entries, proposalNumbers) {
+  const tracked = new Set(
+    (Array.isArray(proposalNumbers) ? proposalNumbers : [])
+      .map(normalizeDaoPositiveInteger)
+      .filter(Boolean),
+  );
+  return normalizeDaoProposalIndexEntries(entries)
+    .filter((entry) => tracked.has(entry.proposal));
+}
+
+async function fetchDaoProposalMeta(queryDaoApi) {
+  const body = await queryDaoApi('/dao/proposals/meta');
+  if (!body) {
+    throw new Error('Failed to load DAO proposal metadata');
+  }
+  if (body.error) {
+    throw new Error(String(body.error));
+  }
+
+  const index = body.meta && typeof body.meta === 'object' ? body.meta : body;
+  const proposals = normalizeDaoProposalIndexEntries(index.proposals);
+  return {
+    count: Math.max(normalizeDaoPositiveInteger(index.count), proposals.length),
+    proposals,
+  };
+}
+
+function mapBackendProposalToStoreProposal(proposal, metadataEntry) {
   if (!proposal || typeof proposal !== 'object') return null;
 
   const number = normalizeDaoPositiveInteger(proposal.number);
@@ -861,9 +1020,9 @@ function mapBackendProposalToStoreProposal(proposal, summaryEntry) {
   const proposalType = String(proposal.proposalType || '').trim();
   if (!proposalType) return null;
 
-  const state = summaryEntry.status;
+  const state = metadataEntry.status;
   const created = normalizeDaoTimestamp(proposal.creationTime);
-  const stateChanged = summaryEntry.timestamp;
+  const stateChanged = metadataEntry.timestamp;
   const title = String(proposal.title || proposal.description || '').trim();
 
   return {
@@ -874,7 +1033,7 @@ function mapBackendProposalToStoreProposal(proposal, summaryEntry) {
     title,
     description: String(proposal.description || '').trim(),
     proposalType,
-    emergency: summaryEntry.emergencyFlag,
+    emergency: metadataEntry.emergencyFlag,
     state,
     status: state,
     state_changed: stateChanged,
@@ -882,59 +1041,51 @@ function mapBackendProposalToStoreProposal(proposal, summaryEntry) {
   };
 }
 
-function buildStoreFromBackendProposals(count, summaryProposals) {
-  const store = createEmptyDaoStore();
-
-  store.meta = {
-    count: Math.max(normalizeDaoPositiveInteger(count), summaryProposals.length),
-  };
-
-  for (const { proposal: rawProposal, summaryEntry } of summaryProposals) {
-    const proposal = mapBackendProposalToStoreProposal(rawProposal, summaryEntry);
+function mapBackendProposals(indexedProposals) {
+  const proposals = {};
+  for (const { proposal: rawProposal, metadataEntry } of indexedProposals) {
+    const proposal = mapBackendProposalToStoreProposal(rawProposal, metadataEntry);
     if (!proposal) continue;
 
     const id = daoProposalId(proposal.number, proposal.nonce);
-    store.proposals[id] = proposal;
+    proposals[id] = proposal;
   }
-
-  return store;
+  return proposals;
 }
 
-async function fetchBackendProposal(queryDaoApi, summaryEntry) {
-  const body = await queryDaoApi(`/dao/proposals/${summaryEntry.proposal}`);
+async function fetchBackendProposal(queryDaoApi, metadataEntry) {
+  const body = await queryDaoApi(`/dao/proposals/${metadataEntry.proposal}`);
   if (!body) {
-    console.warn(`Skipping DAO proposal #${summaryEntry.proposal}: no response`);
+    console.warn(`Skipping DAO proposal #${metadataEntry.proposal}: no response`);
     return null;
   }
   if (body.error || !body.proposal) {
-    console.warn(`Skipping DAO proposal #${summaryEntry.proposal}: proposal unavailable`, body.error || body);
+    console.warn(`Skipping DAO proposal #${metadataEntry.proposal}: proposal unavailable`, body.error || body);
     return null;
   }
-  return { proposal: body.proposal, summaryEntry };
+  return { proposal: body.proposal, metadataEntry };
 }
 
 export function createDaoBackendFetcher(queryDaoApi) {
   if (typeof queryDaoApi !== 'function') {
-    return async () => createEmptyDaoStore();
+    return {
+      fetchMeta: async () => createEmptyDaoStore().meta,
+      fetchProposals: async () => ({}),
+    };
   }
 
-  return async () => {
-    const body = await queryDaoApi('/dao/proposals/summary');
-    if (!body) {
-      throw new Error('Failed to load DAO proposal summary');
-    }
-    if (body.error) {
-      throw new Error(String(body.error));
-    }
+  return {
+    async fetchMeta() {
+      return fetchDaoProposalMeta(queryDaoApi);
+    },
 
-    const summaryEntries = (Array.isArray(body.proposals) ? body.proposals : [])
-      .map(normalizeDaoProposalSummaryEntry)
-      .filter(Boolean);
-    const proposals = await Promise.all(
-      summaryEntries.map((summaryEntry) => fetchBackendProposal(queryDaoApi, summaryEntry))
-    );
-
-    return buildStoreFromBackendProposals(body.count, proposals.filter(Boolean));
+    async fetchProposals(entries) {
+      const normalizedEntries = normalizeDaoProposalIndexEntries(entries);
+      const proposals = await Promise.all(
+        normalizedEntries.map((entry) => fetchBackendProposal(queryDaoApi, entry))
+      );
+      return mapBackendProposals(proposals.filter(Boolean));
+    },
   };
 }
 
@@ -946,6 +1097,7 @@ function normalizeDaoStore(store) {
     .map((proposal) => normalizeDaoPositiveInteger(proposal?.number));
   safe.meta = {
     count: Math.max(normalizeDaoPositiveInteger(safe.meta?.count), ...proposalNumbers),
+    proposals: normalizeDaoProposalIndexEntries(safe.meta?.proposals),
   };
 
   return safe;
@@ -994,13 +1146,21 @@ function storeToUiList(store) {
 let _store = null;
 let _loadingPromise = null;
 let _refreshVersion = 0;
-let _latestCommittedRefreshVersion = 0;
 
-// Backend integration hook. The fetcher returns a count and the loaded proposal details.
+// Backend integration hook. Metadata and full proposal details are fetched separately.
 let _backendFetcher = null;
 
 export function setDaoBackendFetcher(fetcher) {
-  _backendFetcher = typeof fetcher === 'function' ? fetcher : null;
+  _backendFetcher = fetcher
+    && typeof fetcher.fetchMeta === 'function'
+    && typeof fetcher.fetchProposals === 'function'
+    ? fetcher
+    : null;
+}
+
+async function fetchNormalizedDaoMeta() {
+  const meta = _backendFetcher ? await _backendFetcher.fetchMeta() : createEmptyDaoStore().meta;
+  return normalizeDaoStore({ meta, proposals: {} }).meta;
 }
 
 async function refreshInternal({ force }) {
@@ -1011,15 +1171,15 @@ async function refreshInternal({ force }) {
   const previousStore = _store;
   const loadingPromise = (async () => {
     try {
-      const next = _backendFetcher ? await _backendFetcher() : createEmptyDaoStore();
+      const meta = await fetchNormalizedDaoMeta();
+      const next = { meta, proposals: {} };
       const normalizedStore = normalizeDaoStore(next);
-      if (refreshVersion > _latestCommittedRefreshVersion) {
+      if (refreshVersion === _refreshVersion) {
         _store = normalizedStore;
-        _latestCommittedRefreshVersion = refreshVersion;
       }
       return _store;
     } catch (error) {
-      if (!_store) {
+      if (!_store && refreshVersion === _refreshVersion) {
         _store = previousStore || normalizeDaoStore(createEmptyDaoStore());
       }
       throw error;
@@ -1037,8 +1197,10 @@ async function refreshInternal({ force }) {
 }
 
 export const daoRepo = {
-  isReady() {
-    return Boolean(_store);
+  reset() {
+    _store = null;
+    _loadingPromise = null;
+    _refreshVersion += 1;
   },
 
   async refresh({ force } = {}) {
@@ -1049,12 +1211,43 @@ export const daoRepo = {
     return refreshInternal({ force: false });
   },
 
+  async loadProposalEntries(entries, { append = false } = {}) {
+    if (!_store) await refreshInternal({ force: false });
+
+    const currentStore = _store;
+    const proposals = _backendFetcher ? await _backendFetcher.fetchProposals(entries) : {};
+    if (_store !== currentStore) return _store;
+
+    _store.proposals = append ? { ..._store.proposals, ...proposals } : proposals;
+    return _store;
+  },
+
+  async refreshProposal(proposalNumber) {
+    if (!_store) await refreshInternal({ force: false });
+
+    const number = normalizeDaoPositiveInteger(proposalNumber);
+    const entry = _store.meta.proposals.find((proposal) => proposal.proposal === number);
+    if (!entry || !_backendFetcher) return null;
+
+    const currentStore = _store;
+    const proposals = await _backendFetcher.fetchProposals([entry]);
+    if (_store !== currentStore) return null;
+
+    const proposal = Object.values(proposals)[0] || null;
+    if (proposal) _store.proposals[daoProposalId(proposal.number, proposal.nonce)] = proposal;
+    return proposal;
+  },
+
   getProposalById(proposalId) {
     return _store?.proposals?.[proposalId] || null;
   },
 
   getProposalsForUi() {
     return storeToUiList(_store);
+  },
+
+  getProposalMetaForUi() {
+    return (_store?.meta?.proposals || []).map((entry) => ({ ...entry }));
   },
 
   async createProposal({
@@ -1074,8 +1267,8 @@ export const daoRepo = {
         throw new Error('DAO proposal submit handler is required');
       }
 
-      const store = await refreshInternal({ force: true });
-      proposalNumber = normalizeDaoPositiveInteger(store?.meta?.count) + 1;
+      const meta = await fetchNormalizedDaoMeta();
+      proposalNumber = normalizeDaoPositiveInteger(meta.count) + 1;
       transaction = buildDaoProposalCreateTransaction({
         draft,
         timestamp,
