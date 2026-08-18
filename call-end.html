@@ -1,0 +1,10 @@
+<script>
+  // Succeeds only when this browsing context is script-closable,
+  // e.g. it originated from window.open().
+  window.close();
+
+  // Graceful fallback for regular user-opened tabs.
+  setTimeout(() => {
+    window.location.replace('https://liberdus.com/');
+  }, 250);
+</script>
