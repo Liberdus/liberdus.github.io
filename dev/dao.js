@@ -12,54 +12,71 @@ export const DAO_TYPE_OPTIONS = [
   { key: 'protocol', label: 'Protocol', group: 'Server proposal types' },
 ];
 
+export const DAO_PARAMETER_MAX_WHOLE_DIGITS = 15;
+
+const DAO_DECIMAL_STRING_PATTERN = /^(?:0|[1-9]\d{0,14})(?:\.\d{1,18})?$/;
+
+export function normalizeDaoParameterInput(value) {
+  let text = String(value ?? '');
+  if (/^\.\d*$/.test(text)) text = `0${text}`;
+
+  const [wholePart, ...decimalParts] = text.split('.');
+  if (!/^\d+$/.test(wholePart)) return text;
+  return [wholePart.slice(0, DAO_PARAMETER_MAX_WHOLE_DIGITS), ...decimalParts].join('.');
+}
+
+export function isValidDaoDecimalString(value) {
+  return DAO_DECIMAL_STRING_PATTERN.test(String(value ?? '').trim());
+}
+
 export const DAO_CONFIG_CHANGE_OPTIONS = {
   governance: [
-    { key: 'claimDuration', path: 'current.dao.claimDuration', label: 'Claim Duration', valueType: 'integer' },
-    { key: 'graceDuration', path: 'current.dao.graceDuration', label: 'Grace Duration', valueType: 'integer' },
-    { key: 'minimumSpendUsdStr', path: 'current.dao.minimumSpendUsdStr', label: 'Minimum Vote Spend', valueType: 'float' },
-    { key: 'pctBurned', path: 'current.dao.pctBurned', label: 'Percent Burned', valueType: 'integer' },
-    { key: 'proposalFeeUsdStr', path: 'current.dao.proposalFeeUsdStr', label: 'Proposal Fee', valueType: 'float' },
-    { key: 'reviewDuration', path: 'current.dao.reviewDuration', label: 'Review Duration', valueType: 'integer' },
-    { key: 'voteExponent', path: 'current.dao.voteExponent', label: 'Vote Exponent', valueType: 'float' },
-    { key: 'voteThresholdUsdStr', path: 'current.dao.voteThresholdUsdStr', label: 'Vote Threshold', valueType: 'float' },
-    { key: 'votingDuration', path: 'current.dao.votingDuration', label: 'Voting Duration', valueType: 'integer' },
+    { key: 'claimDuration', path: 'current.dao.claimDuration', label: 'Claim Duration', valueType: 'number', validation: 'integer' },
+    { key: 'graceDuration', path: 'current.dao.graceDuration', label: 'Grace Duration', valueType: 'number', validation: 'integer' },
+    { key: 'minimumSpendUsdStr', path: 'current.dao.minimumSpendUsdStr', label: 'Minimum Vote Spend', valueType: 'string', validation: 'decimalString' },
+    { key: 'pctBurned', path: 'current.dao.pctBurned', label: 'Percent Burned', valueType: 'number', validation: 'integer' },
+    { key: 'proposalFeeUsdStr', path: 'current.dao.proposalFeeUsdStr', label: 'Proposal Fee', valueType: 'string', validation: 'decimalString' },
+    { key: 'reviewDuration', path: 'current.dao.reviewDuration', label: 'Review Duration', valueType: 'number', validation: 'integer' },
+    { key: 'voteExponent', path: 'current.dao.voteExponent', label: 'Vote Exponent', valueType: 'number', validation: 'decimal' },
+    { key: 'voteThresholdUsdStr', path: 'current.dao.voteThresholdUsdStr', label: 'Vote Threshold', valueType: 'string', validation: 'decimalString' },
+    { key: 'votingDuration', path: 'current.dao.votingDuration', label: 'Voting Duration', valueType: 'number', validation: 'integer' },
   ],
   economic: [
-    { key: 'certCycleDuration', path: 'current.certCycleDuration', label: 'Certificate Cycle Duration', valueType: 'integer' },
-    { key: 'enableNodeSlashing', path: 'current.enableNodeSlashing', label: 'Enable Node Slashing', valueType: 'boolean' },
-    { key: 'maintenanceInterval', path: 'current.maintenanceInterval', label: 'Maintenance Interval', valueType: 'integer' },
-    { key: 'messageMaxLength', path: 'current.messageMaxLength', label: 'Message Max Length', valueType: 'integer' },
-    { key: 'messageRetentionDays', path: 'current.messageRetentionDays', label: 'Message Retention Days', valueType: 'integer' },
-    { key: 'nodeRewardInterval', path: 'current.nodeRewardInterval', label: 'Node Reward Interval', valueType: 'integer' },
-    { key: 'restakeCooldown', path: 'current.restakeCooldown', label: 'Restake Cooldown', valueType: 'integer' },
-    { key: 'enableLeftNetworkEarlySlashing', path: 'current.slashing.enableLeftNetworkEarlySlashing', label: 'Enable Left Network Early Slashing', valueType: 'boolean' },
-    { key: 'enableNodeRefutedSlashing', path: 'current.slashing.enableNodeRefutedSlashing', label: 'Enable Node Refuted Slashing', valueType: 'boolean' },
-    { key: 'enableSyncTimeoutSlashing', path: 'current.slashing.enableSyncTimeoutSlashing', label: 'Enable Sync Timeout Slashing', valueType: 'boolean' },
-    { key: 'leftNetworkEarlyPenaltyPercent', path: 'current.slashing.leftNetworkEarlyPenaltyPercent', label: 'Left Network Early Penalty Percent', valueType: 'float' },
-    { key: 'nodeRefutedPenaltyPercent', path: 'current.slashing.nodeRefutedPenaltyPercent', label: 'Node Refuted Penalty Percent', valueType: 'float' },
-    { key: 'syncTimeoutPenaltyPercent', path: 'current.slashing.syncTimeoutPenaltyPercent', label: 'Sync Timeout Penalty Percent', valueType: 'float' },
-    { key: 'stabilityScaleDiv', path: 'current.stabilityScaleDiv', label: 'Stability Scale Divisor', valueType: 'integer' },
-    { key: 'stabilityScaleMul', path: 'current.stabilityScaleMul', label: 'Stability Scale Multiplier', valueType: 'integer' },
-    { key: 'stakeLockTime', path: 'current.stakeLockTime', label: 'Stake Lock Time', valueType: 'integer' },
-    { key: 'tollNetworkTaxPercent', path: 'current.tollNetworkTaxPercent', label: 'Toll Network Tax Percent', valueType: 'integer' },
-    { key: 'tollTimeout', path: 'current.tollTimeout', label: 'Toll Timeout', valueType: 'integer' },
-    { key: 'txPause', path: 'current.txPause', label: 'Pause Transactions', valueType: 'boolean' },
+    { key: 'certCycleDuration', path: 'current.certCycleDuration', label: 'Certificate Cycle Duration', valueType: 'number', validation: 'integer' },
+    { key: 'enableNodeSlashing', path: 'current.enableNodeSlashing', label: 'Enable Node Slashing', valueType: 'boolean', validation: 'boolean' },
+    { key: 'maintenanceInterval', path: 'current.maintenanceInterval', label: 'Maintenance Interval', valueType: 'number', validation: 'integer' },
+    { key: 'messageMaxLength', path: 'current.messageMaxLength', label: 'Message Max Length', valueType: 'number', validation: 'integer' },
+    { key: 'messageRetentionDays', path: 'current.messageRetentionDays', label: 'Message Retention Days', valueType: 'number', validation: 'integer' },
+    { key: 'nodeRewardInterval', path: 'current.nodeRewardInterval', label: 'Node Reward Interval', valueType: 'number', validation: 'integer' },
+    { key: 'restakeCooldown', path: 'current.restakeCooldown', label: 'Restake Cooldown', valueType: 'number', validation: 'integer' },
+    { key: 'enableLeftNetworkEarlySlashing', path: 'current.slashing.enableLeftNetworkEarlySlashing', label: 'Enable Left Network Early Slashing', valueType: 'boolean', validation: 'boolean' },
+    { key: 'enableNodeRefutedSlashing', path: 'current.slashing.enableNodeRefutedSlashing', label: 'Enable Node Refuted Slashing', valueType: 'boolean', validation: 'boolean' },
+    { key: 'enableSyncTimeoutSlashing', path: 'current.slashing.enableSyncTimeoutSlashing', label: 'Enable Sync Timeout Slashing', valueType: 'boolean', validation: 'boolean' },
+    { key: 'leftNetworkEarlyPenaltyPercent', path: 'current.slashing.leftNetworkEarlyPenaltyPercent', label: 'Left Network Early Penalty Percent', valueType: 'number', validation: 'decimal' },
+    { key: 'nodeRefutedPenaltyPercent', path: 'current.slashing.nodeRefutedPenaltyPercent', label: 'Node Refuted Penalty Percent', valueType: 'number', validation: 'decimal' },
+    { key: 'syncTimeoutPenaltyPercent', path: 'current.slashing.syncTimeoutPenaltyPercent', label: 'Sync Timeout Penalty Percent', valueType: 'number', validation: 'decimal' },
+    { key: 'stabilityScaleDiv', path: 'current.stabilityScaleDiv', label: 'Stability Scale Divisor', valueType: 'number', validation: 'integer' },
+    { key: 'stabilityScaleMul', path: 'current.stabilityScaleMul', label: 'Stability Scale Multiplier', valueType: 'number', validation: 'integer' },
+    { key: 'stakeLockTime', path: 'current.stakeLockTime', label: 'Stake Lock Time', valueType: 'number', validation: 'integer' },
+    { key: 'tollNetworkTaxPercent', path: 'current.tollNetworkTaxPercent', label: 'Toll Network Tax Percent', valueType: 'number', validation: 'integer' },
+    { key: 'tollTimeout', path: 'current.tollTimeout', label: 'Toll Timeout', valueType: 'number', validation: 'integer' },
+    { key: 'txPause', path: 'current.txPause', label: 'Pause Transactions', valueType: 'boolean', validation: 'boolean' },
   ],
   protocol: [
-    { key: 'minNodes', path: 'config.p2p.minNodes', label: 'Min Nodes', valueType: 'integer' },
-    { key: 'maxNodes', path: 'config.p2p.maxNodes', label: 'Max Nodes', valueType: 'integer' },
-    { key: 'baselineNodes', path: 'config.p2p.baselineNodes', label: 'Baseline Nodes', valueType: 'integer' },
-    { key: 'cycleDuration', path: 'config.p2p.cycleDuration', label: 'Cycle Duration', valueType: 'integer' },
-    { key: 'allowEndUserTxnInjections', path: 'config.p2p.allowEndUserTxnInjections', label: 'Allow End User Transactions', valueType: 'boolean' },
-    { key: 'amountToGrow', path: 'config.p2p.amountToGrow', label: 'Amount To Grow', valueType: 'integer' },
-    { key: 'amountToShrink', path: 'config.p2p.amountToShrink', label: 'Amount To Shrink', valueType: 'integer' },
-    { key: 'maxJoinedPerCycle', path: 'config.p2p.maxJoinedPerCycle', label: 'Max Joined Per Cycle', valueType: 'integer' },
-    { key: 'maxDesiredMultiplier', path: 'config.p2p.maxDesiredMultiplier', label: 'Max Desired Multiplier', valueType: 'float' },
-    { key: 'maxShrinkMultiplier', path: 'config.p2p.maxShrinkMultiplier', label: 'Max Shrink Multiplier', valueType: 'float' },
-    { key: 'syncBoostEnabled', path: 'config.p2p.syncBoostEnabled', label: 'Sync Boost Enabled', valueType: 'boolean' },
-    { key: 'limitRate', path: 'config.rateLimiting.limitRate', label: 'Limit Rate', valueType: 'boolean' },
-    { key: 'nodesPerConsensusGroup', path: 'config.sharding.nodesPerConsensusGroup', label: 'Nodes Per Consensus Group', valueType: 'integer' },
-    { key: 'voterPercentage', path: 'config.stateManager.voterPercentage', label: 'Voter Percentage', valueType: 'float' },
+    { key: 'minNodes', path: 'config.p2p.minNodes', label: 'Min Nodes', valueType: 'number', validation: 'integer' },
+    { key: 'maxNodes', path: 'config.p2p.maxNodes', label: 'Max Nodes', valueType: 'number', validation: 'integer' },
+    { key: 'baselineNodes', path: 'config.p2p.baselineNodes', label: 'Baseline Nodes', valueType: 'number', validation: 'integer' },
+    { key: 'cycleDuration', path: 'config.p2p.cycleDuration', label: 'Cycle Duration', valueType: 'number', validation: 'integer' },
+    { key: 'allowEndUserTxnInjections', path: 'config.p2p.allowEndUserTxnInjections', label: 'Allow End User Transactions', valueType: 'boolean', validation: 'boolean' },
+    { key: 'amountToGrow', path: 'config.p2p.amountToGrow', label: 'Amount To Grow', valueType: 'number', validation: 'integer' },
+    { key: 'amountToShrink', path: 'config.p2p.amountToShrink', label: 'Amount To Shrink', valueType: 'number', validation: 'integer' },
+    { key: 'maxJoinedPerCycle', path: 'config.p2p.maxJoinedPerCycle', label: 'Max Joined Per Cycle', valueType: 'number', validation: 'integer' },
+    { key: 'maxDesiredMultiplier', path: 'config.p2p.maxDesiredMultiplier', label: 'Max Desired Multiplier', valueType: 'number', validation: 'decimal' },
+    { key: 'maxShrinkMultiplier', path: 'config.p2p.maxShrinkMultiplier', label: 'Max Shrink Multiplier', valueType: 'number', validation: 'decimal' },
+    { key: 'syncBoostEnabled', path: 'config.p2p.syncBoostEnabled', label: 'Sync Boost Enabled', valueType: 'boolean', validation: 'boolean' },
+    { key: 'limitRate', path: 'config.rateLimiting.limitRate', label: 'Limit Rate', valueType: 'boolean', validation: 'boolean' },
+    { key: 'nodesPerConsensusGroup', path: 'config.sharding.nodesPerConsensusGroup', label: 'Nodes Per Consensus Group', valueType: 'number', validation: 'integer' },
+    { key: 'voterPercentage', path: 'config.stateManager.voterPercentage', label: 'Voter Percentage', valueType: 'number', validation: 'decimal' },
   ],
 };
 
@@ -71,6 +88,10 @@ export const DAO_STATES = [
   { key: 'accepted', label: 'Accepted' },
   { key: 'applied', label: 'Applied' },
 ];
+
+const DAO_NON_FILTER_STATE_LABELS = new Map([
+  ['canceled', 'Canceled'],
+]);
 
 export const DAO_PROPOSAL_DAY_MS = 24 * 60 * 60 * 1000;
 export const DAO_PROPOSAL_GRACE_PERIOD_MAX_MS = 999_999_999_999;
@@ -181,7 +202,9 @@ export function getDaoTypeLabel(typeKey) {
 }
 
 export function getDaoStateLabel(key) {
-  return DAO_STATES.find((s) => s.key === key)?.label || key;
+  return DAO_STATES.find((state) => state.key === key)?.label
+    || DAO_NON_FILTER_STATE_LABELS.get(key)
+    || key;
 }
 
 export function getEffectiveDaoState(proposal) {
@@ -874,6 +897,35 @@ export function parseDaoUnsignedBigInt(value) {
   }
 }
 
+export function getDaoFinalVoteResult(proposal) {
+  const state = getEffectiveDaoState(proposal);
+  if (!DAO_REWARD_STATE_KEYS.includes(state)) return null;
+
+  const totalVote = Array.isArray(proposal?.totalVote)
+    ? proposal.totalVote.map((value) => parseDaoUnsignedBigInt(value) ?? 0n)
+    : [];
+  if (totalVote.length === 0) return null;
+
+  const storedWinnerIndex = proposal?.winningOptionIndex;
+  const winnerIndex = Number.isInteger(storedWinnerIndex)
+    && storedWinnerIndex >= 0
+    && storedWinnerIndex < totalVote.length
+    ? storedWinnerIndex
+    : totalVote.reduce(
+      (winner, total, index) => (total > totalVote[winner] ? index : winner),
+      0
+    );
+  const totalWeight = totalVote.reduce((sum, total) => sum + total, 0n);
+  const isRejected = state === 'rejected';
+
+  return {
+    outcome: isRejected ? 'Rejected' : 'Accepted',
+    tone: isRejected ? 'rejected' : 'accepted',
+    totalWeight,
+    winnerIndex,
+  };
+}
+
 function hasZeroDaoVoteTotals(proposal) {
   const totalVote = proposal?.totalVote;
   return Array.isArray(totalVote)
@@ -1123,6 +1175,7 @@ function storeToUiList(store) {
         stateEnteredAt: proposal.state_changed,
         options: proposal.options,
         totalVote: proposal.totalVote,
+        winningOptionIndex: proposal.winningOptionIndex,
         committeeVotes: proposal.committeeVotes,
         committeeAddresses: proposal.committeeAddresses,
         voterRewardPool: proposal.voterRewardPool,

@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'z'
+const version = 'a'
 const BOOT_SPLASH_HANDOFF_MS = 1000;
 let myVersion = '0';
 async function checkVersion() {
@@ -86,9 +86,11 @@ import {
   DAO_PROPOSAL_DAY_MS,
   DAO_PROPOSAL_GRACE_PERIOD_MAX_MS,
   DAO_PROPOSAL_TITLE_MAX_LENGTH,
+  DAO_PARAMETER_MAX_WHOLE_DIGITS,
   buildDaoProposalCreateDraft,
   daoRepo,
   DAO_STATES,
+  getDaoFinalVoteResult,
   getDaoTransactionMessage,
   getDaoTrackedProposalMetadataEntries,
   getDaoProposalClaimWindow,
@@ -100,8 +102,10 @@ import {
   getDaoTypeLabel,
   getEffectiveDaoState,
   hasPendingDaoAction,
+  isValidDaoDecimalString,
   isDaoTransactionType,
   normalizeDaoAddress,
+  normalizeDaoParameterInput,
   parseDaoUnsignedBigInt,
   setDaoBackendFetcher,
 } from './dao.js';
@@ -3010,6 +3014,11 @@ class DaoModal {
           tone: 'neutral',
         });
       }
+    } else if (state === 'canceled') {
+      chips.push({
+        value: getDaoStateLabel(state),
+        tone: 'rejected',
+      });
     } else {
       const lifecycleActions = getDaoProposalLifecycleActions(proposal, reward);
       const claimAction = lifecycleActions.find((action) => action.kind === 'claim_reward');
@@ -3082,6 +3091,7 @@ function escapeDaoFormAttribute(value) {
 }
 
 const DAO_REVIEW_START_MAX_MS = new Date(9999, 11, 31, 23, 59, 0, 0).getTime();
+const DAO_PARAMETER_NUMBER_LIMIT = 10 ** DAO_PARAMETER_MAX_WHOLE_DIGITS;
 
 class AddProposalModal {
   load() {
@@ -3094,6 +3104,7 @@ class AddProposalModal {
     this.descriptionInput = document.getElementById('addProposalDescription');
     this.proposalFeeInput = document.getElementById('addProposalFee');
     this.optionsList = document.getElementById('addProposalOptionsList');
+    this.optionsLimitHelp = document.getElementById('addProposalOptionsLimitHelp');
     this.addOptionButton = document.getElementById('addProposalOptionButton');
     this.emergencySelect = document.getElementById('addProposalEmergency');
     this.reviewStartButton = document.getElementById('addProposalReviewStartTime');
@@ -3117,7 +3128,7 @@ class AddProposalModal {
       ));
       this.form.addEventListener('input', (event) => this.clearValidationError(event.target));
       this.form.addEventListener('change', (event) => this.clearValidationError(event.target));
-      this.form.addEventListener('click', (event) => this.handleTimingHelpClick(event));
+      this.form.addEventListener('click', (event) => this.handleFormHelpClick(event));
     }
 
     if (this.typeSelect) {
@@ -3306,7 +3317,7 @@ class AddProposalModal {
   }
 
   getValidationHighlight(target) {
-    return target?.closest?.('.dao-form-change-box, .dao-form-row-controls, .dao-form-option, .form-group') || target || null;
+    return target?.closest?.('.dao-form-change-box, .dao-form-option, .form-group') || target || null;
   }
 
   showValidationError(error) {
@@ -3460,14 +3471,13 @@ class AddProposalModal {
     if (!this.optionsList) return;
 
     const configOptions = this.getConfigOptions();
+    const isEmergency = this.emergencySelect?.value === 'true';
+    this.optionsLimitHelp?.classList.toggle('hidden', isEmergency);
     this.optionsList.innerHTML = [
       `
         <div class="dao-form-option dao-form-option--no-change">
           <div class="dao-form-row-title"><label>Option: No change</label></div>
-          <div class="dao-form-row-controls">
-            <span class="dao-form-index">1</span>
-            <div class="form-control dao-form-current-value">No change</div>
-          </div>
+          <div class="form-control dao-form-current-value">No change</div>
           <p class="dao-form-help">This required first option makes no parameter changes.</p>
         </div>
       `,
@@ -3477,7 +3487,6 @@ class AddProposalModal {
     ].join('');
 
     if (this.addOptionButton) {
-      const isEmergency = this.emergencySelect?.value === 'true';
       this.addOptionButton.disabled = configOptions.length === 0 || isEmergency || this.options.length >= 9;
     }
   }
@@ -3558,19 +3567,24 @@ class AddProposalModal {
   }
 
   renderProposedValueControl(option, value, id, dataAttributes) {
-    if (option.valueType === 'boolean') {
-      return `
-        <select id="${id}" class="form-control" ${dataAttributes} required>
-          <option value="">Select value</option>
-          <option value="true" ${value === 'true' ? 'selected' : ''}>True</option>
-          <option value="false" ${value === 'false' ? 'selected' : ''}>False</option>
-        </select>
-      `;
+    switch (`${option.valueType}:${option.validation}`) {
+      case 'boolean:boolean':
+        return `
+          <select id="${id}" class="form-control" ${dataAttributes} required>
+            <option value="">Select value</option>
+            <option value="true" ${value === 'true' ? 'selected' : ''}>True</option>
+            <option value="false" ${value === 'false' ? 'selected' : ''}>False</option>
+          </select>
+        `;
+      case 'string:decimalString':
+        return `<input id="${id}" class="form-control" ${dataAttributes} type="text" inputmode="decimal" maxlength="34" value="${escapeDaoFormAttribute(value)}" required />`;
+      case 'number:integer':
+        return `<input id="${id}" class="form-control" ${dataAttributes} type="number" step="1" inputmode="numeric" min="0" value="${escapeDaoFormAttribute(value)}" required />`;
+      case 'number:decimal':
+        return `<input id="${id}" class="form-control" ${dataAttributes} type="number" step="any" inputmode="decimal" min="0" value="${escapeDaoFormAttribute(value)}" required />`;
+      default:
+        throw new Error(`Unsupported DAO parameter validation: ${option.valueType}:${option.validation}`);
     }
-
-    const step = option.valueType === 'integer' ? '1' : 'any';
-    const inputmode = option.valueType === 'integer' ? 'numeric' : 'decimal';
-    return `<input id="${id}" class="form-control" ${dataAttributes} type="number" step="${step}" inputmode="${inputmode}" value="${escapeDaoFormAttribute(value)}" required />`;
   }
 
   addOption() {
@@ -3646,7 +3660,11 @@ class AddProposalModal {
 
     if (event.target.matches('[data-dao-change-value]')) {
       const change = proposalOption.changes[Number(event.target.dataset.daoChangeIndex)];
-      if (change) change.value = event.target.value;
+      if (!change) return;
+
+      const value = normalizeDaoParameterInput(event.target.value);
+      event.target.value = value;
+      change.value = value;
     }
   }
 
@@ -3703,8 +3721,8 @@ class AddProposalModal {
     });
   }
 
-  handleTimingHelpClick(event) {
-    const helpButton = event.target?.closest?.('[data-dao-timing-help]');
+  handleFormHelpClick(event) {
+    const helpButton = event.target?.closest?.('[data-dao-form-help]');
     if (!helpButton) return;
 
     event.preventDefault();
@@ -3794,15 +3812,39 @@ class AddProposalModal {
         seenKeys.add(option.key);
 
         const value = String(change.value || '').trim();
+        const parameterType = `${option.valueType}:${option.validation}`;
+        const numericValue = Number(value);
         if (!value) throw this.createValidationError(`Enter a proposed value for ${option.label}`, valueInput);
-        if (option.valueType === 'boolean' && value !== 'true' && value !== 'false') {
+        if (parameterType === 'boolean:boolean' && value !== 'true' && value !== 'false') {
           throw this.createValidationError(`${option.label} must be true or false`, valueInput);
         }
-        if (option.valueType === 'integer' && !Number.isInteger(Number(value))) {
+        if (parameterType === 'number:integer' && !Number.isInteger(numericValue)) {
           throw this.createValidationError(`${option.label} must be a whole number`, valueInput);
         }
-        if (option.valueType === 'float' && !Number.isFinite(Number(value))) {
+        if (parameterType === 'number:integer' && (
+          numericValue < 0 || numericValue >= DAO_PARAMETER_NUMBER_LIMIT
+        )) {
+          throw this.createValidationError(
+            `${option.label} must be a non-negative whole number with up to ${DAO_PARAMETER_MAX_WHOLE_DIGITS} digits`,
+            valueInput,
+          );
+        }
+        if (parameterType === 'number:decimal' && !Number.isFinite(numericValue)) {
           throw this.createValidationError(`${option.label} must be a number`, valueInput);
+        }
+        if (parameterType === 'number:decimal' && (
+          numericValue < 0 || numericValue >= DAO_PARAMETER_NUMBER_LIMIT
+        )) {
+          throw this.createValidationError(
+            `${option.label} must be non-negative with up to ${DAO_PARAMETER_MAX_WHOLE_DIGITS} digits before the decimal point`,
+            valueInput,
+          );
+        }
+        if (parameterType === 'string:decimalString' && !isValidDaoDecimalString(value)) {
+          throw this.createValidationError(
+            `${option.label} must be a non-negative number`,
+            valueInput,
+          );
         }
 
         return {
@@ -4398,14 +4440,6 @@ function getDaoVoteTotals(proposal) {
   }));
 }
 
-function getDaoVoteWinner(totals) {
-  const totalWeight = totals.reduce((sum, row) => sum + row.total, 0n);
-  if (totalWeight <= 0n) return { totalWeight, winner: null };
-
-  const winner = totals.reduce((current, row) => (row.total > current.total ? row : current), totals[0]);
-  return { totalWeight, winner };
-}
-
 function isDaoFinalResultState(state) {
   return state === 'accepted' || state === 'rejected' || state === 'applied';
 }
@@ -4470,27 +4504,11 @@ function getDaoCommitteeReviewResultSummary(proposal) {
 }
 
 function getDaoVoteResultSummary(proposal) {
-  const state = getEffectiveDaoState(proposal);
-  if (!isDaoFinalResultState(state)) return null;
-
+  const result = getDaoFinalVoteResult(proposal);
+  if (!result) return null;
   const totals = getDaoVoteTotals(proposal);
-  if (totals.length === 0) return null;
-
-  const { totalWeight, winner } = getDaoVoteWinner(totals);
-  if (totalWeight <= 0n) {
-    return {
-      headline: 'Rejected',
-      outcome: 'Rejected',
-      source: 'vote',
-      tone: 'rejected',
-      totalWeight,
-      totals,
-      winner: totals[0],
-    };
-  }
-
-  const outcome = winner.index === 0 ? 'Accepted' : 'Rejected';
-  const tone = winner.index === 0 ? 'accepted' : 'rejected';
+  const winner = totals.find((row) => row.index === result.winnerIndex) || null;
+  const { outcome, tone, totalWeight } = result;
 
   return { headline: outcome, outcome, source: 'vote', tone, totalWeight, totals, winner };
 }
@@ -4975,12 +4993,15 @@ class ProposalInfoModal {
       : -1;
     const meter = this.renderVoteResultMeter(totals, totalWeight, winnerIndex, 'Current vote breakdown');
     const deadlineText = formatDaoCompactTimestamp(votingWindow.end);
+    const votingEnded = votingWindow.label === 'Voting ended';
+    const deadlinePrefix = votingEnded ? 'Vote ended' : 'Voting ends';
+    const deadlineClass = votingEnded ? ' proposal-vote-current-deadline--ended' : '';
 
     return `
       <section class="proposal-info-section proposal-vote-current-section">
         <div class="proposal-vote-current-heading">
           <h3>Current Vote</h3>
-          ${deadlineText ? `<span title="${escapeDaoFormAttribute(`Voting ends: ${formatDaoTimestamp(votingWindow.end)}`)}">${escapeHtml(`Voting ends: ${deadlineText}`)}</span>` : ''}
+          ${deadlineText ? `<span class="proposal-vote-current-deadline${deadlineClass}" title="${escapeDaoFormAttribute(`${deadlinePrefix}: ${formatDaoTimestamp(votingWindow.end)}`)}">${escapeHtml(`${deadlinePrefix}: ${deadlineText}`)}</span>` : ''}
         </div>
         ${meter}
       </section>
@@ -5161,7 +5182,7 @@ class ProposalInfoModal {
       return this.renderCommitteeResults(result, committeeReview, currentAddress);
     }
 
-    const winnerLabel = result.winner ? `${result.winner.option} (${result.outcome})` : 'Unavailable';
+    const winnerLabel = result.winner?.option || 'Unavailable';
     const totalLabel = result.totalWeight > 0n ? formatDaoVotingPower(result.totalWeight) : 'No votes yet';
     const winnerPosition = result.totals.findIndex((row) => row.index === result.winner?.index);
     const meter = this.renderVoteResultMeter(
@@ -5255,14 +5276,8 @@ class ProposalInfoModal {
 
   renderVotingDetails(proposal) {
     const votingWindow = getDaoProposalVotingWindow(proposal);
-    const totalVote = Array.isArray(proposal.totalVote) ? proposal.totalVote : [];
-    const options = getDaoProposalOptions(proposal);
-    const totalVoteText = totalVote.length
-      ? totalVote.map((value, index) => `${options[index] || `Option ${index + 1}`}: ${formatDaoVotingPower(value)}`).join('\n')
-      : 'No votes yet';
     return renderDaoProposalSection('Voting Details', [
       ['Voting state', votingWindow.label],
-      ['Current totals', totalVoteText],
     ]);
   }
 
@@ -5299,7 +5314,7 @@ class ProposalInfoModal {
   getProposalDetailsSummary(state, rewardSummary) {
     const parts = ['Overview', 'review timeline'];
     if (state === 'review') parts.push('committee review');
-    if (state === 'voting') parts.push('voting totals');
+    if (state === 'voting') parts.push('voting status');
     if (rewardSummary) parts.push('reward accounting');
     return parts.join(', ');
   }
@@ -30045,6 +30060,7 @@ class SendAssetFormModal {
     this.usernameInput = document.getElementById('sendToAddress');
     this.amountInput = document.getElementById('sendAmount');
     this.memoInput = document.getElementById('sendMemo');
+    this.memoGroup = document.getElementById('sendMemoGroup');
     this.retryTxIdInput = document.getElementById('retryOfPaymentTxId');
     this.usernameAvailable = document.getElementById('sendToAddressError');
     this.submitButton = document.querySelector('#sendForm button[type="submit"]');
@@ -30115,7 +30131,7 @@ class SendAssetFormModal {
   async open({ mode = 'liberdus', networkId = null, assetKey = null } = {}) {
     this.mode = mode;
     this.networkGroup.hidden = mode !== 'evm';
-    this.modal.classList.add('active');
+    this.memoGroup.hidden = mode === 'evm';
     this.memoValidation = {};
     this.memoByteCounter.textContent = '';
     this.memoByteCounter.style.display = 'none';
@@ -30156,6 +30172,7 @@ class SendAssetFormModal {
       this.assetSelectDropdown.value = assetKey;
       await this.handleAssetChange();
     }
+    this.modal.classList.add('active');
   }
 
   getSelectedNetwork() {
@@ -30927,7 +30944,7 @@ class SendAssetFormModal {
       if (paymentData.a) {
         this.amountInput.value = paymentData.a;
       }
-      if (paymentData.m) {
+      if (paymentData.m && this.mode !== 'evm') {
         this.memoInput.value = paymentData.m;
       }
 
@@ -31293,6 +31310,7 @@ class ReceiveModal {
     this.assetSelect = document.getElementById('receiveAsset');
     this.amountInput = document.getElementById('receiveAmount');
     this.memoInput = document.getElementById('receiveMemo');
+    this.memoGroup = document.getElementById('receiveMemoGroup');
     this.displayAddress = document.getElementById('displayAddress');
     this.qrcodeContainer = document.getElementById('qrcode');
     this.previewElement = document.getElementById('qrDataPreview');
@@ -31323,7 +31341,7 @@ class ReceiveModal {
   async open({ mode = 'liberdus', networkId = null, assetKey = null } = {}) {
     this.mode = mode;
     this.networkGroup.hidden = mode !== 'evm';
-    this.modal.classList.add('active');
+    this.memoGroup.hidden = mode === 'evm';
 
     // Clear input fields
     this.amountInput.value = '';
@@ -31344,6 +31362,7 @@ class ReceiveModal {
       this.assetSelect.value = assetKey;
       await this.handleAssetChange();
     }
+    this.modal.classList.add('active');
   }
 
   close() {
