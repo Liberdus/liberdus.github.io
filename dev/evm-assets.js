@@ -2,6 +2,7 @@ import {
   BUTTON_COOLDOWN_MS,
   escapeHtml,
   normalizeUsername,
+  openModal,
   utf82bin,
   withButtonCooldown,
 } from './lib.js';
@@ -261,6 +262,8 @@ const REQUIRED_NETWORKS = Object.freeze([
     shortName: 'ETH',
     chainId: 1,
     nativeSymbol: 'ETH',
+    logoUrl: 'https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/ethereum/info/logo.png',
+    explorerUrl: 'https://etherscan.io',
     source: 'evm',
     rpcUrls: DEFAULT_EVM_RPC_URLS.ethereum,
   }),
@@ -270,6 +273,8 @@ const REQUIRED_NETWORKS = Object.freeze([
     shortName: 'BSC',
     chainId: 56,
     nativeSymbol: 'BNB',
+    logoUrl: 'https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/smartchain/info/logo.png',
+    explorerUrl: 'https://bscscan.com',
     source: 'evm',
     rpcUrls: DEFAULT_EVM_RPC_URLS.bsc,
   }),
@@ -279,6 +284,8 @@ const REQUIRED_NETWORKS = Object.freeze([
     shortName: 'POL',
     chainId: 137,
     nativeSymbol: 'POL',
+    logoUrl: 'https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/polygon/info/logo.png',
+    explorerUrl: 'https://polygonscan.com',
     source: 'evm',
     rpcUrls: DEFAULT_EVM_RPC_URLS.polygon,
   }),
@@ -351,7 +358,7 @@ function normalizeEvmToken(token, network) {
     tokenValueUsd: token?.tokenValueUsd ?? null,
     tokenDecimals: Number.isInteger(token?.tokenDecimals) ? token.tokenDecimals : 18,
     rawAmount: typeof token?.rawAmount === 'string' ? token.rawAmount : null,
-    logoUrl: token?.logoUrl || null,
+    logoUrl: token?.logoUrl || (!contractAddress ? network.logoUrl : null),
     source: 'evm',
     walletAsset: null,
   });
@@ -405,6 +412,7 @@ function extraNetworkDefinitions(portfolio, tokens) {
         nativeSymbol: nativeToken?.tokenSymbol || networkId.toUpperCase(),
         source: 'evm',
         rpcUrls: DEFAULT_EVM_RPC_URLS[networkId] || Object.freeze([]),
+        explorerUrl: chain?.explorerUrl || null,
       });
     })
     .sort((left, right) => left.name.localeCompare(right.name));
@@ -474,6 +482,50 @@ function walletProbeAddress(address) {
     throw new TypeError('Wallet address must be a 20-byte hexadecimal value');
   }
   return withPrefix;
+}
+
+function normalizeExplorerBaseUrl(value) {
+  if (typeof value !== 'string' || !value.trim()) return null;
+
+  try {
+    const url = new URL(value.trim());
+    if (url.protocol !== 'https:' || url.username || url.password) return null;
+    url.pathname = `${url.pathname.replace(/\/+$/, '')}/`;
+    url.search = '';
+    url.hash = '';
+    return url;
+  } catch {
+    return null;
+  }
+}
+
+function buildEvmTokenExplorerUrl(walletNetwork, contractAddress) {
+  const explorerBaseUrl = normalizeExplorerBaseUrl(walletNetwork?.explorerUrl);
+  if (!explorerBaseUrl || !contractAddress) return null;
+
+  try {
+    const contract = normalizeEvmAddress(contractAddress, 'token contract');
+    return new URL(`token/${contract}`, explorerBaseUrl).toString();
+  } catch {
+    return null;
+  }
+}
+
+export function buildEvmAssetHistoryUrl(walletNetwork, asset, walletAddress) {
+  const address = walletProbeAddress(walletAddress);
+  let url;
+  if (asset?.contractAddress) {
+    const tokenExplorerUrl = buildEvmTokenExplorerUrl(walletNetwork, asset.contractAddress);
+    if (!tokenExplorerUrl) return null;
+    url = new URL(tokenExplorerUrl);
+    url.searchParams.set('a', address);
+  } else {
+    const explorerBaseUrl = normalizeExplorerBaseUrl(walletNetwork?.explorerUrl);
+    if (!explorerBaseUrl) return null;
+    url = new URL(`address/${address}`, explorerBaseUrl);
+  }
+  url.hash = 'transactions';
+  return url.toString();
 }
 
 function liberdusLookupAddress(address) {
@@ -1240,7 +1292,7 @@ class AssetsModal {
   }
 
   async open() {
-    this.modal.classList.add('active');
+    openModal(this.modal);
     await this.update();
   }
 
@@ -1308,7 +1360,7 @@ class AssetsModal {
             <div class="asset-info">
               <div class="asset-name">${escapeHtml(asset.tokenName)}</div>
               <div class="asset-symbol">
-                ${asset.tokenPriceUsd === null ? 'Price unavailable' : `${formatConnectedUsd(asset.tokenPriceUsd)} / ${escapeHtml(asset.tokenSymbol)}`}
+                ${asset.tokenPriceUsd === null ? '<span style="color: var(--danger-color)">$0</span>' : `${formatConnectedUsd(asset.tokenPriceUsd)} / ${escapeHtml(asset.tokenSymbol)}`}
               </div>
             </div>
             <div class="asset-balance">
@@ -1364,9 +1416,7 @@ class AssetDetailsModal {
         assetKey: this.assetKey,
       });
     });
-    document.getElementById('assetDetailsHistory').addEventListener('click', () => {
-      this.controller.showToast('EVM transaction history is not available yet.', 3000, 'info');
-    });
+    document.getElementById('assetDetailsHistory').addEventListener('click', () => this.openHistory());
   }
 
   getSelection() {
@@ -1388,12 +1438,12 @@ class AssetDetailsModal {
 
     this.render(walletNetwork, asset);
     this.modal.querySelector('.modal-content').scrollTop = 0;
-    this.modal.classList.add('active');
+    openModal(this.modal);
   }
 
   render(walletNetwork, asset) {
     const priceText = asset.tokenPriceUsd === null
-      ? 'Price unavailable'
+      ? '$0'
       : formatConnectedUsd(asset.tokenPriceUsd);
     const valueText = formatConnectedUsd(asset.tokenValueUsd);
     const amountText = `${formatConnectedTokenAmount(asset.tokenAmount)} ${asset.tokenSymbol}`;
@@ -1401,6 +1451,7 @@ class AssetDetailsModal {
     this.title.textContent = asset.tokenSymbol;
     this.symbol.textContent = asset.tokenName;
     this.price.textContent = priceText;
+    this.price.style.color = asset.tokenPriceUsd === null ? 'var(--danger-color)' : '';
     this.updated.textContent = formatAssetDetailsUpdatedAt(this.controller.getUpdatedAt());
     this.logo.innerHTML = connectedAssetLogoMarkup(asset, walletNetwork);
     this.name.textContent = asset.tokenName;
@@ -1413,9 +1464,52 @@ class AssetDetailsModal {
     this.decimals.textContent = Number.isInteger(asset.tokenDecimals)
       ? String(asset.tokenDecimals)
       : 'Unavailable';
-    this.contract.textContent = asset.contractAddress || 'Native asset — no contract';
+    const tokenExplorerUrl = buildEvmTokenExplorerUrl(walletNetwork, asset.contractAddress);
+    this.contract.innerHTML = tokenExplorerUrl
+      ? `<a href="${escapeHtml(tokenExplorerUrl)}" target="_blank" rel="noopener noreferrer">${escapeHtml(asset.contractAddress)}</a>`
+      : escapeHtml(asset.contractAddress || 'Native asset — no contract');
     this.marketPrice.textContent = priceText;
+    this.marketPrice.style.color = this.price.style.color;
     this.holdingValue.textContent = valueText;
+  }
+
+  openHistory() {
+    const { walletNetwork, asset } = this.getSelection();
+    if (!walletNetwork || !asset) {
+      this.controller.showToast(
+        'This asset is no longer available. Refresh and try again.',
+        3000,
+        'warning',
+      );
+      return;
+    }
+
+    let historyUrl;
+    try {
+      historyUrl = buildEvmAssetHistoryUrl(
+        walletNetwork,
+        asset,
+        this.controller.getAccount()?.keys?.address,
+      );
+    } catch {
+      this.controller.showToast(
+        'Transaction history is unavailable for this asset.',
+        3000,
+        'warning',
+      );
+      return;
+    }
+
+    if (!historyUrl) {
+      this.controller.showToast(
+        `Transaction history is unavailable for ${walletNetwork.name}.`,
+        3000,
+        'warning',
+      );
+      return;
+    }
+
+    window.open(historyUrl, '_blank', 'noopener,noreferrer');
   }
 
   close() {
@@ -1572,7 +1666,7 @@ export class EvmSendConfirmationModal {
     this.render(prepared);
     this.confirmButton.disabled = false;
     this.cancelButton.disabled = false;
-    this.modal.classList.add('active');
+    openModal(this.modal);
     return new Promise((resolve) => {
       this.pending = { resolve };
     });

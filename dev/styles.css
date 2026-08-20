@@ -1607,7 +1607,7 @@ button:disabled {
   min-height: var(--icon-button-height);
 }
 
-.sign-out-header-button.active {
+.modal.active.is-transition-complete .sign-out-header-button {
   pointer-events: auto;
   opacity: 1;
 }
@@ -1778,6 +1778,140 @@ select.form-control {
 select.form-control.is-private {
   color: var(--danger-color);
   border-color: var(--danger-color);
+}
+
+.popup-select__trigger {
+  align-items: center;
+  background: var(--background-color);
+  color: var(--text-color);
+  display: grid;
+  gap: 8px;
+  grid-template-columns: minmax(0, 1fr) 16px;
+  text-align: left;
+}
+
+.popup-select__value,
+.popup-select__option-label {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.popup-select__chevron {
+  background-color: currentColor;
+  height: 16px;
+  -webkit-mask: url("data:image/svg+xml,%3Csvg viewBox='0 0 24 24' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='m6.7 8.7 5.3 5.3 5.3-5.3 1.4 1.4-6.7 6.7-6.7-6.7z'/%3E%3C/svg%3E") center / contain no-repeat;
+  mask: url("data:image/svg+xml,%3Csvg viewBox='0 0 24 24' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='m6.7 8.7 5.3 5.3 5.3-5.3 1.4 1.4-6.7 6.7-6.7-6.7z'/%3E%3C/svg%3E") center / contain no-repeat;
+  transition: transform 0.15s ease;
+  width: 16px;
+}
+
+.popup-select__trigger[aria-expanded='true'] .popup-select__chevron {
+  transform: rotate(180deg);
+}
+
+.popup-select__menu {
+  background: var(--background-color);
+  border: 1px solid var(--border-color);
+  border-radius: 14px;
+  box-shadow: var(--overlay-shadow-large);
+  color: var(--text-color);
+  max-height: 458px; /* Ten 44px rows plus menu chrome. */
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 8px;
+  position: fixed;
+  scrollbar-width: thin;
+  touch-action: pan-y;
+  z-index: var(--overlay-z-index-high);
+  -webkit-overflow-scrolling: touch;
+}
+
+.popup-select__menu:focus {
+  outline: none;
+}
+
+.popup-select__menu::-webkit-scrollbar {
+  width: 6px;
+}
+
+.popup-select__menu::-webkit-scrollbar-track {
+  margin: 8px 0;
+}
+
+.popup-select__menu::-webkit-scrollbar-thumb {
+  background-color: var(--scrollbar-thumb);
+  background-clip: padding-box;
+  border: 1px solid transparent;
+  border-radius: 10px;
+}
+
+.popup-select__scroll-indicator {
+  background: var(--primary-tint-12);
+  border-radius: 10px;
+  pointer-events: none;
+  position: fixed;
+  width: 4px;
+  z-index: var(--overlay-z-index-high);
+}
+
+.popup-select__scroll-thumb {
+  background: var(--primary-color);
+  border-radius: inherit;
+  left: 0;
+  position: absolute;
+  width: 100%;
+}
+
+@media (hover: none) and (pointer: coarse) {
+  .popup-select__menu {
+    scrollbar-width: none;
+  }
+
+  .popup-select__menu::-webkit-scrollbar {
+    display: none;
+  }
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .popup-select__scroll-indicator {
+    display: none;
+  }
+}
+
+.popup-select__option {
+  align-items: center;
+  border-radius: 8px;
+  cursor: pointer;
+  display: grid;
+  font-size: var(--font-size-sm);
+  gap: 8px;
+  grid-template-columns: 20px minmax(0, 1fr);
+  line-height: 1.3;
+  min-height: 44px;
+  padding: 8px 10px;
+}
+
+.popup-select__option::before {
+  content: '';
+  height: 18px;
+  width: 18px;
+}
+
+.popup-select__option[aria-selected='true']::before {
+  background-color: var(--primary-color);
+  -webkit-mask: url("data:image/svg+xml,%3Csvg viewBox='0 0 24 24' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='m9.2 16.6-4.8-4.8 1.4-1.4 3.4 3.4 9-9 1.4 1.4z'/%3E%3C/svg%3E") center / contain no-repeat;
+  mask: url("data:image/svg+xml,%3Csvg viewBox='0 0 24 24' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='m9.2 16.6-4.8-4.8 1.4-1.4 3.4 3.4 9-9 1.4 1.4z'/%3E%3C/svg%3E") center / contain no-repeat;
+}
+
+.popup-select__option.is-active,
+.popup-select__option:hover {
+  background: var(--hover-background-purple);
+}
+
+.popup-select__option[aria-disabled='true'] {
+  cursor: not-allowed;
+  opacity: 0.55;
 }
 
 textarea.form-control {
@@ -7799,7 +7933,7 @@ small {
 
 /* Dialog overlay - centered with backdrop */
 .modal.modal-dialog {
-  display: none; /* Hidden by default */
+  display: flex;
   position: fixed; /* Fixed position to overlay everything */
   top: 0;
   left: 0; /* Start from left, no slide-in */
@@ -7809,15 +7943,17 @@ small {
   justify-content: center; /* Center direct child (dialog-box-content) horizontally */
   align-items: center; /* Center direct child (dialog-box-content) vertically */
   z-index: var(--overlay-z-index-base); /* Ensure it's on top */
+  visibility: hidden;
   opacity: 0;
-  transition: var(--overlay-transition);
+  transition: var(--overlay-transition), visibility 0s linear 0.2s;
   /* Override general .modal transition if it interferes */
   transform: none !important; /* Prevent slide-in */
 }
 
 .modal.modal-dialog.active {
-  display: flex; /* Show and use flex for centering */
+  visibility: visible;
   opacity: 1;
+  transition-delay: 0s;
   transform: none !important; /* Ensure no slide-in even when active */
 }
 
@@ -9811,7 +9947,8 @@ small {
   padding: 0 100px;
 }
 
-#dateTimePickerForm {
+#dateTimePickerForm,
+#durationPickerForm {
   max-width: none;
   min-width: 0;
   padding-inline: 0;
@@ -9832,13 +9969,13 @@ small {
   }
 }
 
-.date-time-picker-row {
+.picker-row {
   display: flex;
   gap: 8px;
   align-items: center;
 }
 
-.date-time-picker-row:not(:first-child) {
+.picker-row:not(:first-child) {
   margin-top: 8px;
 }
 
@@ -9848,12 +9985,21 @@ small {
   width: 100%;
 }
 
-.date-time-picker-time-select {
+.picker-select {
   flex: 1 1 0;
   min-width: 0;
 }
 
-#dateTimePickerPreview {
+.picker-field {
+  flex: 1 1 0;
+  min-width: 0;
+}
+
+.picker-field label {
+  display: block;
+}
+
+.picker-preview {
   color: var(--text-color);
   line-height: 1.4;
   overflow: visible;

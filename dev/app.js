@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'a'
+const version = 'b'
 const BOOT_SPLASH_HANDOFF_MS = 1000;
 let myVersion = '0';
 async function checkVersion() {
@@ -154,6 +154,8 @@ import {
   linkifyUrls,
   escapeHtml,
   debounce,
+  installModalTransitionListeners,
+  openModal,
   withButtonCooldown,
   BUTTON_COOLDOWN_MS,
   FAUCET_COOLDOWN_MS,
@@ -715,11 +717,13 @@ function lockRapidMenuClicks(menuList) {
 
 // Load saved account data and update chat list on page load
 document.addEventListener('DOMContentLoaded', async () => {
+  installModalTransitionListeners();
   markConnectivityDependentElements();
   await checkVersion(); // version needs to be checked before anything else happens
   timeDifference(); // Calculate and log time difference early
 
   setupConnectivityDetection();
+  PopupSelect.load();
 
   // React Native App
   reactNativeApp.load();
@@ -902,6 +906,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   // Call scheduling and shared date/time picker modals
   callScheduleChoiceModal.load();
   dateTimePickerModal.load();
+  durationPickerModal.load();
 
   // Remove Accounts Modal
   removeAccountsModal.load();
@@ -1383,7 +1388,7 @@ class WelcomeMenuModal {
       unlockModal.openButtonElementUsed = welcomeScreen.openWelcomeMenuButton;
       unlockModal.open();
     } else {
-      this.modal.classList.add('active');
+      openModal(this.modal);
       enterFullscreen();
     }
   }
@@ -2368,20 +2373,8 @@ class MenuModal {
     }
   }
 
-  enableSignOutButtonWithDelay() {
-    // Disable button initially
-    this.signOutHeaderButton.classList.remove('active');
-    // Re-enable after modal animation completes (300ms) + small buffer to prevent accidental double-taps
-    setTimeout(() => {
-      if (this.isActive()) {
-        this.signOutHeaderButton.classList.add('active');
-      }
-    }, 400); // 400ms = modal animation (300ms) + 100ms buffer
-  }
-
   open() {
-    this.modal.classList.add('active');
-    this.enableSignOutButtonWithDelay();
+    openModal(this.modal);
     enterFullscreen();
   }
 
@@ -2603,7 +2596,7 @@ class DaoModal {
     if (menuModal?.isActive?.()) menuModal.close();
     footer?.closeNewChatButton?.();
 
-    this.modal.classList.add('active');
+    openModal(this.modal);
     enterFullscreen();
 
     // Default filter is Voting
@@ -3091,7 +3084,46 @@ function escapeDaoFormAttribute(value) {
 }
 
 const DAO_REVIEW_START_MAX_MS = new Date(9999, 11, 31, 23, 59, 0, 0).getTime();
+const DURATION_MINUTE_MS = 60 * 1000;
+const DURATION_HOUR_MS = 60 * DURATION_MINUTE_MS;
+const DURATION_DAY_MS = 24 * DURATION_HOUR_MS;
+const DURATION_PICKER_MAX_DAYS = 30;
+const DAO_GRACE_PERIOD_PRODUCT_MAX_MS = DURATION_PICKER_MAX_DAYS * DURATION_DAY_MS;
 const DAO_PARAMETER_NUMBER_LIMIT = 10 ** DAO_PARAMETER_MAX_WHOLE_DIGITS;
+
+function durationPartsToMilliseconds(days, hours, minutes) {
+  const parts = [days, hours, minutes].map(Number);
+  if (parts.some((part) => !Number.isInteger(part) || part < 0)) return NaN;
+  if (parts[1] > 23 || parts[2] > 59) return NaN;
+  const milliseconds = (parts[0] * DURATION_DAY_MS)
+    + (parts[1] * DURATION_HOUR_MS)
+    + (parts[2] * DURATION_MINUTE_MS);
+  return Number.isSafeInteger(milliseconds) ? milliseconds : NaN;
+}
+
+function millisecondsToDurationParts(milliseconds) {
+  const value = Number(milliseconds);
+  if (!Number.isSafeInteger(value) || value < 0 || value % DURATION_MINUTE_MS !== 0) return null;
+  const days = Math.floor(value / DURATION_DAY_MS);
+  const remainder = value % DURATION_DAY_MS;
+  const hours = Math.floor(remainder / DURATION_HOUR_MS);
+  const minutes = Math.floor((remainder % DURATION_HOUR_MS) / DURATION_MINUTE_MS);
+  return { days, hours, minutes };
+}
+
+function formatDurationParts(milliseconds) {
+  const parts = millisecondsToDurationParts(milliseconds);
+  if (!parts) return '';
+  if (milliseconds === 0) return '0 minutes';
+  return [
+    [parts.days, 'day'],
+    [parts.hours, 'hour'],
+    [parts.minutes, 'minute'],
+  ]
+    .filter(([value]) => value > 0)
+    .map(([value, unit]) => `${value} ${unit}${value === 1 ? '' : 's'}`)
+    .join(' ');
+}
 
 class AddProposalModal {
   load() {
@@ -3109,10 +3141,13 @@ class AddProposalModal {
     this.emergencySelect = document.getElementById('addProposalEmergency');
     this.reviewStartButton = document.getElementById('addProposalReviewStartTime');
     this.reviewStartHelp = document.getElementById('addProposalReviewStartHelp');
-    this.gracePeriodInput = document.getElementById('addProposalGracePeriodMs');
+    this.gracePeriodButton = document.getElementById('addProposalGracePeriodMs');
     this.gracePeriodHelp = document.getElementById('addProposalGracePeriodHelp');
     this.gracePeriodLimit = document.getElementById('addProposalGracePeriodLimit');
+    this.gracePeriodLoadError = false;
     this.submitButton = this.form?.querySelector('button[type="submit"]');
+    if (this.typeSelect) PopupSelect.enhance(this.typeSelect);
+    if (this.emergencySelect) PopupSelect.enhance(this.emergencySelect);
     this.resetConfigCache();
 
     if (this.closeButton) this.closeButton.addEventListener('click', () => this.close());
@@ -3145,13 +3180,7 @@ class AddProposalModal {
       });
     }
     if (this.reviewStartButton) this.reviewStartButton.addEventListener('click', () => this.openReviewStartPicker());
-    if (this.gracePeriodInput) {
-      this.gracePeriodInput.addEventListener('input', () => {
-        const maxLength = String(DAO_PROPOSAL_GRACE_PERIOD_MAX_MS).length;
-        this.gracePeriodInput.value = this.gracePeriodInput.value.slice(0, maxLength);
-        this.renderGracePeriodLimitHint();
-      });
-    }
+    if (this.gracePeriodButton) this.gracePeriodButton.addEventListener('click', () => this.openGracePeriodPicker());
 
     if (this.optionsList) {
       this.optionsList.addEventListener('click', (event) => this.handleOptionsClick(event));
@@ -3161,21 +3190,25 @@ class AddProposalModal {
   }
 
   open() {
-    this.modal.classList.add('active');
+    openModal(this.modal);
     enterFullscreen();
     this.resetConfigCache();
     this.proposalFeeUsdStr = null;
     this.maxGracePeriodMs = null;
+    this.gracePeriodLoadError = false;
     if (this.titleInput) this.titleInput.value = '';
-    if (this.typeSelect) this.typeSelect.value = 'governance';
-    if (this.descriptionInput) this.descriptionInput.value = '';
-    if (this.emergencySelect) this.emergencySelect.value = 'false';
-    this.reviewStartTimeMs = 0;
-    this.renderReviewStartTime();
-    if (this.gracePeriodInput) {
-      this.gracePeriodInput.value = '';
-      this.gracePeriodInput.removeAttribute('max');
+    if (this.typeSelect) {
+      this.typeSelect.value = 'governance';
+      PopupSelect.sync(this.typeSelect);
     }
+    if (this.descriptionInput) this.descriptionInput.value = '';
+    if (this.emergencySelect) {
+      this.emergencySelect.value = 'false';
+      PopupSelect.sync(this.emergencySelect);
+    }
+    this.reviewStartTimeMs = 0;
+    this.gracePeriodMs = 0;
+    this.renderReviewStartTime();
     this.options = [this.createOption()];
     this.renderOptions('Loading current DAO config values...');
     this.renderGracePeriodLimitHint();
@@ -3187,6 +3220,7 @@ class AddProposalModal {
   }
 
   close() {
+    PopupSelect.hide();
     this.modal.classList.remove('active');
     enterFullscreen();
   }
@@ -3246,19 +3280,21 @@ class AddProposalModal {
     const maximumSummary = this.maxGracePeriodMs === null
       ? ''
       : `${formatDaoDurationEstimate(this.maxGracePeriodMs)} (${this.maxGracePeriodMs} ms)`;
-    const currentValue = String(this.gracePeriodInput?.value ?? '').trim();
-    const currentSummary = currentValue ? formatDaoDurationEstimate(currentValue) : '';
-    if (this.gracePeriodInput) {
-      this.gracePeriodInput.placeholder = maximumSummary ? 'Custom ms' : 'Loading maximum...';
+    const currentSummary = formatDurationParts(this.gracePeriodMs);
+    if (this.gracePeriodButton) {
+      this.gracePeriodButton.textContent = String(this.gracePeriodMs);
+      this.gracePeriodButton.disabled = this.maxGracePeriodMs === null;
+      this.gracePeriodButton.setAttribute('aria-busy', String(this.maxGracePeriodMs === null));
     }
     if (this.gracePeriodHelp) {
-      this.gracePeriodHelp.textContent = currentSummary ? `Estimate: ${currentSummary}` : '';
+      this.gracePeriodHelp.textContent = this.maxGracePeriodMs === null
+        ? (this.gracePeriodLoadError ? 'Duration: maximum unavailable' : 'Duration: loading maximum...')
+        : `Duration: ${currentSummary}`;
     }
-    this.renderMaximumWarning(
-      this.gracePeriodInput,
-      this.gracePeriodLimit,
-      `Maximum: ${maximumSummary}`
-    );
+    if (this.gracePeriodLimit) {
+      this.gracePeriodLimit.textContent = maximumSummary ? `Maximum: ${maximumSummary}` : '';
+      this.gracePeriodLimit.classList.toggle('hidden', !maximumSummary);
+    }
   }
 
   async refreshProposalDefaults() {
@@ -3270,12 +3306,7 @@ class AddProposalModal {
       if (!this.isActive() || requestId !== this.proposalDefaultsRequestId) return;
       this.proposalFeeUsdStr = proposalFeeUsdStr;
       this.maxGracePeriodMs = maxGracePeriodMs;
-      if (this.gracePeriodInput) {
-        this.gracePeriodInput.max = String(maxGracePeriodMs);
-        if (!String(this.gracePeriodInput.value || '').trim()) {
-          this.gracePeriodInput.value = String(maxGracePeriodMs);
-        }
-      }
+      this.gracePeriodLoadError = false;
       this.renderProposalFee();
       this.renderGracePeriodLimitHint();
     } catch (error) {
@@ -3283,10 +3314,7 @@ class AddProposalModal {
       if (!this.isActive() || requestId !== this.proposalDefaultsRequestId) return;
       this.proposalFeeUsdStr = '';
       this.maxGracePeriodMs = null;
-      if (this.gracePeriodInput) {
-        this.gracePeriodInput.value = '';
-        this.gracePeriodInput.removeAttribute('max');
-      }
+      this.gracePeriodLoadError = true;
       this.renderProposalFee();
       this.renderGracePeriodLimitHint();
       showToast('Could not refresh DAO proposal fee', 2500, 'warning');
@@ -3309,10 +3337,11 @@ class AddProposalModal {
   }
 
   clearValidationError(target) {
-    const highlight = this.getValidationHighlight(target);
+    const control = PopupSelect.getVisibleControl(target);
+    const highlight = this.getValidationHighlight(control);
     highlight?.classList.remove('dao-form-error');
-    if (target?.matches?.('input, select, textarea, button')) {
-      target.removeAttribute('aria-invalid');
+    if (control?.matches?.('input, select, textarea, button')) {
+      control.removeAttribute('aria-invalid');
     }
   }
 
@@ -3321,7 +3350,7 @@ class AddProposalModal {
   }
 
   showValidationError(error) {
-    const target = error?.validationTarget;
+    const target = PopupSelect.getVisibleControl(error?.validationTarget);
     const highlight = this.getValidationHighlight(target);
     if (highlight) {
       highlight.classList.add('dao-form-error');
@@ -3413,7 +3442,12 @@ class AddProposalModal {
     if (Object.values(proposalDurations).some((duration) => !Number.isSafeInteger(duration) || duration < 0)) {
       throw new Error('Missing DAO proposal lifecycle durations');
     }
-    const maxGracePeriodMs = Math.min(graceDuration, DAO_PROPOSAL_GRACE_PERIOD_MAX_MS);
+    const rawMaximumMs = Math.min(
+      graceDuration,
+      DAO_PROPOSAL_GRACE_PERIOD_MAX_MS,
+      DAO_GRACE_PERIOD_PRODUCT_MAX_MS,
+    );
+    const maxGracePeriodMs = Math.floor(rawMaximumMs / DURATION_MINUTE_MS) * DURATION_MINUTE_MS;
     return { proposalFeeUsdStr, maxGracePeriodMs, proposalDurations };
   }
 
@@ -3470,6 +3504,8 @@ class AddProposalModal {
   renderOptions(unavailableMessage = '') {
     if (!this.optionsList) return;
 
+    PopupSelect.hide();
+
     const configOptions = this.getConfigOptions();
     const isEmergency = this.emergencySelect?.value === 'true';
     this.optionsLimitHelp?.classList.toggle('hidden', isEmergency);
@@ -3485,6 +3521,9 @@ class AddProposalModal {
         this.renderOption(proposalOption, index, configOptions, unavailableMessage)
       )),
     ].join('');
+
+    this.optionsList.querySelectorAll('select')
+      .forEach((select) => PopupSelect.enhance(select));
 
     if (this.addOptionButton) {
       this.addOptionButton.disabled = configOptions.length === 0 || isEmergency || this.options.length >= 9;
@@ -3538,7 +3577,7 @@ class AddProposalModal {
       <option value="${escapeHtml(item.key)}" ${item.key === option.key ? 'selected' : ''}>${escapeHtml(item.label)}</option>
     `).join('') : '';
     const parameterControl = isTemplate
-      ? `<select id="${configId}" class="form-control" data-dao-change-key data-dao-option-index="${optionIndex}" data-dao-change-index="${changeIndex}" required>${selectOptions}</select>`
+      ? `<select id="${configId}" class="form-control" aria-label="Select parameter for Option ${optionNumber}, change ${changeNumber}" data-dao-change-key data-dao-option-index="${optionIndex}" data-dao-change-index="${changeIndex}" required>${selectOptions}</select>`
       : `<input id="${configId}" class="form-control dao-form-current-value" type="text" value="${escapeDaoFormAttribute(option.label)}" readonly />`;
 
     return `
@@ -3604,7 +3643,9 @@ class AddProposalModal {
     this.options.push(this.createOption());
     this.synchronizeOptions();
     this.renderOptions();
-    this.optionsList?.querySelector(`[data-dao-option="${this.options.length - 1}"] [data-dao-change-value]`)?.focus();
+    PopupSelect.focus(this.optionsList?.querySelector(
+      `[data-dao-option="${this.options.length - 1}"] [data-dao-change-value]`
+    ));
   }
 
   addParameterChange(optionIndex) {
@@ -3623,7 +3664,10 @@ class AddProposalModal {
     template.changes.push({ key: nextOption.key, value: '' });
     this.synchronizeOptions();
     this.renderOptions();
-    this.optionsList?.querySelector(`[data-dao-option="${optionIndex}"] [data-dao-change-row]:last-child [data-dao-change-key]`)?.focus();
+    const parameterSelect = this.optionsList?.querySelector(
+      `[data-dao-option="${optionIndex}"] [data-dao-change-row]:last-child [data-dao-change-key]`
+    );
+    PopupSelect.focus(parameterSelect);
   }
 
   handleOptionsClick(event) {
@@ -3672,15 +3716,19 @@ class AddProposalModal {
     if (!event.target.matches('[data-dao-change-key]')) return;
 
     const optionIndex = Number(event.target.dataset.daoOptionIndex);
+    const changeIndex = Number(event.target.dataset.daoChangeIndex);
     if (optionIndex !== 0) return;
 
     const proposalOption = this.options[optionIndex];
-    const change = proposalOption?.changes[Number(event.target.dataset.daoChangeIndex)];
+    const change = proposalOption?.changes[changeIndex];
     if (!change) return;
     change.key = event.target.value;
     change.value = '';
     this.synchronizeOptions();
     this.renderOptions();
+    PopupSelect.focus(this.optionsList?.querySelector(
+      `[data-dao-change-key][data-dao-option-index="${optionIndex}"][data-dao-change-index="${changeIndex}"]`
+    ));
   }
 
   getIntegerValue(input, label, unit = '') {
@@ -3718,6 +3766,28 @@ class AddProposalModal {
       },
       minError: 'Review start time must be in the future',
       maxError: 'Review start time must be before the year 10000',
+    });
+  }
+
+  openGracePeriodPicker() {
+    if (!Number.isSafeInteger(this.maxGracePeriodMs) || this.maxGracePeriodMs < 0) {
+      showToast('Grace period maximum is still loading', 2500, 'warning');
+      return;
+    }
+    durationPickerModal.open({
+      title: 'Choose Grace Period',
+      initialDurationMs: this.gracePeriodMs,
+      maxDurationMs: this.maxGracePeriodMs,
+      selectionFormatter: (durationMs) => ({
+        preview: `Grace period: ${formatDurationParts(durationMs)} (${durationMs} ms)`,
+        submitLabel: `Submit: ${durationMs} ms grace period`,
+      }),
+      onDone: (durationMs) => {
+        if (durationMs === null) return;
+        this.gracePeriodMs = durationMs;
+        this.renderGracePeriodLimitHint();
+        this.clearValidationError(this.gracePeriodButton);
+      },
     });
   }
 
@@ -3889,7 +3959,13 @@ class AddProposalModal {
     try {
       const { options, changes } = this.getValidatedOptions();
       const reviewStartTimeMs = this.getReviewStartTimeMs();
-      const gracePeriodMs = this.getMillisecondsValue(this.gracePeriodInput, 'Grace period', this.maxGracePeriodMs);
+      const gracePeriodMs = this.gracePeriodMs;
+      if (!Number.isSafeInteger(this.maxGracePeriodMs) || this.maxGracePeriodMs < 0) {
+        throw this.createValidationError('Grace period maximum is not loaded yet', this.gracePeriodButton);
+      }
+      if (!Number.isSafeInteger(gracePeriodMs) || gracePeriodMs < 0 || gracePeriodMs > this.maxGracePeriodMs) {
+        throw this.createValidationError(`Grace period must not exceed ${this.maxGracePeriodMs} milliseconds`, this.gracePeriodButton);
+      }
       const emergency = this.emergencySelect?.value === 'true';
       if (!emergency && !this.proposalFeeUsdStr) {
         throw this.createValidationError('Current DAO proposal fee is not loaded yet', this.proposalFeeInput);
@@ -4072,7 +4148,7 @@ class ConfirmProposalModal {
     this.currentDraft = draft;
     this.setSubmitting(false);
     this.render();
-    this.modal.classList.add('active');
+    openModal(this.modal);
     enterFullscreen();
   }
 
@@ -4870,7 +4946,7 @@ class ProposalInfoModal {
   async _open(proposalId) {
     this._currentProposalId = proposalId;
 
-    this.modal.classList.add('active');
+    openModal(this.modal);
     enterFullscreen();
 
     let p = null;
@@ -5274,13 +5350,6 @@ class ProposalInfoModal {
     ]);
   }
 
-  renderVotingDetails(proposal) {
-    const votingWindow = getDaoProposalVotingWindow(proposal);
-    return renderDaoProposalSection('Voting Details', [
-      ['Voting state', votingWindow.label],
-    ]);
-  }
-
   renderProposalDetails({ proposal, state, reviewWindow, rewardSummary, committeeReviewSection }) {
     const sections = [
       renderDaoProposalSection('Overview', [
@@ -5296,7 +5365,6 @@ class ProposalInfoModal {
         ['Review ends', formatDaoDetailTimestamp(reviewWindow.end)],
       ]),
       committeeReviewSection,
-      state === 'voting' ? this.renderVotingDetails(proposal) : '',
       this.renderProposalRewards(rewardSummary),
     ].filter(Boolean);
 
@@ -5314,7 +5382,6 @@ class ProposalInfoModal {
   getProposalDetailsSummary(state, rewardSummary) {
     const parts = ['Overview', 'review timeline'];
     if (state === 'review') parts.push('committee review');
-    if (state === 'voting') parts.push('voting status');
     if (rewardSummary) parts.push('reward accounting');
     return parts.join(', ');
   }
@@ -6339,20 +6406,8 @@ class SettingsModal {
     this.signOutHeaderButton.addEventListener('click', settingsWrappedSignOut);
   }
 
-  enableSignOutButtonWithDelay() {
-    // Disable button initially
-    this.signOutHeaderButton.classList.remove('active');
-    // Re-enable after modal animation completes (300ms) + small buffer to prevent accidental double-taps
-    setTimeout(() => {
-      if (this.isActive()) {
-        this.signOutHeaderButton.classList.add('active');
-      }
-    }, 400); // 400ms = modal animation (300ms) + 100ms buffer
-  }
-
   open() {
-    this.modal.classList.add('active');
-    this.enableSignOutButtonWithDelay();
+    openModal(this.modal);
     enterFullscreen();
   }
 
@@ -6402,7 +6457,7 @@ class ChatSettingsModal {
     this.warningShown = false;
     this.setSliderValue(this.draftFontSizePx);
     this.updatePreview();
-    this.modal.classList.add('active');
+    openModal(this.modal);
   }
 
   handleSliderInput() {
@@ -6519,7 +6574,7 @@ class ManageContactsModal {
    */
   open() {
     this.clearFile();
-    this.modal.classList.add('active');
+    openModal(this.modal);
     enterFullscreen();
   }
 
@@ -6639,7 +6694,7 @@ class SecretModal {
   }
 
   open() {
-    this.modal.classList.add('active');
+    openModal(this.modal);
     enterFullscreen();
     this.resetSecretState();
   }
@@ -6774,7 +6829,7 @@ class ScanQRModal {
   }
 
   open() {
-    this.modal.classList.add('active');
+    openModal(this.modal);
     this.startCamera();
   }
 
@@ -7479,7 +7534,7 @@ class SignInModal {
 
     // Wait for browser to process DOM changes before starting modal transition.
     requestAnimationFrame(async () => {
-      this.modal.classList.add('active');
+      openModal(this.modal);
 
       // No accounts on this device — open Create Account instead.
       if (usernames.length === 0) {
@@ -7841,7 +7896,7 @@ class MyInfoModal {
 
   async open() {
     await this.updateMyInfo();
-    this.modal.classList.add('active');
+    openModal(this.modal);
   }
 
   close() {
@@ -8105,7 +8160,7 @@ class ContactInfoModal {
       friendModal.updateFriendButton(contact, 'addFriendButtonContactInfo');
     }
 
-    this.modal.classList.add('active');
+    openModal(this.modal);
   }
 
   // Close the modal
@@ -8273,7 +8328,7 @@ class FriendModal {
     this.selectFriendStatus(contact.friend);
     this.initialFriendStatus = contact.friend;
     this.warningShown = false;
-    this.modal.classList.add('active');
+    openModal(this.modal);
 
     if (this.showPendingStatusIfNeeded(contactAddress)) {
       return;
@@ -8792,7 +8847,7 @@ class EditContactModal {
     this.notesInput.value = contactNotes;
 
     // Show the edit contact modal
-    this.modal.classList.add('active');
+    openModal(this.modal);
     // Delay focus to ensure transition completes (modal transition is 300ms)
     setTimeout(() => {
       const inputToFocus = focusField === 'notes' ? this.notesInput : this.nameInput;
@@ -8931,7 +8986,7 @@ class HistoryModal {
   }
 
   open() {
-    this.modal.classList.add('active');
+    openModal(this.modal);
     this.populateAssets();
     this.updateTransactionHistory();
     
@@ -9242,7 +9297,7 @@ class CallsModal {
   open() {
     this.refreshCalls();
     this.render();
-    this.modal.classList.add('active');
+    openModal(this.modal);
     this.clockTimer.start();
     // start periodic refresh to update call button states every 5s
     this._stateInterval = setInterval(() => {
@@ -9566,7 +9621,7 @@ class GroupCallParticipantsModal {
       }
     }
 
-    this.modal?.classList.add('active');
+    openModal(this.modal);
   }
 
   onParticipantClick(e) {
@@ -12202,7 +12257,7 @@ class SearchMessagesModal {
   }
 
   open() {
-    this.modal.classList.add('active');
+    openModal(this.modal);
     // Delay focus to ensure transition completes (modal transition is 300ms)
     setTimeout(() => {
       this.searchInput.focus();
@@ -12422,7 +12477,7 @@ class SearchContactsModal {
   }
 
   open() {
-    this.modal.classList.add('active');
+    openModal(this.modal);
     // Delay focus to ensure transition completes (modal transition is 300ms)
     setTimeout(() => {
       this.searchInput.focus();
@@ -12810,7 +12865,7 @@ class AvatarEditModal {
     await this.refreshPreview();
     // populate three-option avatar selector (contact, mine, identicon)
     try { await this.populateOptions(); } catch (e) { console.warn('populateOptions failed', e); }
-    this.modal.classList.add('active');
+    openModal(this.modal);
     enterFullscreen();
   }
 
@@ -14345,7 +14400,7 @@ class RemoveAccountModal {
 
   open() {
     // called when the modal needs to be opened
-    this.modal.classList.add('active');
+    openModal(this.modal);
   }
 
   close() {
@@ -14460,7 +14515,7 @@ class RemoveAccountsModal {
   open() {
     this.renderAccounts();
     this.submitButton.disabled = true;
-    this.modal.classList.add('active');
+    openModal(this.modal);
   }
 
   close() {
@@ -14719,7 +14774,7 @@ class BackupAccountModal {
 
   open() {
     // called when the modal needs to be opened
-    this.modal.classList.add('active');
+    openModal(this.modal);
     
     // Show/hide checkbox based on login status
     if (myData) {
@@ -15676,7 +15731,7 @@ class RestoreAccountModal {
 
     // clear and show modal
     this.clearForm();
-    this.modal.classList.add('active');
+    openModal(this.modal);
   }
 
   close() {
@@ -15740,7 +15795,7 @@ class RestoreAccountModal {
       const tokenData = await backupModal.startGoogleDriveAuth();
       
       // Show picker modal and load files
-      this.pickerModal.classList.add('active');
+      openModal(this.pickerModal);
       this.pickerLoading.style.display = 'block';
       this.pickerFileList.style.display = 'none';
       this.pickerEmpty.style.display = 'none';
@@ -16429,7 +16484,7 @@ class TollModal {
   }
 
   open() {
-    this.modal.classList.add('active');
+    openModal(this.modal);
     // set currentTollValue to the toll value
     const toll = myData.settings.toll || 0n;
     const tollUnit = myData.settings.tollUnit || 'USD';
@@ -16771,7 +16826,7 @@ class InviteModal {
       }
     }
     this.validateInputs(); // Set initial button state
-    this.modal.classList.add('active');
+    openModal(this.modal);
   }
 
   close() {
@@ -16853,7 +16908,7 @@ class SourceModal {
   }
 
   open() {
-    this.modal.classList.add('active');
+    openModal(this.modal);
   }
 
   close() {
@@ -16895,7 +16950,7 @@ class AboutModal {
 
   open() {
     // Show the modal
-    this.modal.classList.add('active');
+    openModal(this.modal);
   }
 
   close() {
@@ -16956,7 +17011,7 @@ class UpdateWarningModal {
     } else {
       this.storeUrl = 'https://play.google.com/store/apps/details?id=com.jairaj.liberdus';
     }
-    this.modal.classList.add('active');
+    openModal(this.modal);
   }
 
   close() {
@@ -16998,7 +17053,7 @@ class HelpModal {
   }
 
   open() {
-    this.modal.classList.add('active');
+    openModal(this.modal);
   }
 
   close() {
@@ -17020,7 +17075,7 @@ class FarmModal {
   }
 
   open() {
-    this.modal.classList.add('active');
+    openModal(this.modal);
     enterFullscreen();
   }
 
@@ -17071,7 +17126,7 @@ class LogsModal {
   }
 
   open() {
-    this.modal.classList.add('active');
+    openModal(this.modal);
     // Fill the textarea with data and position the scroll to the bottom
     this.logsTextarea.value = this.data;
     this.logsTextarea.scrollTop = this.logsTextarea.scrollHeight;
@@ -17208,7 +17263,7 @@ class MyProfileModal {
 
   open() {
     // called when the modal needs to be opened
-    this.modal.classList.add('active');
+    openModal(this.modal);
     if (myData && myData.account) {
       this.name.value = myData.account.name || '';
       // Email and Phone fields hidden - may want to restore later
@@ -17377,7 +17432,7 @@ class ValidatorStakingModal {
     this.stakeButton.disabled = false;
 
     // Show the modal
-    this.modal.classList.add('active');
+    openModal(this.modal);
 
     this.updatePendingTxUi(this.getCurrentPendingStakeTx());
 
@@ -17954,7 +18009,7 @@ class StakeValidatorModal {
   }
 
   open() {
-    this.modal.classList.add('active');
+    openModal(this.modal);
 
     // Set the correct fill function for the staking context
     qrScanModal.fillFunction = this.fillFromQR.bind(this);
@@ -19540,7 +19595,7 @@ class ChatModal {
     this.loadDraft(address);
 
     // Show modal
-    this.modal.classList.add('active');
+    openModal(this.modal);
 
     // Clear unread count
     const totalUnread = contact.unread;
@@ -26065,7 +26120,7 @@ class CallInviteModal {
 
     this.contactsList.innerHTML = '';
     this.emptyState.style.display = 'none';
-    this.modal.classList.add('active');
+    openModal(this.modal);
 
     const currentChatAddress = chatModal.address || '';
     const myAddress = myAccount?.keys?.address || '';
@@ -26411,7 +26466,7 @@ class ShareAttachmentModal {
 
     this.contactsList.innerHTML = '';
     this.emptyState.style.display = 'none';
-    this.modal.classList.add('active');
+    openModal(this.modal);
 
     // Build contacts list (exclude self and current chat contact) and group by status
     const currentChatAddress = chatModal.address;
@@ -26858,7 +26913,7 @@ class ShareContactsModal {
     this.actionButton.style.display = 'none';
 
     // Show modal
-    this.modal.classList.add('active');
+    openModal(this.modal);
 
     // Check if account is private - show restriction message if so
     if (isPrivateAccount()) {
@@ -27356,7 +27411,7 @@ class ImportContactsModal {
     this.actionButton.style.display = 'none';
 
     // Show modal
-    this.modal.classList.add('active');
+    openModal(this.modal);
 
     // Check if account is private - show restriction message if so
     if (isPrivateAccount()) {
@@ -28113,7 +28168,7 @@ class CallScheduleChoiceModal {
 
   open(onSelect) {
     this.onSelect = onSelect;
-    this.modal?.classList.add('active');
+    openModal(this.modal);
     this._startRecipientTimeUpdates();
   }
 
@@ -28165,6 +28220,135 @@ class CallScheduleChoiceModal {
 
     this.recipientTime.textContent = `Recipient time: ${s}`;
     this.recipientTime.style.display = '';
+  }
+}
+
+/**
+ * Shared picker for whole-minute durations.
+ */
+class DurationPickerModal {
+  load() {
+    this.modal = document.getElementById('durationPickerModal');
+    if (!this.modal) return;
+    this.title = document.getElementById('durationPickerModalTitle');
+    this.form = document.getElementById('durationPickerForm');
+    this.daysSelect = document.getElementById('durationPickerDays');
+    this.hoursSelect = document.getElementById('durationPickerHours');
+    this.minutesSelect = document.getElementById('durationPickerMinutes');
+    this.preview = document.getElementById('durationPickerPreview');
+    this.submitButton = document.getElementById('confirmDurationPicker');
+    this.cancelButton = document.getElementById('cancelDurationPicker');
+    this.closeButton = document.getElementById('closeDurationPickerModal');
+
+    this.form?.addEventListener('submit', withButtonCooldown(
+      this.submitButton,
+      BUTTON_COOLDOWN_MS,
+      null,
+      () => this._submitValue(),
+    ));
+    this.form?.addEventListener('change', () => this._updateAvailableOptions());
+    this.cancelButton?.addEventListener('click', () => this.close());
+    this.closeButton?.addEventListener('click', () => this.close());
+  }
+
+  open({
+    initialDurationMs = 0,
+    maxDurationMs,
+    onDone,
+    title = 'Select Duration',
+    selectionFormatter = null,
+  }) {
+    if (typeof onDone !== 'function') throw new Error('Duration picker callback is required');
+    if (!Number.isSafeInteger(maxDurationMs) || maxDurationMs < 0) {
+      throw new Error('Duration picker maximum is required');
+    }
+    this.returnFocus = document.activeElement;
+    this.options = { maxDurationMs, onDone, selectionFormatter };
+    if (this.title) this.title.textContent = title;
+    this._populateOptions(maxDurationMs);
+    const safeInitialMs = Math.min(Math.max(0, initialDurationMs), maxDurationMs);
+    const initialParts = millisecondsToDurationParts(safeInitialMs) || { days: 0, hours: 0, minutes: 0 };
+    this.daysSelect.value = String(initialParts.days);
+    this.hoursSelect.value = String(initialParts.hours);
+    this.minutesSelect.value = String(initialParts.minutes);
+    openModal(this.modal);
+    this._updateAvailableOptions();
+    requestAnimationFrame(() => this.daysSelect?.focus());
+  }
+
+  close() {
+    this._closeWith(null);
+  }
+
+  _populateOptions(maxDurationMs) {
+    this.daysSelect.replaceChildren();
+    this.hoursSelect.replaceChildren();
+    this.minutesSelect.replaceChildren();
+    for (let day = 0; day <= DURATION_PICKER_MAX_DAYS; day++) {
+      this.daysSelect.add(new Option(String(day), String(day)));
+    }
+    for (let hour = 0; hour < 24; hour++) this.hoursSelect.add(new Option(String(hour), String(hour)));
+    for (let minute = 0; minute < 60; minute++) this.minutesSelect.add(new Option(String(minute), String(minute)));
+  }
+
+  _selectedDurationMs() {
+    return durationPartsToMilliseconds(
+      this.daysSelect?.value,
+      this.hoursSelect?.value,
+      this.minutesSelect?.value,
+    );
+  }
+
+  _updateAvailableOptions() {
+    const maxDurationMs = this.options?.maxDurationMs ?? 0;
+    const days = Number(this.daysSelect?.value || 0);
+    const hours = Number(this.hoursSelect?.value || 0);
+    Array.from(this.daysSelect?.options || []).forEach((option) => {
+      option.disabled = durationPartsToMilliseconds(Number(option.value), 0, 0) > maxDurationMs;
+    });
+    if (this.daysSelect?.selectedOptions[0]?.disabled) this.daysSelect.value = '0';
+    const selectedDays = Number(this.daysSelect?.value || days || 0);
+    Array.from(this.hoursSelect?.options || []).forEach((option) => {
+      option.disabled = durationPartsToMilliseconds(selectedDays, Number(option.value), 0) > maxDurationMs;
+    });
+    if (this.hoursSelect?.selectedOptions[0]?.disabled) this.hoursSelect.value = '0';
+    const selectedHours = Number(this.hoursSelect?.value || hours || 0);
+    Array.from(this.minutesSelect?.options || []).forEach((option) => {
+      option.disabled = durationPartsToMilliseconds(selectedDays, selectedHours, Number(option.value)) > maxDurationMs;
+    });
+    if (this.minutesSelect?.selectedOptions[0]?.disabled) this.minutesSelect.value = '0';
+    this._updatePreview();
+  }
+
+  _updatePreview() {
+    const durationMs = this._selectedDurationMs();
+    const selection = typeof this.options?.selectionFormatter === 'function'
+      ? this.options.selectionFormatter(durationMs)
+      : {
+        preview: `Duration: ${formatDurationParts(durationMs)} (${durationMs} ms)`,
+        submitLabel: `Submit: ${durationMs} ms`,
+      };
+    if (this.preview) this.preview.textContent = selection?.preview || '';
+    if (this.submitButton) this.submitButton.textContent = selection?.submitLabel || 'Submit';
+  }
+
+  _submitValue() {
+    const durationMs = this._selectedDurationMs();
+    if (!Number.isSafeInteger(durationMs) || durationMs < 0 || durationMs > this.options.maxDurationMs) {
+      showToast('Choose a duration within the allowed maximum', 2500, 'error');
+      return;
+    }
+    this._closeWith(durationMs);
+  }
+
+  _closeWith(value) {
+    this.modal?.classList.remove('active');
+    const onDone = this.options?.onDone;
+    const returnFocus = this.returnFocus;
+    this.options = null;
+    this.returnFocus = null;
+    if (onDone) onDone(value);
+    returnFocus?.focus();
   }
 }
 
@@ -28258,7 +28442,7 @@ class DateTimePickerModal {
         : '';
     }
 
-    this.modal?.classList.add('active');
+    openModal(this.modal);
     this.clockTimer.start();
     this._updatePreview();
     requestAnimationFrame(() => this.dateInput?.focus());
@@ -28407,6 +28591,7 @@ class DateTimePickerModal {
 const CALL_SCHEDULE_MAX_DAYS = 400;
 const callScheduleChoiceModal = new CallScheduleChoiceModal();
 const dateTimePickerModal = new DateTimePickerModal();
+const durationPickerModal = new DurationPickerModal();
 
 function openCallScheduleDatePicker(onDone) {
   const now = getCorrectedTimestamp();
@@ -29269,7 +29454,7 @@ class NewChatModal {
    * @returns {void}
    */
   openNewChatModal() {
-    this.modal.classList.add('active');
+    openModal(this.modal);
     footer.closeNewChatButton();
     this.usernameAvailable.style.display = 'none';
     this.submitButton.disabled = true;
@@ -29620,7 +29805,7 @@ class CreateAccountModal {
       this.migrateAccountsSection.style.display = 'none';
     }
 
-    this.modal.classList.add('active');
+    openModal(this.modal);
     enterFullscreen();
     // Delay focus to ensure transition completes (modal transition is 300ms)
     setTimeout(() => {
@@ -30148,6 +30333,8 @@ class SendAssetFormModal {
     this.submitButton.disabled = true;
     qrScanModal.fillFunction = this.fillFromQR.bind(this); // set function to handle filling the payment form from QR data
 
+    if (!openModal(this.modal)) return;
+
     if (this.username) {
       this.usernameInput.value = this.username;
       setTimeout(() => {
@@ -30172,7 +30359,6 @@ class SendAssetFormModal {
       this.assetSelectDropdown.value = assetKey;
       await this.handleAssetChange();
     }
-    this.modal.classList.add('active');
   }
 
   getSelectedNetwork() {
@@ -30992,7 +31178,7 @@ class SendAssetConfirmModal {
   }
 
   open() {
-    this.modal.classList.add('active');
+    openModal(this.modal);
   }
 
   close() {
@@ -31347,6 +31533,8 @@ class ReceiveModal {
     this.amountInput.value = '';
     this.memoInput.value = '';
 
+    if (!openModal(this.modal)) return;
+
     if (this.mode === 'evm') {
       await evmAssets.refresh();
       evmAssets.populateNetworkSelect(this.networkSelect, {
@@ -31362,7 +31550,6 @@ class ReceiveModal {
       this.assetSelect.value = assetKey;
       await this.handleAssetChange();
     }
-    this.modal.classList.add('active');
   }
 
   close() {
@@ -31656,7 +31843,7 @@ class FailedTransactionModal {
     this.txid = txid;
     //open.assetID = assetID;
 
-    this.modal.classList.add('active');
+    openModal(this.modal);
   }
 
   /**
@@ -31823,7 +32010,7 @@ class BridgeModal {
   }
 
   open() {
-    this.modal.classList.add('active');
+    openModal(this.modal);
     
     // Reset defaults
     this.direction = 'in';
@@ -31920,7 +32107,7 @@ class MigrateAccountsModal {
     try {
       await this.populateAccounts();
       if (createAccountModal.isCreatingAccount) return;
-      this.modal.classList.add('active');
+      openModal(this.modal);
     } finally {
       this.isOpening = false;
       createAccountModal.refreshControlStates();
@@ -32435,7 +32622,7 @@ class LockModal {
     this.clearInputs();
 
     // show the modal
-    this.modal.classList.add('active');
+    openModal(this.modal);
   }
 
   close() {
@@ -32668,7 +32855,7 @@ class UnlockModal {
   }
 
   open() {
-    this.modal.classList.add('active');
+    openModal(this.modal);
     setTimeout(() => this.updateButtonState(), 100);
   }
 
@@ -32774,7 +32961,7 @@ class LaunchModal {
   }
 
   open() {
-    this.modal.classList.add('active');
+    openModal(this.modal);
     this.hasShownBackupReminderThisOpen = false;
     this.urlInput.value = window.location.href.split('?')[0];
     this.updateButtonState();
@@ -35644,7 +35831,7 @@ const modalCloseHandlers = new Map([
     failedTransactionModal, bridgeModal, migrateAccountsModal, lockModal,
     unlockModal, launchModal, updateWarningModal, removeAccountModal,
     removeAccountsModal, secretModal, callsModal, groupCallParticipantsModal,
-    callScheduleChoiceModal, dateTimePickerModal, callInviteModal, shareAttachmentModal,
+    callScheduleChoiceModal, dateTimePickerModal, durationPickerModal, callInviteModal, shareAttachmentModal,
     chatSettingsModal, qrScanModal, backupModal, importModal,
     accountModal, validatorModal, stakeModal, messageSearchModal, contactSearchModal,
     importContactsModal, shareContactsModal,
@@ -35668,4 +35855,392 @@ function closeTopModal({ id: modalId }) {
 
   closeModal();
   return true;
+}
+
+class PopupSelect {
+  static MAX_MENU_WIDTH = 360;
+  static MIN_MENU_WIDTH = 280;
+  static TRIGGER_GAP = 6;
+  static VIEWPORT_MARGIN = 8;
+  static SCROLL_INDICATOR_INSET = 8;
+  static SCROLL_INDICATOR_RIGHT_INSET = 3;
+  static SCROLL_INDICATOR_WIDTH = 4;
+  static MIN_SCROLL_THUMB_HEIGHT = 24;
+  static generatedId = 0;
+  static activeSelect = null;
+  static activeIndex = -1;
+  static menu = null;
+  static scrollIndicator = null;
+  static scrollThumb = null;
+
+  static load() {
+    if (PopupSelect.menu) return;
+
+    PopupSelect.menu = document.getElementById('popupSelectListbox');
+    PopupSelect.scrollIndicator = document.getElementById('popupSelectScrollIndicator');
+    PopupSelect.scrollThumb = PopupSelect.scrollIndicator?.firstElementChild;
+    if (!PopupSelect.menu || !PopupSelect.scrollIndicator || !PopupSelect.scrollThumb) throw new Error('PopupSelect markup is missing');
+    document.addEventListener('pointerdown', PopupSelect.handleDocumentPointerDown, true);
+    document.addEventListener('click', PopupSelect.handleDocumentClick);
+    document.addEventListener('keydown', PopupSelect.handleDocumentKeyDown);
+    document.addEventListener('change', ({ target }) => PopupSelect.sync(target), true);
+    document.addEventListener('scroll', PopupSelect.handleDocumentScroll, { capture: true, passive: true });
+    window.addEventListener('resize', PopupSelect.hide);
+    window.visualViewport?.addEventListener('scroll', PopupSelect.hide, { passive: true });
+    window.visualViewport?.addEventListener('resize', PopupSelect.hide);
+    PopupSelect.menu.addEventListener('scroll', PopupSelect.updateScrollIndicator, { passive: true });
+  }
+
+  static handleDocumentPointerDown(event) {
+    const trigger = PopupSelect.getTrigger(PopupSelect.activeSelect);
+    if (
+      !trigger ||
+      trigger.contains(event.target) ||
+      PopupSelect.menu.contains(event.target)
+    ) return;
+
+    PopupSelect.hide();
+  }
+
+  static handleDocumentClick(event) {
+    const option = event.target.closest?.('.popup-select__option');
+    if (option && PopupSelect.menu.contains(option)) {
+      if (!PopupSelect.activeSelect || option.getAttribute('aria-disabled') === 'true') return;
+      PopupSelect.setActiveIndex(Number(option.dataset.optionIndex));
+      PopupSelect.selectActiveOption();
+      return;
+    }
+
+    const trigger = event.target.closest?.('.popup-select__trigger');
+    const select = PopupSelect.getSelect(trigger);
+    if (!select) return;
+
+    if (PopupSelect.activeSelect === select) PopupSelect.close();
+    else PopupSelect.open(select);
+  }
+
+  static handleDocumentKeyDown(event) {
+    const trigger = event.target.closest?.('.popup-select__trigger');
+    const select = PopupSelect.getSelect(trigger);
+    if (select && ['Enter', ' ', 'ArrowDown', 'ArrowUp'].includes(event.key)) {
+      event.preventDefault();
+      PopupSelect.open(select);
+      return;
+    }
+
+    if (PopupSelect.activeSelect && PopupSelect.menu.contains(event.target)) {
+      PopupSelect.handleMenuKeyDown(event);
+      return;
+    }
+
+    if (event.key !== 'Escape' || !PopupSelect.activeSelect) return;
+    event.preventDefault();
+    PopupSelect.close();
+  }
+
+  static handleDocumentScroll(event) {
+    if (!PopupSelect.activeSelect || event.target === PopupSelect.menu) return;
+    PopupSelect.hide();
+  }
+
+  static getTrigger(select) {
+    const trigger = select?.nextElementSibling;
+    return trigger?.classList.contains('popup-select__trigger') ? trigger : null;
+  }
+
+  static getSelect(trigger) {
+    const select = trigger?.previousElementSibling;
+    return select?.tagName === 'SELECT' ? select : null;
+  }
+
+  static getVisibleControl(control) {
+    return PopupSelect.getTrigger(control) || control;
+  }
+
+  static hide() {
+    const trigger = PopupSelect.getTrigger(PopupSelect.activeSelect);
+    if (!PopupSelect.activeSelect) return;
+
+    PopupSelect.activeSelect = null;
+    PopupSelect.activeIndex = -1;
+    trigger?.setAttribute('aria-expanded', 'false');
+    PopupSelect.menu.hidden = true;
+    PopupSelect.scrollIndicator.hidden = true;
+  }
+
+  static close() {
+    if (!PopupSelect.activeSelect) return;
+    const trigger = PopupSelect.getTrigger(PopupSelect.activeSelect);
+
+    PopupSelect.hide();
+    trigger?.focus({ preventScroll: true });
+  }
+
+  static enhance(select) {
+    if (select?.tagName !== 'SELECT') throw new TypeError('PopupSelect requires a select element');
+    if (!PopupSelect.menu) throw new Error('PopupSelect.load() must be called before creating controls');
+    if (PopupSelect.getTrigger(select)) return;
+
+    const label = select.labels?.[0] || null;
+    if (!select.id) select.id = `popupSelect${++PopupSelect.generatedId}`;
+    if (label && !label.id) label.id = `${select.id}PopupLabel`;
+    const trigger = PopupSelect.createTrigger(select, label);
+
+    select.classList.add('sr-only');
+    select.setAttribute('aria-hidden', 'true');
+    select.tabIndex = -1;
+    select.insertAdjacentElement('afterend', trigger);
+    if (label) label.htmlFor = trigger.id;
+
+    PopupSelect.sync(select);
+  }
+
+  static createTrigger(select, label) {
+    const trigger = document.createElement('button');
+    trigger.id = `${select.id}PopupTrigger`;
+    trigger.className = 'form-control popup-select__trigger';
+    trigger.type = 'button';
+    trigger.setAttribute('role', 'combobox');
+    trigger.setAttribute('aria-haspopup', 'listbox');
+    trigger.setAttribute('aria-expanded', 'false');
+    trigger.setAttribute('aria-controls', PopupSelect.menu.id);
+    if (select.required) trigger.setAttribute('aria-required', 'true');
+
+    const accessibleName = select.getAttribute('aria-label');
+    const describedBy = select.getAttribute('aria-describedby');
+    if (accessibleName) trigger.setAttribute('aria-label', accessibleName);
+    else if (label) trigger.setAttribute('aria-labelledby', `${label.id} ${trigger.id}Value`);
+    if (describedBy) trigger.setAttribute('aria-describedby', describedBy);
+
+    trigger.innerHTML = `
+      <span id="${trigger.id}Value" class="popup-select__value"></span>
+      <span class="popup-select__chevron" aria-hidden="true"></span>
+    `;
+
+    return trigger;
+  }
+
+  static renderMenu() {
+    const select = PopupSelect.activeSelect;
+    if (!select) return;
+
+    const trigger = PopupSelect.getTrigger(select);
+    const accessibleName = select.getAttribute('aria-label');
+    const labelledBy = trigger?.labels?.[0]?.id;
+    PopupSelect.menu.removeAttribute('aria-label');
+    PopupSelect.menu.removeAttribute('aria-labelledby');
+    PopupSelect.menu.removeAttribute('aria-activedescendant');
+    if (accessibleName) PopupSelect.menu.setAttribute('aria-label', accessibleName);
+    else if (labelledBy) PopupSelect.menu.setAttribute('aria-labelledby', labelledBy);
+
+    PopupSelect.menu.replaceChildren();
+    PopupSelect.menu.scrollTop = 0;
+    [...select.options].forEach((option, index) => {
+      const item = document.createElement('div');
+      item.id = `${PopupSelect.menu.id}Option${index}`;
+      item.className = 'popup-select__option';
+      item.dataset.optionIndex = String(index);
+      item.setAttribute('role', 'option');
+      item.setAttribute('aria-selected', String(index === select.selectedIndex));
+      if (option.disabled) item.setAttribute('aria-disabled', 'true');
+
+      const label = document.createElement('span');
+      label.className = 'popup-select__option-label';
+      label.textContent = option.textContent;
+      item.append(label);
+      PopupSelect.menu.append(item);
+    });
+  }
+
+  static sync(select) {
+    const trigger = PopupSelect.getTrigger(select);
+    if (!trigger) return;
+
+    const selectedText = select.options[select.selectedIndex]?.textContent || '';
+    trigger.querySelector('.popup-select__value').textContent = selectedText;
+    const accessibleName = select.getAttribute('aria-label');
+    if (accessibleName) trigger.setAttribute('aria-label', `${accessibleName}: ${selectedText}`);
+    trigger.disabled = select.disabled;
+    if (PopupSelect.activeSelect !== select) return;
+
+    PopupSelect.renderMenu();
+    PopupSelect.activeIndex = select.selectedIndex >= 0 && !select.options[select.selectedIndex].disabled
+      ? select.selectedIndex
+      : PopupSelect.findEnabledIndex(0, 1);
+    if (!PopupSelect.menu.hidden) PopupSelect.setActiveIndex(PopupSelect.activeIndex);
+  }
+
+  static open(select) {
+    const trigger = PopupSelect.getTrigger(select);
+    if (!trigger || PopupSelect.activeSelect === select || select.disabled || select.options.length === 0) return;
+
+    PopupSelect.hide();
+    PopupSelect.activeSelect = select;
+    PopupSelect.sync(select);
+    trigger.setAttribute('aria-expanded', 'true');
+    PopupSelect.menu.hidden = false;
+
+    PopupSelect.positionMenu();
+    PopupSelect.menu.focus({ preventScroll: true });
+    PopupSelect.setActiveIndex(PopupSelect.activeIndex);
+  }
+
+  static focus(control) {
+    PopupSelect.getVisibleControl(control)?.focus({ preventScroll: true });
+  }
+
+  static findEnabledIndex(index, direction) {
+    const options = PopupSelect.activeSelect.options;
+    while (index >= 0 && index < options.length) {
+      if (!options[index].disabled) return index;
+      index += direction;
+    }
+    return -1;
+  }
+
+  static setActiveIndex(index) {
+    if (!PopupSelect.activeSelect || index < 0 || PopupSelect.activeSelect.options[index]?.disabled) return;
+
+    PopupSelect.activeIndex = index;
+    PopupSelect.menu.querySelectorAll('.popup-select__option').forEach((item, itemIndex) => {
+      item.classList.toggle('is-active', itemIndex === index);
+    });
+
+    const activeOption = PopupSelect.menu.querySelector(`[data-option-index="${index}"]`);
+    if (!activeOption) return;
+    PopupSelect.menu.setAttribute('aria-activedescendant', activeOption.id);
+    const optionBottom = activeOption.offsetTop + activeOption.offsetHeight;
+    if (activeOption.offsetTop < PopupSelect.menu.scrollTop) {
+      PopupSelect.menu.scrollTop = activeOption.offsetTop;
+    } else if (optionBottom > PopupSelect.menu.scrollTop + PopupSelect.menu.clientHeight) {
+      PopupSelect.menu.scrollTop = optionBottom - PopupSelect.menu.clientHeight;
+    }
+    PopupSelect.updateScrollIndicator();
+  }
+
+  static selectActiveOption() {
+    const select = PopupSelect.activeSelect;
+    const option = select?.options[PopupSelect.activeIndex];
+    if (!option || option.disabled) return;
+
+    const changed = select.selectedIndex !== PopupSelect.activeIndex;
+    select.selectedIndex = PopupSelect.activeIndex;
+    PopupSelect.close();
+    if (changed) {
+      select.dispatchEvent(new Event('input', { bubbles: true }));
+      select.dispatchEvent(new Event('change', { bubbles: true }));
+    }
+  }
+
+  static positionMenu() {
+    const trigger = PopupSelect.getTrigger(PopupSelect.activeSelect);
+    if (!trigger) return;
+
+    const triggerRect = trigger.getBoundingClientRect();
+    const visualViewport = window.visualViewport;
+    const viewport = {
+      left: visualViewport?.offsetLeft ?? 0,
+      top: visualViewport?.offsetTop ?? 0,
+      right: (visualViewport?.offsetLeft ?? 0) + (visualViewport?.width ?? window.innerWidth),
+      bottom: (visualViewport?.offsetTop ?? 0) + (visualViewport?.height ?? window.innerHeight),
+    };
+    const availableWidth = Math.max(0, viewport.right - viewport.left - PopupSelect.VIEWPORT_MARGIN * 2);
+    const menuWidth = Math.min(
+      Math.max(Math.ceil(triggerRect.width), PopupSelect.MIN_MENU_WIDTH),
+      PopupSelect.MAX_MENU_WIDTH,
+      availableWidth,
+    );
+
+    PopupSelect.menu.style.width = `${menuWidth}px`;
+    PopupSelect.menu.style.maxHeight = '';
+    const desiredHeight = PopupSelect.menu.getBoundingClientRect().height;
+    const spaceBelow = Math.max(
+      0,
+      viewport.bottom - PopupSelect.VIEWPORT_MARGIN - triggerRect.bottom - PopupSelect.TRIGGER_GAP,
+    );
+    const spaceAbove = Math.max(
+      0,
+      triggerRect.top - viewport.top - PopupSelect.VIEWPORT_MARGIN - PopupSelect.TRIGGER_GAP,
+    );
+    const opensAbove = spaceBelow < desiredHeight && spaceAbove > spaceBelow;
+    const availableHeight = opensAbove ? spaceAbove : spaceBelow;
+
+    PopupSelect.menu.style.maxHeight = `${Math.floor(Math.min(desiredHeight, availableHeight))}px`;
+    const menuRect = PopupSelect.menu.getBoundingClientRect();
+    const minLeft = viewport.left + PopupSelect.VIEWPORT_MARGIN;
+    const maxLeft = viewport.right - PopupSelect.VIEWPORT_MARGIN - menuRect.width;
+    const left = Math.max(minLeft, Math.min(maxLeft, triggerRect.left));
+    const top = opensAbove
+      ? triggerRect.top - PopupSelect.TRIGGER_GAP - menuRect.height
+      : triggerRect.bottom + PopupSelect.TRIGGER_GAP;
+
+    PopupSelect.menu.dataset.placement = opensAbove ? 'above' : 'below';
+    PopupSelect.menu.style.left = `${Math.round(left)}px`;
+    PopupSelect.menu.style.top = `${Math.round(top)}px`;
+    PopupSelect.updateScrollIndicator();
+  }
+
+  static updateScrollIndicator() {
+    const scrollRange = PopupSelect.menu.scrollHeight - PopupSelect.menu.clientHeight;
+    if (!PopupSelect.activeSelect || scrollRange <= 1) {
+      PopupSelect.scrollIndicator.hidden = true;
+      return;
+    }
+
+    const menuRect = PopupSelect.menu.getBoundingClientRect();
+    const trackHeight = Math.max(0, menuRect.height - PopupSelect.SCROLL_INDICATOR_INSET * 2);
+    const thumbHeight = Math.min(
+      trackHeight,
+      Math.max(
+        PopupSelect.MIN_SCROLL_THUMB_HEIGHT,
+        trackHeight * (PopupSelect.menu.clientHeight / PopupSelect.menu.scrollHeight),
+      ),
+    );
+    const thumbTravel = Math.max(0, trackHeight - thumbHeight);
+    const scrollProgress = Math.min(1, Math.max(0, PopupSelect.menu.scrollTop / scrollRange));
+    const thumbTop = thumbTravel * scrollProgress;
+
+    PopupSelect.scrollIndicator.hidden = false;
+    PopupSelect.scrollIndicator.style.height = `${Math.round(trackHeight)}px`;
+    PopupSelect.scrollIndicator.style.left = `${Math.round(
+      menuRect.right - PopupSelect.SCROLL_INDICATOR_RIGHT_INSET - PopupSelect.SCROLL_INDICATOR_WIDTH,
+    )}px`;
+    PopupSelect.scrollIndicator.style.top = `${Math.round(menuRect.top + PopupSelect.SCROLL_INDICATOR_INSET)}px`;
+    PopupSelect.scrollThumb.style.height = `${Math.round(thumbHeight)}px`;
+    PopupSelect.scrollThumb.style.top = `${Math.round(thumbTop)}px`;
+  }
+
+  static handleMenuKeyDown(event) {
+    switch (event.key) {
+      case 'ArrowDown':
+        event.preventDefault();
+        PopupSelect.setActiveIndex(PopupSelect.findEnabledIndex(PopupSelect.activeIndex + 1, 1));
+        break;
+      case 'ArrowUp':
+        event.preventDefault();
+        PopupSelect.setActiveIndex(PopupSelect.findEnabledIndex(PopupSelect.activeIndex - 1, -1));
+        break;
+      case 'Home':
+        event.preventDefault();
+        PopupSelect.setActiveIndex(PopupSelect.findEnabledIndex(0, 1));
+        break;
+      case 'End':
+        event.preventDefault();
+        PopupSelect.setActiveIndex(PopupSelect.findEnabledIndex(PopupSelect.activeSelect.options.length - 1, -1));
+        break;
+      case 'Enter':
+      case ' ':
+        event.preventDefault();
+        PopupSelect.selectActiveOption();
+        break;
+      case 'Escape':
+        event.preventDefault();
+        event.stopPropagation();
+        PopupSelect.close();
+        break;
+      case 'Tab':
+        PopupSelect.close();
+        break;
+    }
+  }
 }

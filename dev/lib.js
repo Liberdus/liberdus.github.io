@@ -273,6 +273,50 @@ export function escapeHtml(str) {
 export const BUTTON_COOLDOWN_MS = 2000;
 export const FAUCET_COOLDOWN_MS = 5000;
 
+const MODAL_TRANSITION_FALLBACK_MS = 1000;
+let openingModal = null;
+let modalTransitionTimeout = null;
+let modalTransitionListenersInstalled = false;
+
+function finishModalTransition(modal) {
+    if (modal !== openingModal) return;
+
+    if (modalTransitionTimeout !== null) {
+        clearTimeout(modalTransitionTimeout);
+        modalTransitionTimeout = null;
+    }
+
+    openingModal = null;
+    if (modal.classList.contains('active')) modal.classList.add('is-transition-complete');
+}
+
+function handleModalTransitionComplete(event) {
+    if (event.target !== openingModal || event.propertyName !== 'opacity') return;
+    finishModalTransition(event.target);
+}
+
+export function installModalTransitionListeners() {
+    if (modalTransitionListenersInstalled) return;
+    modalTransitionListenersInstalled = true;
+    document.addEventListener('transitionend', handleModalTransitionComplete);
+    document.addEventListener('transitioncancel', handleModalTransitionComplete);
+}
+
+/**
+ * Activates one modal at a time and ignores overlapping requests.
+ * @param {HTMLElement|null|undefined} modal - Modal element to activate
+ * @returns {boolean} Whether the modal was activated
+ */
+export function openModal(modal) {
+    if (!modal || openingModal || modal.classList.contains('active')) return false;
+
+    openingModal = modal;
+    modal.classList.remove('is-transition-complete');
+    modal.classList.add('active');
+    modalTransitionTimeout = setTimeout(() => finishModalTransition(modal), MODAL_TRANSITION_FALLBACK_MS);
+    return true;
+}
+
 /**
  * Wraps an async handler so the given buttons are disabled for a minimum cooldown (ms).
  * If the handler takes longer than ms, cooldown lifts as soon as the handler finishes.
