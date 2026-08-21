@@ -1716,10 +1716,8 @@ class EvmSendFormAdapter {
     this.amountInput = document.getElementById('sendAmount');
     this.submitButton = this.sendForm?.querySelector('button[type="submit"]');
     this.networkSelect = document.getElementById('sendNetwork');
-    this.networkGroup = document.getElementById('sendNetworkGroup');
     this.networkStatus = document.getElementById('sendNetworkStatus');
     this.assetSelectDropdown = document.getElementById('sendAsset');
-    this.assetGroup = this.assetSelectDropdown?.closest('.form-group');
     this.balanceWarning = document.getElementById('balanceWarning');
     this.usernameAvailable = document.getElementById('sendToAddressError');
     this.closeButton = document.getElementById('closeSendAssetFormModal');
@@ -1839,7 +1837,6 @@ class EvmSendFormAdapter {
     clearTimeout(this.refreshTimer);
     this.refreshTimer = setTimeout(() => {
       if (!this.modal?.classList.contains('active') || !this.isEvmSelected()) return;
-      this.updateNetworkStatus();
       this.controller.refreshSendButtonState(this);
     }, 0);
   }
@@ -1852,10 +1849,8 @@ class EvmSendFormAdapter {
     this.usernameInput.placeholder = 'Enter username or 0x wallet address';
   }
 
-  applyContext({ networkId = null, assetKey = null } = {}) {
+  applyContext() {
     this.clearRecipientLookup();
-    if (this.networkGroup) this.networkGroup.hidden = Boolean(networkId);
-    if (this.assetGroup) this.assetGroup.hidden = Boolean(networkId && assetKey);
     this.updateNetworkStatus();
     this.scheduleRefresh();
   }
@@ -1863,7 +1858,6 @@ class EvmSendFormAdapter {
   resetContext() {
     clearTimeout(this.refreshTimer);
     this.clearRecipientLookup();
-    if (this.assetGroup) this.assetGroup.hidden = false;
   }
 
   async handleSubmit(event) {
@@ -2000,35 +1994,12 @@ class EvmAssetsController {
       amount,
     });
   }
-  async openContextualSend(options) {
-    await this.openSend(options);
-    this.sendFormAdapter.applyContext(options);
+  openContextualSend(options) {
+    const opening = this.openSend(options);
+    this.sendFormAdapter.applyContext();
+    return opening;
   }
-  async openContextualReceive(options) {
-    await this.openReceive(options);
-    this.applyContextualSelectors('receive', options);
-  }
-  applyContextualSelectors(prefix, { networkId = null, assetKey = null } = {}) {
-    const modal = document.getElementById(`${prefix}Modal`);
-    const networkGroup = document.getElementById(`${prefix}NetworkGroup`);
-    const assetSelect = document.getElementById(`${prefix}Asset`);
-    const assetGroup = assetSelect?.closest('.form-group');
-    if (networkGroup) networkGroup.hidden = Boolean(networkId);
-    if (assetGroup) assetGroup.hidden = Boolean(networkId && assetKey);
-    const closeButton = document.getElementById(`close${prefix[0].toUpperCase()}${prefix.slice(1)}Modal`);
-    closeButton?.addEventListener('click', () => {
-      if (assetGroup) assetGroup.hidden = false;
-    }, { once: true });
-    if (modal && assetGroup && globalThis.MutationObserver) {
-      const observer = new MutationObserver(() => {
-        if (!modal.classList.contains('active')) {
-          assetGroup.hidden = false;
-          observer.disconnect();
-        }
-      });
-      observer.observe(modal, { attributes: true, attributeFilter: ['class'] });
-    }
-  }
+  openContextualReceive(options) { return this.openReceive(options); }
   refreshSendButtonState(form) {
     const resolution = form.getResolvedRecipient();
     const amount = form.amountInput.value.trim();
@@ -2092,58 +2063,6 @@ class EvmAssetsController {
       await form.refreshSendButtonDisabledState();
     }
   }
-  async prepareFormNetwork({
-    mode = 'liberdus',
-    networkId = null,
-    assetKey = null,
-    networkGroup,
-    networkSelect,
-    assetSelect,
-    beforeLiberdus,
-  } = {}) {
-    const isEvm = mode === 'evm';
-    const hasSelectedNetwork = isEvm && Boolean(networkId);
-
-    if (networkGroup) {
-      networkGroup.hidden = !isEvm || hasSelectedNetwork;
-    }
-    const hasSelectedAsset = isEvm && Boolean(networkId) && Boolean(assetKey);
-    const assetGroup = assetSelect?.closest('.form-group');
-    if (assetGroup) {
-      assetGroup.hidden = hasSelectedAsset;
-    }
-
-    if (isEvm) {
-      await this.refresh();
-      this.populateNetworkSelect(networkSelect, {
-        selectedId: networkId || 'ethereum',
-        evmOnly: true,
-      });
-      return;
-    }
-
-    if (typeof beforeLiberdus === 'function') {
-      await beforeLiberdus();
-    }
-    this.rebuildCatalog();
-    this.populateNetworkSelect(networkSelect, { selectedId: 'liberdus' });
-  }
-
-  applySelectedAsset({ mode = 'liberdus', assetKey = null, assetSelect } = {}) {
-    if (!assetSelect || !assetKey) return false;
-
-    const hasSelectedAsset = mode === 'evm'
-      && [...assetSelect.options].some((option) => option.value === assetKey);
-    const assetGroup = assetSelect.closest('.form-group');
-    if (assetGroup) {
-      assetGroup.hidden = hasSelectedAsset;
-    }
-    if (hasSelectedAsset) {
-      assetSelect.value = assetKey;
-    }
-    return hasSelectedAsset;
-  }
-
   getConnectionText() { return this.discovery.getConnectionText(); }
   formatTokenAmount(value) { return formatConnectedTokenAmount(value); }
 }
