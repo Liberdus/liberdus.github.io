@@ -1323,8 +1323,12 @@ class AssetsModal {
     const visibleNetworks = selectedNetworkId === 'all'
       ? catalog
       : catalog.filter((walletNetwork) => walletNetwork.id === selectedNetworkId);
+    const assetUsdValue = ({ asset }) => asset.tokenValueUsd === null ? -Infinity : Number(asset.tokenValueUsd);
+    const visibleAssets = visibleNetworks
+      .flatMap((walletNetwork) => walletNetwork.assets.map((asset) => ({ walletNetwork, asset })))
+      .sort((left, right) => assetUsdValue(right) - assetUsdValue(left));
 
-    if (visibleNetworks.length === 0) {
+    if (visibleAssets.length === 0) {
       this.assetsList.innerHTML = `
         <div class="empty-state">
           <div></div>
@@ -1335,18 +1339,9 @@ class AssetsModal {
       return;
     }
 
-    this.assetsList.innerHTML = visibleNetworks.map((walletNetwork) => `
-      <section class="wallet-network-assets" data-network-id="${escapeHtml(walletNetwork.id)}">
-        <div class="wallet-network-row">
-          <div>
-            <div class="wallet-network-name">${escapeHtml(walletNetwork.name)}</div>
-            <div class="wallet-network-chain">Chain ID ${escapeHtml(String(walletNetwork.chainId ?? '—'))}</div>
-          </div>
-          <span class="wallet-network-status ${walletNetwork.connected ? 'connected' : 'available'}">
-            ${walletNetwork.connected ? 'Connected' : 'Ready'}
-          </span>
-        </div>
-        ${walletNetwork.assets.map((asset) => `
+    this.assetsList.innerHTML = `
+      <section class="wallet-network-assets">
+        ${visibleAssets.map(({ walletNetwork, asset }) => `
           <button
             type="button"
             class="asset-item connected-asset-item connected-asset-button"
@@ -1359,6 +1354,7 @@ class AssetsModal {
             </div>
             <div class="asset-info">
               <div class="asset-name">${escapeHtml(asset.tokenName)}</div>
+              <div class="wallet-network-chain">${escapeHtml(walletNetwork.name)}</div>
               <div class="asset-symbol">
                 ${asset.tokenPriceUsd === null ? '<span style="color: var(--danger-color)">$0</span>' : `${formatConnectedUsd(asset.tokenPriceUsd)} / ${escapeHtml(asset.tokenSymbol)}`}
               </div>
@@ -1371,7 +1367,7 @@ class AssetsModal {
           </button>
         `).join('')}
       </section>
-    `).join('');
+    `;
   }
 }
 
@@ -1449,7 +1445,7 @@ class AssetDetailsModal {
     const amountText = `${formatConnectedTokenAmount(asset.tokenAmount)} ${asset.tokenSymbol}`;
 
     this.title.textContent = asset.tokenSymbol;
-    this.symbol.textContent = asset.tokenName;
+    this.symbol.textContent = `${asset.tokenName} price`;
     this.price.textContent = priceText;
     this.price.style.color = asset.tokenPriceUsd === null ? 'var(--danger-color)' : '';
     this.updated.textContent = formatAssetDetailsUpdatedAt(this.controller.getUpdatedAt());
@@ -1889,6 +1885,7 @@ class EvmAssetsController {
     this.openSend = () => {};
     this.openReceive = () => {};
     this.showToast = () => {};
+    this.syncSelect = () => {};
     this.confirmationModal = new EvmSendConfirmationModal();
     this.confirmTransfer = (...args) => this.confirmationModal.confirm(...args);
     this.loaded = false;
@@ -1918,6 +1915,7 @@ class EvmAssetsController {
     openReceive,
     showToast,
     confirmTransfer,
+    syncSelect,
   } = {}) {
     if (typeof getAccount === 'function') this.getAccount = getAccount;
     if (typeof getLiberdusAsset === 'function') this.getLiberdusAsset = getLiberdusAsset;
@@ -1925,6 +1923,7 @@ class EvmAssetsController {
     if (typeof openReceive === 'function') this.openReceive = openReceive;
     if (typeof showToast === 'function') this.showToast = showToast;
     if (typeof confirmTransfer === 'function') this.confirmTransfer = confirmTransfer;
+    if (typeof syncSelect === 'function') this.syncSelect = syncSelect;
   }
 
   load() {
@@ -1970,10 +1969,12 @@ class EvmAssetsController {
     return this.discovery.findAsset(networkId, assetKey, options);
   }
   populateNetworkSelect(select, options) {
-    return this.discovery.populateNetworkSelect(select, options);
+    this.discovery.populateNetworkSelect(select, options);
+    this.syncSelect(select);
   }
   populateAssetSelect(select, networkId) {
-    return this.discovery.populateAssetSelect(select, networkId);
+    this.discovery.populateAssetSelect(select, networkId);
+    this.syncSelect(select);
   }
   validateTransfer({ networkId, assetKey, recipient, amount }) {
     const { walletNetwork, asset } = this.findAsset(networkId, assetKey, { evmOnly: true });
