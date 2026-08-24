@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'd'
+const version = 'e'
 const BOOT_SPLASH_HANDOFF_MS = 1000;
 let myVersion = '0';
 async function checkVersion() {
@@ -91,11 +91,13 @@ import {
   daoRepo,
   DAO_STATES,
   getDaoFinalVoteResult,
+  getDaoNotificationSummary,
   getDaoTransactionMessage,
   getDaoTrackedProposalMetadataEntries,
   getDaoProposalClaimWindow,
   getDaoPendingFinalizationOutcome,
   getDaoProposalTimeline,
+  getDaoVoteReminderSchedule,
   getDaoRewardClaimStatus,
   getDaoStateLabel,
   getDaoTypeForLifecycleKind,
@@ -411,6 +413,9 @@ function newDataRecord(myAccount) {
     },
     contacts: {},
     daoUserVotes: {},
+    daoNotifications: {
+      lastDaoOpenedAt: 0,
+    },
     chats: [],
     wallet: {
       networth: 0.0,
@@ -461,6 +466,8 @@ function clearMyData() {
   myAccount = null;
   evmAssets.reset();
   daoRepo.reset();
+  daoModal.resetNotificationState();
+  resetDaoNotificationSummary();
 }
 
 /**
@@ -1420,11 +1427,13 @@ class Header {
     this.menuButton = document.getElementById('toggleMenu');
     this.settingsButton = document.getElementById('toggleSettings');
     this.upcomingCallsBtn = document.getElementById('upcomingCallsBtn');
+    this.daoNotificationsButton = document.getElementById('daoNotificationsBtn');
 
     this.logoLink.addEventListener('keydown', ignoreShiftTabKey); // add event listener for first-item to prevent shift+tab
     this.menuButton.addEventListener('click', () => menuModal.open());
     this.settingsButton.addEventListener('click', () => settingsModal.open());
     this.upcomingCallsBtn.addEventListener('click', () => callsModal.open());
+    this.daoNotificationsButton.addEventListener('click', () => daoModal.open());
     
     // Add click event for whole name container
     this.nameContainer.addEventListener('click', () => {
@@ -1487,6 +1496,23 @@ class Header {
     } else {
       this.upcomingCallsBtn.classList.remove('upcoming-calls-glow');
     }
+  }
+
+  updateDaoNotificationsIcon() {
+    if (!this.daoNotificationsButton) return;
+
+    const hasVoting = hasDaoVotingNotifications(daoNotificationSummary);
+    const hasClaim = hasDaoClaimNotifications(daoNotificationSummary);
+    const hasNotifications = hasVoting || hasClaim;
+    let label = 'Open DAO notifications';
+    if (hasVoting && hasClaim) label = 'Open DAO voting and claim notifications';
+    else if (hasVoting) label = 'Open DAO voting notifications';
+    else if (hasClaim) label = 'Open DAO claim notifications';
+
+    this.daoNotificationsButton.hidden = !hasNotifications;
+    this.daoNotificationsButton.classList.toggle('dao-notification-glow', hasNotifications);
+    this.daoNotificationsButton.title = label;
+    this.daoNotificationsButton.setAttribute('aria-label', label);
   }
 
 }
@@ -2486,6 +2512,87 @@ const daoProposalVoteTracker = createDaoProposalVoteTracker({
   },
 });
 
+function createEmptyDaoNotificationSummary() {
+  return {
+    newVoting: [],
+    endedVoting: [],
+    finalizedTrackedVote: [],
+  };
+}
+
+function copyDaoNotificationSummary(summary) {
+  return {
+    newVoting: [...summary.newVoting],
+    endedVoting: [...summary.endedVoting],
+    finalizedTrackedVote: [...summary.finalizedTrackedVote],
+  };
+}
+
+function mergeDaoNotificationSummaries(current, incoming) {
+  return {
+    newVoting: [...new Set([...current.newVoting, ...incoming.newVoting])],
+    endedVoting: [...new Set([...current.endedVoting, ...incoming.endedVoting])],
+    finalizedTrackedVote: [...new Set([
+      ...current.finalizedTrackedVote,
+      ...incoming.finalizedTrackedVote,
+    ])],
+  };
+}
+
+function getDaoNotificationProposalNumbers(summary) {
+  return new Set([
+    ...summary.newVoting,
+    ...summary.endedVoting,
+    ...summary.finalizedTrackedVote,
+  ]);
+}
+
+function hasDaoVotingNotifications(summary) {
+  return summary.newVoting.length > 0 || summary.endedVoting.length > 0;
+}
+
+function hasDaoClaimNotifications(summary) {
+  return summary.finalizedTrackedVote.length > 0;
+}
+
+function getDaoNotificationInitialFilter(summary) {
+  if (hasDaoClaimNotifications(summary)) return 'claimable';
+  if (hasDaoVotingNotifications(summary)) return 'voting';
+  return '';
+}
+
+let daoNotificationSummary = createEmptyDaoNotificationSummary();
+
+function resetDaoNotificationSummary() {
+  daoNotificationSummary = createEmptyDaoNotificationSummary();
+  header.updateDaoNotificationsIcon();
+}
+
+async function refreshDaoNotificationSummary() {
+  const accountData = myData;
+  if (!accountData) {
+    resetDaoNotificationSummary();
+    return false;
+  }
+
+  try {
+    await daoRepo.refresh({ force: true });
+    if (accountData !== myData) return false;
+
+    daoNotificationSummary = getDaoNotificationSummary({
+      metadataEntries: daoRepo.getProposalMetaForUi(),
+      daoUserVotes: accountData.daoUserVotes,
+      lastDaoOpenedAt: accountData.daoNotifications?.lastDaoOpenedAt || 0,
+      now: getTransactionTimestamp(),
+    });
+    header.updateDaoNotificationsIcon();
+    return true;
+  } catch (error) {
+    console.warn('Failed to refresh DAO notifications:', error);
+    return false;
+  }
+}
+
 const DAO_PROPOSAL_PAGE_SIZE = 10;
 const DAO_ALL_FILTER = { key: 'all', label: 'All' };
 const DAO_CLAIMABLE_FILTER = { key: 'claimable', label: 'Claimable' };
@@ -2549,6 +2656,8 @@ class DaoModal {
     this.visibleProposalCount = DAO_PROPOSAL_PAGE_SIZE;
     this.detailsRequest = null;
     this.proposalOpenSequence = 0;
+    this.notificationBatch = createEmptyDaoNotificationSummary();
+    this.notificationProposalNumbers = new Set();
   }
 
   load() {
@@ -2584,12 +2693,19 @@ class DaoModal {
     }
   }
 
-  open() {
+  open(initialFilterKey = '') {
     assert(getDaoCurrentAccountAddress(), 'DAO modal requires an active account');
-    this._open();
+    const filterKey = initialFilterKey || getDaoNotificationInitialFilter(daoNotificationSummary);
+    assert(!filterKey || DAO_FILTER_OPTIONS.some((filter) => filter.key === filterKey), 'Unknown DAO initial filter');
+    const incomingNotifications = copyDaoNotificationSummary(daoNotificationSummary);
+    this.notificationBatch = mergeDaoNotificationSummaries(this.notificationBatch, incomingNotifications);
+    for (const proposalNumber of getDaoNotificationProposalNumbers(incomingNotifications)) {
+      this.notificationProposalNumbers.add(proposalNumber);
+    }
+    this._open(filterKey);
   }
 
-  async _open() {
+  async _open(initialFilterKey) {
     const refreshId = ++this.refreshSequence;
     this.openRefreshId = refreshId;
     this.proposalOpenSequence += 1;
@@ -2602,14 +2718,15 @@ class DaoModal {
     openModal(this.modal);
     enterFullscreen();
 
-    // Default filter is Voting
-    this.selectedFilterKey = this.selectedFilterKey || 'voting';
+    this.selectedFilterKey = initialFilterKey || this.selectedFilterKey || 'voting';
     this.visibleProposalCount = DAO_PROPOSAL_PAGE_SIZE;
     this.render();
 
+    const notificationCutoff = getCorrectedTimestamp();
     try {
       await daoRepo.refresh({ force: true });
       if (!this.isActive() || refreshId !== this.openRefreshId) return;
+      this.acknowledgeNotifications(notificationCutoff);
       const refreshedClaimProposalNumbers = await this.syncTrackedClaimWindows();
       if (!this.isActive() || refreshId !== this.openRefreshId) return;
       this.refreshState = 'ready';
@@ -2649,6 +2766,45 @@ class DaoModal {
 
   isActive() {
     return this.modal.classList.contains('active');
+  }
+
+  resetNotificationState() {
+    this.notificationBatch = createEmptyDaoNotificationSummary();
+    this.notificationProposalNumbers.clear();
+  }
+
+  acknowledgeNotifications(notificationCutoff) {
+    if (!myData) return;
+
+    const lastOpenedAt = Number(myData.daoNotifications?.lastDaoOpenedAt) || 0;
+    myData.daoNotifications = {
+      lastDaoOpenedAt: Math.max(lastOpenedAt, notificationCutoff),
+    };
+    saveState();
+    resetDaoNotificationSummary();
+  }
+
+  clearNotificationForProposal(proposalNumber) {
+    if (!this.notificationProposalNumbers.delete(proposalNumber)) return false;
+
+    this.notificationBatch.newVoting = this.notificationBatch.newVoting
+      .filter((number) => number !== proposalNumber);
+    this.notificationBatch.endedVoting = this.notificationBatch.endedVoting
+      .filter((number) => number !== proposalNumber);
+    this.notificationBatch.finalizedTrackedVote = this.notificationBatch.finalizedTrackedVote
+      .filter((number) => number !== proposalNumber);
+
+    for (const filter of DAO_FILTER_OPTIONS) {
+      const chip = this.filterBar?.querySelector(`.dao-filter-chip[data-filter-key="${filter.key}"]`);
+      chip?.classList.toggle('has-notification', this.hasNotificationForFilter(filter.key));
+    }
+    return true;
+  }
+
+  hasNotificationForFilter(key) {
+    if (key === 'voting') return hasDaoVotingNotifications(this.notificationBatch);
+    if (key === DAO_CLAIMABLE_FILTER.key) return hasDaoClaimNotifications(this.notificationBatch);
+    return false;
   }
 
   getClaimCandidateMetadataEntries(entries, now = getTransactionTimestamp()) {
@@ -2739,6 +2895,9 @@ class DaoModal {
       type: pendingTxInfo?.type,
       outcome,
       proposalNumber: pendingTxInfo?.proposalNumber,
+      votingEndsAt: pendingTxInfo?.votingEndsAt,
+      estimatedClaimEndsAt: pendingTxInfo?.estimatedClaimEndsAt,
+      reminderExpiresAt: pendingTxInfo?.reminderExpiresAt,
     });
 
     let didRefreshDaoData = false;
@@ -2842,6 +3001,7 @@ class DaoModal {
       if (chip) {
         const selected = filter.key === this.selectedFilterKey;
         chip.classList.toggle('active', selected);
+        chip.classList.toggle('has-notification', this.hasNotificationForFilter(filter.key));
         chip.setAttribute('aria-selected', selected ? 'true' : 'false');
       }
     }
@@ -2895,10 +3055,15 @@ class DaoModal {
       const title = escapeHtml(rowTitleText);
       const typeLabel = escapeHtml(getDaoTypeLabel(p.proposalType) || 'Proposal');
       const previewHtml = this.renderProposalRowPreview(p);
+      const hasNotification = this.notificationProposalNumbers.has(p.number);
 
       li.tabIndex = 0;
       li.setAttribute('role', 'button');
-      li.setAttribute('aria-label', `Open ${p.emergency === true ? 'emergency ' : ''}${rowTitleText}`);
+      li.classList.toggle('has-notification', hasNotification);
+      li.setAttribute(
+        'aria-label',
+        `${hasNotification ? 'New DAO activity. ' : ''}Open ${p.emergency === true ? 'emergency ' : ''}${rowTitleText}`,
+      );
       li.innerHTML = `
         <div class="dao-row-content">
           <div class="dao-row-title">${title}</div>
@@ -2910,11 +3075,11 @@ class DaoModal {
           </div>
         </div>
       `;
-      li.onclick = () => this.openProposal(p);
+      li.onclick = () => this.openProposal(p, li);
       li.addEventListener('keydown', (e) => {
         if (e.key !== 'Enter' && e.key !== ' ') return;
         e.preventDefault();
-        this.openProposal(p);
+        this.openProposal(p, li);
       });
       this.list.appendChild(li);
     }
@@ -3058,12 +3223,17 @@ class DaoModal {
     `;
   }
 
-  async openProposal(proposal) {
+  async openProposal(proposal, proposalRow) {
     const openId = ++this.proposalOpenSequence;
     try {
       const refreshed = await daoRepo.refreshProposal(proposal.number);
       if (openId !== this.proposalOpenSequence || !this.isActive()) return;
       if (!refreshed) throw new Error(`Proposal #${proposal.number} is unavailable`);
+      if (this.clearNotificationForProposal(proposal.number)) {
+        proposalRow.classList.remove('has-notification');
+        const ariaLabel = proposalRow.getAttribute('aria-label');
+        if (ariaLabel) proposalRow.setAttribute('aria-label', ariaLabel.replace(/^New DAO activity\. /, ''));
+      }
       proposalInfoModal.open(proposal.id);
     } catch (error) {
       if (openId !== this.proposalOpenSequence || !this.isActive()) return;
@@ -5926,6 +6096,7 @@ class ProposalInfoModal {
       from: result.transaction.from,
       networkId: result.transaction.networkId,
     });
+    return pendingAction;
   }
 
   async submitDaoTransaction(transaction) {
@@ -6332,7 +6503,11 @@ class ProposalInfoModal {
         return;
       }
 
-      this.recordAcceptedDaoAction(result, proposal);
+      const pendingAction = this.recordAcceptedDaoAction(result, proposal);
+      const reminderSchedule = getDaoVoteReminderSchedule(proposal);
+      assert(reminderSchedule, 'Accepted DAO vote missing reminder schedule');
+      Object.assign(pendingAction, reminderSchedule);
+      saveState();
       showToast(getDaoTransactionMessage(DAO_ACTION_TYPES.VOTE, 'pending'), 4000, 'info');
       this.updateSubmitButtons();
     } catch (error) {
@@ -7667,6 +7842,9 @@ class SignInModal {
     }
     
     await footer.switchView('chats'); // Default view
+
+    // DAO reminders use only the metadata index and must not block sign-in.
+    await refreshDaoNotificationSummary();
     
     // Restore wallet/history notification dots if there are unread transfers
     if (myData?.wallet?.history && Array.isArray(myData.wallet.history) && myData.wallet.history.length > 0) {
