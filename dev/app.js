@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'e'
+const version = 'f'
 const BOOT_SPLASH_HANDOFF_MS = 1000;
 let myVersion = '0';
 async function checkVersion() {
@@ -22387,7 +22387,12 @@ class ChatModal {
     if (!url || url === '#') return false;
 
     try {
-      const thumbnailBlob = await thumbnailCache.get(url);
+      let thumbnailBlob = await thumbnailCache.get(url);
+      if (!thumbnailBlob && attachmentRow.dataset.pUrl) {
+        const item = this.getMessageRecordFromRenderedChild(attachmentRow);
+        thumbnailBlob = await this.decryptAttachmentToBlob(item, attachmentRow, attachmentRow.dataset.pUrl);
+        await thumbnailCache.save(url, thumbnailBlob, 'image/jpeg');
+      }
       if (!thumbnailBlob || !attachmentRow.isConnected) return false;
       return this.updateThumbnailInPlace(attachmentRow, thumbnailBlob);
     } catch (error) {
