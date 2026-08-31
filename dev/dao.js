@@ -6,10 +6,18 @@ import { normalizeAddress, utf82bin } from './lib.js';
 
 const DAO_REWARD_STATE_KEYS = ['accepted', 'rejected', 'applied'];
 
+export const DAO_PROJECT_TYPE = 'project';
+export const DAO_PROJECT_PREVIEW_KIND = 'project-preview';
+export const DAO_PROJECT_MAX_MILESTONES = 10;
+export const DAO_PROJECT_MILESTONE_TITLE_MAX_LENGTH = 100;
+export const DAO_PROJECT_MILESTONE_TEXT_MAX_LENGTH = 1000;
+export const DAO_PROJECT_DURATION_MAX_DAYS = 3650;
+
 export const DAO_TYPE_OPTIONS = [
   { key: 'governance', label: 'Governance', group: 'Server proposal types' },
   { key: 'economic', label: 'Economic', group: 'Server proposal types' },
   { key: 'protocol', label: 'Protocol', group: 'Server proposal types' },
+  { key: DAO_PROJECT_TYPE, label: 'Project', group: 'Preview proposal types' },
 ];
 
 export const DAO_PARAMETER_MAX_WHOLE_DIGITS = 15;
@@ -80,6 +88,58 @@ export const DAO_CONFIG_CHANGE_OPTIONS = {
   ],
 };
 
+export function isDaoParameterProposalTypeKey(proposalType) {
+  return Object.prototype.hasOwnProperty.call(
+    DAO_CONFIG_CHANGE_OPTIONS,
+    String(proposalType || ''),
+  );
+}
+
+function parseDaoDecimalString(value, label) {
+  const text = value.trim();
+  if (!isValidDaoDecimalString(text)) throw new Error(`${label} must be a non-negative number`);
+  const [whole, fraction = ''] = text.split('.');
+  return { whole, fraction };
+}
+
+export function addDaoDecimalStrings(values) {
+  if (!Array.isArray(values)) throw new Error('DAO decimal values must be an array');
+  if (values.length === 0) return '0';
+
+  const parsed = values.map((value) => parseDaoDecimalString(value, 'DAO decimal value'));
+  const scale = Math.max(...parsed.map(({ fraction }) => fraction.length));
+  const total = parsed.reduce((sum, { whole, fraction }) => (
+    sum + BigInt(`${whole}${fraction.padEnd(scale, '0')}`)
+  ), 0n);
+  const digits = total.toString().padStart(scale + 1, '0');
+  if (scale === 0) return digits;
+
+  const fraction = digits.slice(-scale).replace(/0+$/, '');
+  const whole = digits.slice(0, -scale);
+  return fraction ? `${whole}.${fraction}` : whole;
+}
+
+function getDaoProjectBudgetValue(value) {
+  const text = String(value ?? '').trim();
+  return isValidDaoDecimalString(text) ? text : '0';
+}
+
+export function getDaoProjectBudgetSummary(milestones) {
+  const entries = Array.isArray(milestones) ? milestones : [];
+  const baseCostUsdStr = addDaoDecimalStrings(
+    entries.map((milestone) => getDaoProjectBudgetValue(milestone?.costUsdStr)),
+  );
+  const maximumBonusUsdStr = addDaoDecimalStrings(
+    entries.map((milestone) => getDaoProjectBudgetValue(milestone?.bonusUsdStr)),
+  );
+
+  return {
+    baseCostUsdStr,
+    maximumBonusUsdStr,
+    maximumAuthorizedUsdStr: addDaoDecimalStrings([baseCostUsdStr, maximumBonusUsdStr]),
+  };
+}
+
 export const DAO_STATES = [
   { key: 'review', label: 'Review' },
   { key: 'withheld', label: 'Withheld' },
@@ -88,6 +148,18 @@ export const DAO_STATES = [
   { key: 'accepted', label: 'Accepted' },
   { key: 'applied', label: 'Applied' },
 ];
+
+export const DAO_PROJECT_FILTERS = [
+  { key: 'executing', label: 'Executing' },
+  { key: 'terminated', label: 'Terminated' },
+  { key: 'completed', label: 'Completed' },
+];
+
+const DAO_PROJECT_STATUS_FILTER_KEYS = new Map([
+  ['started', 'executing'],
+  ['terminated', 'terminated'],
+  ['completed', 'completed'],
+]);
 
 const DAO_NON_FILTER_STATE_LABELS = new Map([
   ['canceled', 'Canceled'],
@@ -201,6 +273,18 @@ export function getDaoTypeLabel(typeKey) {
   return DAO_TYPE_OPTIONS.find((t) => t.key === typeKey)?.label || typeKey || '';
 }
 
+function getDaoDefaultProposalOptionLabel(proposalType) {
+  return proposalType === DAO_PROJECT_TYPE ? 'Reject' : 'No change';
+}
+
+export function getDaoProposalOptionLabels(proposal) {
+  const options = Array.isArray(proposal?.options) ? proposal.options : [];
+  const firstOptionLabel = getDaoDefaultProposalOptionLabel(proposal?.proposalType);
+  return options.map((option, index) => (
+    index === 0 && String(option).toLowerCase() === 'no' ? firstOptionLabel : String(option)
+  ));
+}
+
 export function getDaoStateLabel(key) {
   return DAO_STATES.find((state) => state.key === key)?.label
     || DAO_NON_FILTER_STATE_LABELS.get(key)
@@ -209,6 +293,19 @@ export function getDaoStateLabel(key) {
 
 export function getEffectiveDaoState(proposal) {
   return proposal?.status || proposal?.state || 'review';
+}
+
+export function getDaoProposalListFilterKey(proposal) {
+  const proposalState = getEffectiveDaoState(proposal);
+  if (proposal?.proposalType !== DAO_PROJECT_TYPE) return proposalState;
+
+  const projectStatus = String(proposal?.project?.status || '').trim().toLowerCase();
+  const projectFilterKey = DAO_PROJECT_STATUS_FILTER_KEYS.get(projectStatus);
+  if (projectFilterKey) return projectFilterKey;
+
+  // Applied is reserved for parameter changes. A malformed or not-yet-started
+  // Project remains available through All instead of appearing as Applied.
+  return proposalState === 'applied' ? '' : proposalState;
 }
 
 function requireDaoDraftString(value, label, maxLength) {
@@ -350,7 +447,7 @@ export function buildDaoProposalCreateDraft({
   maxGracePeriodMs,
 } = {}) {
   const safeProposalType = requireDaoDraftString(proposalType, 'DAO proposal type');
-  if (!DAO_CONFIG_CHANGE_OPTIONS[safeProposalType]) {
+  if (!isDaoParameterProposalTypeKey(safeProposalType)) {
     throw new Error('DAO proposal type is not supported');
   }
 
@@ -377,6 +474,35 @@ export function buildDaoProposalCreateDraft({
   };
 }
 
+export function buildDaoProjectProposalPreviewDraft({
+  displayTitle,
+  description,
+  project,
+  proposalFeeUsdStr,
+  reviewStartTimeMs,
+  gracePeriodMs,
+  maxGracePeriodMs,
+} = {}) {
+  const proposal = {
+    proposalType: DAO_PROJECT_TYPE,
+    emergency: false,
+    title: requireDaoDraftString(displayTitle, 'DAO proposal title', DAO_PROPOSAL_TITLE_MAX_LENGTH),
+    description: requireDaoDraftString(description, 'DAO proposal description'),
+    options: ['no', 'Fund project'],
+    gracePeriod: normalizeDaoDraftGracePeriodMs(gracePeriodMs, maxGracePeriodMs),
+    project: normalizeDaoProjectDraft(project),
+  };
+
+  return {
+    kind: DAO_PROJECT_PREVIEW_KIND,
+    canSubmit: false,
+    displayTitle: proposal.title,
+    proposalFeeUsdStr: requireDaoProjectUsdString(proposalFeeUsdStr, 'DAO proposal fee'),
+    reviewStartTimeMs: normalizeDaoDraftReviewStartTime(reviewStartTimeMs),
+    proposal,
+  };
+}
+
 export function buildDaoProposalCreateTransaction({
   draft,
   timestamp,
@@ -391,7 +517,7 @@ export function buildDaoProposalCreateTransaction({
   }
 
   const proposalType = requireDaoDraftString(draftTx.proposalType, 'DAO proposal type');
-  if (!DAO_CONFIG_CHANGE_OPTIONS[proposalType]) {
+  if (!isDaoParameterProposalTypeKey(proposalType)) {
     throw new Error('DAO proposal type is not supported');
   }
 
@@ -760,6 +886,328 @@ export function normalizeDaoAddress(value) {
   return normalizeAddress(address);
 }
 
+function createDaoProjectValidationError(message, field, milestoneIndex) {
+  const error = new Error(message);
+  error.daoProjectField = field;
+  if (Number.isSafeInteger(milestoneIndex)) error.daoProjectMilestoneIndex = milestoneIndex;
+  return error;
+}
+
+function requireDaoProjectText(value, label, maxLength, field, milestoneIndex) {
+  try {
+    return requireDaoDraftString(value, label, maxLength);
+  } catch (error) {
+    throw createDaoProjectValidationError(error.message, field, milestoneIndex);
+  }
+}
+
+function requireDaoProjectUsdString(value, label, {
+  field,
+  milestoneIndex,
+  positive = false,
+} = {}) {
+  const text = String(value ?? '').trim();
+  if (!isValidDaoDecimalString(text)) {
+    throw createDaoProjectValidationError(
+      `${label} must be a non-negative USD amount`,
+      field,
+      milestoneIndex,
+    );
+  }
+  if (positive && /^0(?:\.0+)?$/.test(text)) {
+    throw createDaoProjectValidationError(`${label} must be greater than zero`, field, milestoneIndex);
+  }
+  return text;
+}
+
+export function normalizeDaoProjectDraft(value) {
+  const normalizedAddress = normalizeDaoAddress(value?.address);
+  if (!normalizedAddress) {
+    throw createDaoProjectValidationError(
+      'Project recipient must be a valid Liberdus address',
+      'address',
+    );
+  }
+
+  const milestones = value?.milestones;
+  if (!Array.isArray(milestones) || milestones.length === 0) {
+    throw createDaoProjectValidationError('Project needs at least one milestone', 'milestones');
+  }
+  if (milestones.length > DAO_PROJECT_MAX_MILESTONES) {
+    throw createDaoProjectValidationError(
+      `Project can have at most ${DAO_PROJECT_MAX_MILESTONES} milestones`,
+      'milestones',
+    );
+  }
+
+  return {
+    address: `${normalizedAddress}${'0'.repeat(24)}`,
+    milestones: milestones.map((milestone, index) => {
+      const label = `Milestone ${index + 1}`;
+      const durationText = String(milestone?.durationDays ?? '').trim();
+      if (!/^[1-9]\d*$/.test(durationText)) {
+        throw createDaoProjectValidationError(
+          `${label} duration must be a positive whole number of days`,
+          'durationDays',
+          index,
+        );
+      }
+      const durationDays = Number(durationText);
+      if (!Number.isSafeInteger(durationDays) || durationDays > DAO_PROJECT_DURATION_MAX_DAYS) {
+        throw createDaoProjectValidationError(
+          `${label} duration must not exceed ${DAO_PROJECT_DURATION_MAX_DAYS} days`,
+          'durationDays',
+          index,
+        );
+      }
+
+      return {
+        title: requireDaoProjectText(
+          milestone?.title,
+          `${label} title`,
+          DAO_PROJECT_MILESTONE_TITLE_MAX_LENGTH,
+          'title',
+          index,
+        ),
+        description: requireDaoProjectText(
+          milestone?.description,
+          `${label} description`,
+          DAO_PROJECT_MILESTONE_TEXT_MAX_LENGTH,
+          'description',
+          index,
+        ),
+        deliverable: requireDaoProjectText(
+          milestone?.deliverable,
+          `${label} deliverable`,
+          DAO_PROJECT_MILESTONE_TEXT_MAX_LENGTH,
+          'deliverable',
+          index,
+        ),
+        durationDays,
+        costUsdStr: requireDaoProjectUsdString(milestone?.costUsdStr, `${label} cost`, {
+          field: 'costUsdStr',
+          milestoneIndex: index,
+          positive: true,
+        }),
+        penaltyUsdStr: requireDaoProjectUsdString(milestone?.penaltyUsdStr, `${label} late penalty`, {
+          field: 'penaltyUsdStr',
+          milestoneIndex: index,
+        }),
+        bonusUsdStr: requireDaoProjectUsdString(milestone?.bonusUsdStr, `${label} early bonus`, {
+          field: 'bonusUsdStr',
+          milestoneIndex: index,
+        }),
+      };
+    }),
+  };
+}
+
+const DAO_PROJECT_STATUS_LABELS = Object.freeze({
+  pending: 'Pending',
+  started: 'Started',
+  completed: 'Completed',
+  terminated: 'Terminated',
+});
+
+export function getDaoProposalInfoStateLabel(proposal) {
+  const proposalState = getEffectiveDaoState(proposal);
+  const proposalStateLabel = getDaoStateLabel(proposalState) || proposalState || 'Proposal';
+  if (proposal?.proposalType !== DAO_PROJECT_TYPE || proposalState !== 'applied') {
+    return proposalStateLabel;
+  }
+
+  const projectStatus = String(proposal?.project?.status || '').trim().toLowerCase();
+  return DAO_PROJECT_STATUS_LABELS[projectStatus] || proposalStateLabel;
+}
+
+const DAO_PROJECT_RUNTIME_STATUS_KEYS = new Set(['started', 'terminated', 'completed']);
+
+const DAO_PROJECT_MILESTONE_STATUS_LABELS = Object.freeze({
+  pending: 'Pending',
+  started: 'Started',
+  completed: 'Completed',
+});
+
+function normalizeDaoProjectPresentationText(value, maxLength, issues, label) {
+  if (typeof value !== 'string') {
+    issues.push(`${label} is unavailable`);
+    return null;
+  }
+  const text = String(value ?? '').trim();
+  if (!text) {
+    issues.push(`${label} is unavailable`);
+    return null;
+  }
+  if (text.length > maxLength) {
+    issues.push(`${label} exceeds the supported length`);
+    return text.slice(0, maxLength);
+  }
+  return text;
+}
+
+function normalizeDaoProjectPresentationUsd(value, issues, label) {
+  const text = String(value ?? '').trim();
+  if (!isValidDaoDecimalString(text)) {
+    issues.push(`${label} is unavailable`);
+    return null;
+  }
+  return text;
+}
+
+function normalizeDaoProjectPresentationStatus(value, labels, issues, label) {
+  const key = String(value ?? '').trim().toLowerCase();
+  if (!key) {
+    issues.push(`${label} is unavailable`);
+    return null;
+  }
+  if (!labels[key]) {
+    issues.push(`${label} is unknown`);
+    return null;
+  }
+  return { key, label: labels[key] };
+}
+
+function normalizeDaoProjectPresentationTimestamp(value, issues, label) {
+  if (value === undefined || value === null || value === '') return null;
+  const timestamp = normalizeDaoTimestamp(value);
+  if (!timestamp) issues.push(`${label} is unavailable`);
+  return timestamp || null;
+}
+
+function normalizeDaoProjectPresentationWei(value, issues, label, required = false) {
+  if (value === undefined || value === null || value === '') {
+    if (required) issues.push(`${label} is unavailable`);
+    return null;
+  }
+  const amount = parseDaoUnsignedBigInt(value);
+  if (amount === null) issues.push(`${label} is unavailable`);
+  return amount;
+}
+
+function normalizeDaoProjectPresentationMilestone(value, index, issues) {
+  const milestone = value && typeof value === 'object' && !Array.isArray(value) ? value : {};
+  const label = `Milestone ${index + 1}`;
+  if (milestone !== value) issues.push(`${label} is malformed`);
+
+  const durationDays = Number(milestone.durationDays);
+  const normalizedDurationDays = Number.isSafeInteger(durationDays)
+    && durationDays > 0
+    && durationDays <= DAO_PROJECT_DURATION_MAX_DAYS
+    ? durationDays
+    : null;
+  if (normalizedDurationDays === null) issues.push(`${label} duration is unavailable`);
+
+  let paid = null;
+  if (typeof milestone.paid === 'boolean') {
+    paid = milestone.paid;
+  } else {
+    issues.push(`${label} paid state is unavailable`);
+  }
+
+  return {
+    title: normalizeDaoProjectPresentationText(
+      milestone.title,
+      DAO_PROJECT_MILESTONE_TITLE_MAX_LENGTH,
+      issues,
+      `${label} title`,
+    ),
+    description: normalizeDaoProjectPresentationText(
+      milestone.description,
+      DAO_PROJECT_MILESTONE_TEXT_MAX_LENGTH,
+      issues,
+      `${label} description`,
+    ),
+    deliverable: normalizeDaoProjectPresentationText(
+      milestone.deliverable,
+      DAO_PROJECT_MILESTONE_TEXT_MAX_LENGTH,
+      issues,
+      `${label} deliverable`,
+    ),
+    durationDays: normalizedDurationDays,
+    costUsdStr: normalizeDaoProjectPresentationUsd(milestone.costUsdStr, issues, `${label} cost`),
+    penaltyUsdStr: normalizeDaoProjectPresentationUsd(milestone.penaltyUsdStr, issues, `${label} penalty`),
+    bonusUsdStr: normalizeDaoProjectPresentationUsd(milestone.bonusUsdStr, issues, `${label} bonus`),
+    status: normalizeDaoProjectPresentationStatus(
+      milestone.status,
+      DAO_PROJECT_MILESTONE_STATUS_LABELS,
+      issues,
+      `${label} status`,
+    ),
+    startedAt: normalizeDaoProjectPresentationTimestamp(milestone.startedAt, issues, `${label} start time`),
+    completedAt: normalizeDaoProjectPresentationTimestamp(milestone.completedAt, issues, `${label} completion time`),
+    paid,
+    paidAt: normalizeDaoProjectPresentationTimestamp(milestone.paidAt, issues, `${label} paid time`),
+    payoutWei: normalizeDaoProjectPresentationWei(milestone.payoutWei, issues, `${label} payout`),
+  };
+}
+
+export function getDaoProjectPresentation(proposal) {
+  const project = proposal?.project;
+  if (proposal?.proposalType !== DAO_PROJECT_TYPE
+    || !project
+    || typeof project !== 'object'
+    || Array.isArray(project)) {
+    return Object.freeze({
+      kind: 'unavailable',
+      message: 'Project details are unavailable for this proposal.',
+    });
+  }
+
+  const issues = [];
+  const address = normalizeDaoAddress(project.address);
+  if (!address) issues.push('Project recipient is unavailable');
+
+  const rawMilestones = Array.isArray(project.milestones) ? project.milestones : [];
+  if (!Array.isArray(project.milestones)) issues.push('Project milestones are unavailable');
+  if (rawMilestones.length === 0) issues.push('Project has no milestones');
+  if (rawMilestones.length > DAO_PROJECT_MAX_MILESTONES) {
+    issues.push(`Project exceeds ${DAO_PROJECT_MAX_MILESTONES} milestones`);
+  }
+
+  const milestones = rawMilestones
+    .slice(0, DAO_PROJECT_MAX_MILESTONES)
+    .map((milestone, index) => normalizeDaoProjectPresentationMilestone(milestone, index, issues));
+  const canCalculateBudget = milestones.length > 0
+    && milestones.every((milestone) => (
+      milestone.costUsdStr !== null && milestone.bonusUsdStr !== null
+    ));
+  const status = normalizeDaoProjectPresentationStatus(
+    project.status,
+    DAO_PROJECT_STATUS_LABELS,
+    issues,
+    'Project status',
+  );
+  const balanceWei = normalizeDaoProjectPresentationWei(project.balance, issues, 'Project balance', true);
+  const claimableBalanceWei = normalizeDaoProjectPresentationWei(
+    project.claimableBalance,
+    issues,
+    'Project claimable balance',
+    true,
+  );
+
+  return Object.freeze({
+    kind: 'available',
+    completeness: issues.length === 0 ? 'complete' : 'partial',
+    issueCount: issues.length,
+    address: address || null,
+    status,
+    balanceWei,
+    claimableBalanceWei,
+    budget: canCalculateBudget ? getDaoProjectBudgetSummary(milestones) : null,
+    milestones,
+  });
+}
+
+export function shouldOpenDaoProjectMilestoneByDefault(project, proposalState, milestoneIndex) {
+  if (proposalState === 'review' || proposalState === 'voting') return true;
+  if (project?.status?.key !== 'started' || !Array.isArray(project.milestones)) return false;
+  return project.milestones.findIndex((milestone) => milestone?.status?.key === 'started') === milestoneIndex;
+}
+
+export function shouldShowDaoProjectRuntime(project) {
+  return DAO_PROJECT_RUNTIME_STATUS_KEYS.has(project?.status?.key);
+}
+
 function normalizeDaoVoteReminderSchedule(value) {
   const votingEndsAt = normalizeDaoTimestamp(value?.votingEndsAt);
   const estimatedClaimEndsAt = normalizeDaoTimestamp(value?.estimatedClaimEndsAt);
@@ -1006,9 +1454,10 @@ export function getDaoPendingFinalizationOutcome(proposal, now = Date.now()) {
   }
 
   if (state === 'voting' && timestamp > timeline.votingEnd && hasZeroDaoVoteTotals(proposal)) {
+    const defaultOptionLabel = getDaoDefaultProposalOptionLabel(proposal?.proposalType);
     return {
       nextState: 'rejected',
-      message: 'No votes were cast. Finalizing the vote result rejects this proposal because the default No change option wins.',
+      message: `No votes were cast. Finalizing the vote result rejects this proposal because the default ${defaultOptionLabel} option wins.`,
     };
   }
 
@@ -1257,6 +1706,7 @@ function storeToUiList(store) {
         title: proposal.title,
         description: proposal.description,
         proposalType: proposal.proposalType,
+        project: proposal.project,
         emergency: Boolean(proposal.emergency),
         createdAt: proposal.created,
         state,

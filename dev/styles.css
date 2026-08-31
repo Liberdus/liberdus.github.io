@@ -5,6 +5,29 @@
    Note: Organizational headers only; no visual changes
    ============================================= */
 
+/* Self-hosted Inter variable font; SIL OFL 1.1 license in fonts/LICENSE.txt. */
+@font-face {
+  font-family: 'Inter';
+  font-style: normal;
+  font-weight: 400 700;
+  font-display: swap;
+  src: url('./fonts/inter-latin.woff2') format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA,
+    U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193,
+    U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+@font-face {
+  font-family: 'Inter';
+  font-style: normal;
+  font-weight: 400 700;
+  font-display: swap;
+  src: url('./fonts/inter-latin-ext.woff2') format('woff2');
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF,
+    U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020,
+    U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+
 /* ========== Settings (tokens/variables) ========== */
 /* Unstake lock info under the Unstake button */
 #unstake-lock-info,
@@ -68,7 +91,8 @@
   --icon-sign-out: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='%23dc3545' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4'%3E%3C/path%3E%3Cpolyline points='16,17 21,12 16,7'%3E%3C/polyline%3E%3Cline x1='21' y1='12' x2='9' y2='12'%3E%3C/line%3E%3C/svg%3E");
 
   /* Typography tokens */
-  --font-primary: 'Inter', sans-serif;
+  --font-primary: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto,
+    'Helvetica Neue', Arial, sans-serif;
   --font-monospace: monospace;
   --font-size-xs: 12px;
   --font-size-sm: 14px;
@@ -210,6 +234,7 @@ body {
   justify-content: center;
   align-items: center;
   font-family: var(--font-primary);
+  font-variant-ligatures: no-contextual;
 background-color: var(--surface-muted);
   padding: env(safe-area-inset-top, 0px) env(safe-area-inset-right, 0px) env(safe-area-inset-bottom, 0px)
     env(safe-area-inset-left, 0px);
@@ -492,11 +517,11 @@ body {
   justify-content: flex-start;
   align-items: center;
   padding: 2rem;
-  padding-bottom: calc(2rem + env(safe-area-inset-bottom, 0px) + 100px);
+  padding-bottom: calc(2rem + env(safe-area-inset-bottom, 0px));
   overflow-y: auto;
   overflow-x: hidden;
   -webkit-overflow-scrolling: touch;
-  min-height: 100vh;
+  min-height: 0;
 }
 
 .welcome-screen .welcome-buttons {
@@ -536,6 +561,15 @@ body {
 
 .welcome-screen .welcome-buttons button:hover {
   opacity: 0.9;
+}
+
+.welcome-version {
+  flex: none;
+  margin-top: auto;
+  padding-top: 28px;
+  color: var(--muted-text-color);
+  font-size: 0.8rem;
+  text-align: center;
 }
 
 .header {
@@ -1984,6 +2018,204 @@ input[type='file'].form-control::file-selector-button {
   gap: 12px;
 }
 
+.create-account-form {
+  padding: 0;
+  text-align: left;
+}
+
+.create-account-status {
+  color: var(--success-color);
+  display: none;
+}
+
+.create-account-help,
+.create-account-option-help {
+  color: var(--secondary-text-color);
+  font-size: var(--font-size-sm);
+  line-height: 1.4;
+}
+
+.create-account-help {
+  margin: 8px 0 0;
+}
+
+.create-account-advanced {
+  margin-top: 28px;
+}
+
+.create-account-advanced > summary {
+  align-items: center;
+  border-top: 1px solid var(--border-color);
+  color: var(--text-color);
+  cursor: pointer;
+  display: flex;
+  font-size: var(--font-size-base);
+  font-weight: var(--font-weight-medium);
+  justify-content: space-between;
+  list-style: none;
+  padding: 16px 2px;
+}
+
+.create-account-advanced > summary::-webkit-details-marker {
+  display: none;
+}
+
+.create-account-advanced > summary:hover {
+  background: var(--hover-background-purple);
+}
+
+.create-account-advanced > summary:focus-visible {
+  border-radius: 8px;
+  box-shadow: var(--focus-ring-primary);
+  outline: none;
+}
+
+.create-account-advanced.is-disabled > summary {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.create-account-chevron {
+  border-bottom: 2px solid var(--primary-color);
+  border-right: 2px solid var(--primary-color);
+  height: 8px;
+  margin-right: 4px;
+  transform: rotate(45deg);
+  transition: transform 0.2s ease;
+  width: 8px;
+}
+
+.create-account-advanced[open] .create-account-chevron {
+  transform: rotate(225deg);
+}
+
+.create-account-advanced-body {
+  padding: 4px 2px 0;
+}
+
+.create-account-option {
+  align-items: center;
+  display: flex;
+  gap: 12px;
+  min-height: 68px;
+  padding: 8px 0;
+}
+
+.create-account-option-copy {
+  flex: 1;
+  min-width: 0;
+}
+
+.create-account-option-heading {
+  align-items: center;
+  display: flex;
+  gap: 4px;
+}
+
+.create-account-option-title,
+.create-account-option-heading > label {
+  color: var(--text-color);
+  cursor: pointer;
+  font-size: var(--font-size-base);
+  font-weight: var(--font-weight-semibold);
+}
+
+.create-account-option-heading .toll-info-icon {
+  background: none;
+  border: 0;
+  height: 20px;
+  margin: 0;
+  min-height: 0;
+  min-width: 0;
+  padding: 0;
+  width: 20px;
+}
+
+.create-account-option-help {
+  cursor: pointer;
+  display: block;
+  margin-top: 2px;
+}
+
+.create-account-option-toggle {
+  align-items: center;
+  cursor: pointer;
+  display: flex;
+  flex: none;
+  height: 44px;
+  justify-content: flex-end;
+  width: 44px;
+}
+
+.create-account-option-toggle input {
+  height: 1px;
+  opacity: 0;
+  position: absolute;
+  width: 1px;
+}
+
+.create-account-check {
+  align-items: center;
+  background: var(--background-color);
+  border: 1.5px solid var(--border-color);
+  border-radius: 6px;
+  display: flex;
+  height: 22px;
+  justify-content: center;
+  width: 22px;
+}
+
+.create-account-check::after {
+  border-bottom: 2px solid #fff;
+  border-right: 2px solid #fff;
+  content: '';
+  height: 10px;
+  opacity: 0;
+  transform: translateY(-1px) rotate(45deg);
+  width: 5px;
+}
+
+.create-account-option-toggle input:checked + .create-account-check {
+  background: var(--primary-color);
+  border-color: var(--primary-color);
+}
+
+.create-account-option-toggle input:checked + .create-account-check::after {
+  opacity: 1;
+}
+
+.create-account-option-toggle input:focus-visible + .create-account-check {
+  border-color: var(--primary-color);
+  box-shadow: var(--focus-ring-primary);
+}
+
+.create-account-option-toggle input:disabled + .create-account-check {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.create-account-private-key-label {
+  color: var(--text-color);
+  display: block;
+  font-size: var(--font-size-base);
+  font-weight: var(--font-weight-semibold);
+  margin-top: 8px;
+}
+
+.create-account-error {
+  color: var(--danger-color);
+  display: none;
+}
+
+.create-account-private-key {
+  margin-top: 8px;
+  position: relative;
+}
+
+.create-account-actions {
+  margin-top: 24px;
+}
+
 @media (min-width: 480px) {
   .form-actions.form-actions--inline {
     flex-direction: row;
@@ -2259,6 +2491,134 @@ input[type='file'].form-control::file-selector-button {
   border-color: var(--danger-color);
 }
 
+#addProposalModal .dao-project-editor {
+  display: grid;
+  gap: 10px;
+}
+
+#addProposalModal .dao-project-editor.hidden {
+  display: none;
+}
+
+#addProposalModal .dao-form-section.hidden {
+  display: none;
+}
+
+#addProposalModal .dao-project-preview-notice,
+#confirmProposalModal .dao-project-review-notice {
+  background: rgba(61, 61, 206, 0.08);
+  border: 1px solid var(--primary-tint-60);
+  border-radius: 10px;
+  color: var(--text-color);
+  display: grid;
+  font-size: 13px;
+  gap: 3px;
+  line-height: 1.35;
+  padding: 10px;
+}
+
+#addProposalModal .dao-project-preview-notice span,
+#confirmProposalModal .dao-project-review-notice span {
+  color: var(--secondary-text-color);
+}
+
+#addProposalModal .proposal-info-row.dao-project-budget-item {
+  background: transparent;
+  border: 0;
+  box-shadow: none;
+}
+
+#addProposalModal .proposal-info-value.dao-project-budget-value {
+  align-items: baseline;
+  align-self: end;
+  display: flex;
+  flex-wrap: wrap;
+  font-size: 14px;
+  gap: 4px;
+  justify-content: center;
+  line-height: 1.35;
+}
+
+#addProposalModal .dao-project-budget-amount {
+  color: var(--text-color);
+  font-size: inherit;
+  font-weight: var(--font-weight-normal);
+  line-height: inherit;
+}
+
+#addProposalModal .dao-project-budget-value span {
+  color: var(--secondary-text-color);
+  font-size: inherit;
+  font-weight: var(--font-weight-normal);
+  line-height: inherit;
+}
+
+#addProposalModal .dao-project-milestone {
+  background: var(--input-background);
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+  padding: 10px;
+}
+
+#addProposalModal .dao-project-milestone-fields .form-group--full {
+  grid-column: 1 / -1;
+}
+
+#addProposalModal .dao-project-milestone > .dao-form-row-title {
+  flex-wrap: nowrap;
+}
+
+#addProposalModal .dao-project-milestone-actions {
+  align-items: center;
+  display: flex;
+  flex: 0 0 auto;
+  gap: 4px;
+}
+
+#addProposalModal .dao-project-milestone-actions .btn {
+  align-items: center;
+  box-sizing: border-box;
+  border-radius: 8px;
+  display: inline-flex;
+  height: 32px;
+  justify-content: center;
+  min-height: 32px;
+  padding: 0;
+  width: 32px;
+}
+
+#addProposalModal .dao-project-milestone-action-icon {
+  fill: none;
+  height: 17px;
+  pointer-events: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 2;
+  width: 17px;
+}
+
+#addProposalModal .dao-project-editor input,
+#addProposalModal .dao-project-editor textarea {
+  box-sizing: border-box;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  width: 100%;
+}
+
+@media (max-width: 520px) {
+  #addProposalModal .dao-project-milestone-fields {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  #addProposalModal .dao-project-milestone-fields .form-group--full {
+    grid-column: auto;
+  }
+}
+
 #addProposalModal .form-actions {
   display: grid;
   gap: 10px;
@@ -2284,6 +2644,20 @@ input[type='file'].form-control::file-selector-button {
   width: 100%;
 }
 
+#confirmProposalModal .proposal-info > *,
+#confirmProposalModal .proposal-info-heading,
+#confirmProposalModal .proposal-info-section,
+#confirmProposalModal .proposal-info-grid,
+#confirmProposalModal .dao-project-review-notice,
+#proposalInfoModal .proposal-info > *,
+#proposalInfoModal .proposal-info-heading,
+#proposalInfoModal .proposal-info-section,
+#proposalInfoModal .proposal-info-grid {
+  box-sizing: border-box;
+  max-width: 100%;
+  min-width: 0;
+}
+
 #confirmProposalModal .proposal-info-heading,
 #proposalInfoModal .proposal-info-heading {
   display: grid;
@@ -2294,6 +2668,14 @@ input[type='file'].form-control::file-selector-button {
 #confirmProposalModal .proposal-info-title,
 #proposalInfoModal .proposal-info-title {
   margin-bottom: 0;
+}
+
+#confirmProposalModal .proposal-info-title,
+#confirmProposalModal .proposal-info-description,
+#confirmProposalModal .dao-project-review-notice > * {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 #confirmProposalModal .proposal-info-description,
@@ -2345,6 +2727,7 @@ input[type='file'].form-control::file-selector-button {
   text-align: center;
 }
 
+#addProposalModal .proposal-info-grid,
 #confirmProposalModal .proposal-info-grid,
 #proposalInfoModal .proposal-info-grid {
   display: flex;
@@ -2353,13 +2736,16 @@ input[type='file'].form-control::file-selector-button {
   justify-content: center;
 }
 
+#addProposalModal .proposal-option-cards,
 #confirmProposalModal .proposal-option-cards,
 #proposalInfoModal .proposal-option-cards {
   display: grid;
   gap: 10px;
+  grid-auto-rows: 1fr;
   grid-template-columns: minmax(0, 1fr);
 }
 
+#addProposalModal .proposal-option-section,
 #confirmProposalModal .proposal-option-section,
 #proposalInfoModal .proposal-option-section {
   background: rgba(61, 61, 206, 0.055);
@@ -2374,6 +2760,274 @@ input[type='file'].form-control::file-selector-button {
   text-align: left;
 }
 
+#addProposalModal .dao-project-ballot .proposal-option-section {
+  grid-template-rows: auto minmax(0, 1fr);
+}
+
+#confirmProposalModal .dao-project-ballot .proposal-option-section {
+  grid-template-rows: auto minmax(0, 1fr);
+}
+
+#confirmProposalModal .dao-project-review-milestone-list,
+#proposalInfoModal .dao-project-review-milestone-list {
+  display: grid;
+  gap: 10px;
+}
+
+#confirmProposalModal .dao-project-review-milestone,
+#proposalInfoModal .dao-project-review-milestone {
+  background: rgba(61, 61, 206, 0.055);
+  border-radius: var(--overlay-border-radius);
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+  padding: 10px;
+}
+
+#confirmProposalModal .dao-project-review-milestone h4,
+#proposalInfoModal .dao-project-review-milestone h4 {
+  display: grid;
+  gap: 2px;
+  margin: 0;
+  min-width: 0;
+}
+
+#confirmProposalModal .dao-project-review-milestone h4 > span,
+#confirmProposalModal .dao-project-review-copy span,
+#proposalInfoModal .dao-project-review-milestone h4 > span,
+#proposalInfoModal .dao-project-review-copy span {
+  color: var(--secondary-text-color);
+  font-size: 12px;
+  font-weight: var(--font-weight-medium);
+  line-height: 1.35;
+}
+
+#confirmProposalModal .dao-project-review-milestone h4 > strong,
+#proposalInfoModal .dao-project-review-milestone h4 > strong {
+  color: var(--text-color);
+  font-size: 14px;
+  font-weight: var(--font-weight-semibold);
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+#confirmProposalModal .dao-project-review-copy,
+#confirmProposalModal .dao-project-review-copy > div,
+#proposalInfoModal .dao-project-review-copy,
+#proposalInfoModal .dao-project-review-copy > div {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+#confirmProposalModal .dao-project-review-copy,
+#proposalInfoModal .dao-project-review-copy {
+  gap: 8px;
+}
+
+#confirmProposalModal .dao-project-review-copy p,
+#proposalInfoModal .dao-project-review-copy p {
+  color: var(--text-color);
+  font-size: 13px;
+  line-height: 1.35;
+  margin: 0;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+#confirmProposalModal .dao-project-review-milestone .proposal-info-row,
+#proposalInfoModal .dao-project-review-milestone .proposal-info-row {
+  flex-basis: calc((100% - 8px) / 2);
+}
+
+#proposalInfoModal .dao-project-info-milestone {
+  gap: 0;
+  padding: 0;
+}
+
+#proposalInfoModal .dao-project-info-milestone summary {
+  align-items: center;
+  cursor: pointer;
+  display: grid;
+  gap: 8px;
+  grid-template-columns: minmax(0, 1fr) auto 18px;
+  list-style: none;
+  padding: 10px;
+  text-align: left;
+}
+
+#proposalInfoModal .dao-project-info-milestone summary::-webkit-details-marker {
+  display: none;
+}
+
+#proposalInfoModal .dao-project-info-milestone summary::after {
+  border-bottom: 2px solid var(--secondary-text-color);
+  border-right: 2px solid var(--secondary-text-color);
+  content: '';
+  height: 8px;
+  justify-self: center;
+  transform: rotate(45deg);
+  width: 8px;
+}
+
+#proposalInfoModal .dao-project-info-milestone[open] summary {
+  border-bottom: 1px solid var(--border-color);
+}
+
+#proposalInfoModal .dao-project-info-milestone[open] summary::after {
+  transform: rotate(225deg);
+}
+
+#proposalInfoModal .dao-project-info-milestone summary:focus-visible {
+  outline: 2px solid var(--primary-color);
+  outline-offset: -2px;
+}
+
+#proposalInfoModal .dao-project-info-milestone-heading {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  text-align: left;
+}
+
+#proposalInfoModal .dao-project-info-milestone .dao-project-review-copy {
+  text-align: left;
+}
+
+#proposalInfoModal .dao-project-info-milestone-heading > span {
+  color: var(--secondary-text-color);
+  font-size: 12px;
+  font-weight: var(--font-weight-medium);
+  line-height: 1.35;
+}
+
+#proposalInfoModal .dao-project-info-milestone-heading > strong {
+  color: var(--text-color);
+  font-size: 14px;
+  font-weight: var(--font-weight-semibold);
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+#proposalInfoModal .dao-project-info-milestone-status {
+  background: var(--input-background);
+  border-radius: 999px;
+  color: var(--secondary-text-color);
+  font-size: 12px;
+  font-weight: var(--font-weight-semibold);
+  padding: 3px 7px;
+}
+
+#proposalInfoModal .dao-project-info-milestone-content {
+  display: grid;
+  gap: 10px;
+  padding: 10px;
+}
+
+#proposalInfoModal .dao-project-info-notice {
+  background: rgba(61, 61, 206, 0.08);
+  border: 1px solid var(--primary-tint-60);
+  border-radius: 10px;
+  color: var(--text-color);
+  display: grid;
+  font-size: 13px;
+  gap: 3px;
+  line-height: 1.35;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  padding: 10px;
+}
+
+#proposalInfoModal .dao-project-info-notice--partial {
+  background: rgba(239, 108, 0, 0.1);
+  border-color: rgba(239, 108, 0, 0.28);
+}
+
+#proposalInfoModal .dao-project-info-notice--unavailable {
+  background: var(--input-background);
+  border-color: var(--border-color);
+}
+
+#proposalInfoModal .dao-project-info-notice span {
+  color: var(--secondary-text-color);
+}
+
+#proposalInfoModal .dao-project-info-funding .proposal-info-grid {
+  display: grid;
+  gap: 0;
+}
+
+#proposalInfoModal .dao-project-info-funding .proposal-info-row {
+  align-items: baseline;
+  background: transparent;
+  border-bottom: 1px solid var(--border-color);
+  border-radius: 0;
+  box-shadow: none;
+  display: grid;
+  gap: 8px;
+  grid-template-columns: minmax(120px, auto) minmax(0, 1fr);
+  grid-template-rows: none;
+  min-height: 0;
+  padding: 5px 0;
+  text-align: left;
+}
+
+#proposalInfoModal .dao-project-info-funding .proposal-info-row:last-child {
+  border-bottom: 0;
+  padding-bottom: 0;
+}
+
+#proposalInfoModal .dao-project-info-funding .proposal-info-row:first-child {
+  grid-template-columns: auto minmax(0, 1fr);
+}
+
+#proposalInfoModal .dao-project-info-funding .proposal-info-row > span:not(.proposal-info-value) {
+  align-self: baseline;
+  justify-self: start;
+  text-align: left;
+}
+
+#proposalInfoModal .dao-project-info-funding .proposal-info-value {
+  justify-self: end;
+  text-align: right;
+}
+
+#proposalInfoModal .dao-project-info-funding .proposal-info-row:first-child .proposal-info-value {
+  font-size: clamp(10px, 2.2vw, 13px);
+  letter-spacing: -0.02em;
+  white-space: nowrap;
+}
+
+#proposalInfoModal .dao-project-info-runtime {
+  border-top: 1px solid var(--border-color);
+  padding-top: 10px;
+}
+
+#confirmProposalModal .dao-project-review-funding .proposal-info-row {
+  align-items: center;
+  flex-basis: 100%;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  grid-template-rows: none;
+  min-height: 0;
+  width: 100%;
+}
+
+#confirmProposalModal .dao-project-review-funding .proposal-info-row > span:not(.proposal-info-value) {
+  align-self: center;
+  justify-self: start;
+  text-align: left;
+}
+
+#confirmProposalModal .dao-project-review-funding .proposal-info-value {
+  justify-self: end;
+  max-width: 100%;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  text-align: right;
+  word-break: break-word;
+}
+
+#addProposalModal .proposal-option-label,
 #confirmProposalModal .proposal-option-label,
 #proposalInfoModal .proposal-option-label {
   align-items: center;
@@ -2387,6 +3041,7 @@ input[type='file'].form-control::file-selector-button {
   overflow-wrap: anywhere;
 }
 
+#addProposalModal .proposal-option-label::after,
 #confirmProposalModal .proposal-option-label::after,
 #proposalInfoModal .proposal-option-label::after {
   border-top: 1px solid var(--border-color);
@@ -2395,12 +3050,14 @@ input[type='file'].form-control::file-selector-button {
   min-width: 0;
 }
 
+#addProposalModal .proposal-option-changes,
 #confirmProposalModal .proposal-option-changes,
 #proposalInfoModal .proposal-option-changes {
   display: grid;
   gap: 0;
 }
 
+#addProposalModal .proposal-info-row,
 #confirmProposalModal .proposal-info-row,
 #proposalInfoModal .proposal-info-row {
   background: var(--input-background);
@@ -2415,6 +3072,7 @@ input[type='file'].form-control::file-selector-button {
   text-align: center;
 }
 
+#addProposalModal .proposal-info-row,
 #confirmProposalModal .proposal-info-row,
 #proposalInfoModal .proposal-info-row {
   background: rgba(255, 255, 255, 0.92);
@@ -2426,6 +3084,12 @@ input[type='file'].form-control::file-selector-button {
   border: 1px solid rgba(30, 126, 52, 0.34);
 }
 
+#proposalInfoModal .proposal-info-row--rejected {
+  background: rgba(196, 45, 45, 0.12);
+  border: 1px solid rgba(196, 45, 45, 0.3);
+}
+
+#addProposalModal .proposal-info-row > span:not(.proposal-info-value),
 #confirmProposalModal .proposal-info-row > span:not(.proposal-info-value),
 #confirmProposalModal .proposal-change-row span,
 #proposalInfoModal .proposal-info-row > span:not(.proposal-info-value),
@@ -2443,6 +3107,10 @@ input[type='file'].form-control::file-selector-button {
   color: #1e7e34;
 }
 
+#proposalInfoModal .proposal-info-row--rejected span {
+  color: #8f1d16;
+}
+
 #confirmProposalModal .proposal-change-row strong,
 #proposalInfoModal .proposal-change-row strong {
   color: var(--text-color);
@@ -2455,6 +3123,7 @@ input[type='file'].form-control::file-selector-button {
   white-space: pre-wrap;
 }
 
+#addProposalModal .proposal-info-value,
 #confirmProposalModal .proposal-info-value,
 #proposalInfoModal .proposal-info-value {
   color: var(--text-color);
@@ -2471,12 +3140,18 @@ input[type='file'].form-control::file-selector-button {
   color: #0f5f27;
 }
 
+#proposalInfoModal .proposal-info-row--rejected .proposal-info-value {
+  color: #7a1711;
+}
+
+#addProposalModal .proposal-info-row > span:not(.proposal-info-value),
 #confirmProposalModal .proposal-info-row > span:not(.proposal-info-value),
 #proposalInfoModal .proposal-info-row > span:not(.proposal-info-value) {
   align-self: start;
   justify-self: center;
 }
 
+#addProposalModal .proposal-info-value,
 #confirmProposalModal .proposal-info-value,
 #proposalInfoModal .proposal-info-value {
   align-self: center;
@@ -2795,6 +3470,7 @@ input[type='file'].form-control::file-selector-button {
   letter-spacing: -0.01em;
 }
 
+#addProposalModal .proposal-change-arrow,
 #confirmProposalModal .proposal-change-arrow,
 #proposalInfoModal .proposal-change-arrow {
   color: var(--secondary-text-color);
@@ -2804,6 +3480,7 @@ input[type='file'].form-control::file-selector-button {
   text-align: center;
 }
 
+#addProposalModal .proposal-info-muted,
 #confirmProposalModal .proposal-info-muted,
 #confirmProposalModal .proposal-change-row small,
 #proposalInfoModal .proposal-info-muted,
@@ -2818,6 +3495,7 @@ input[type='file'].form-control::file-selector-button {
   margin: 0;
 }
 
+#addProposalModal .proposal-option-section--no-change .proposal-info-muted,
 #confirmProposalModal .proposal-option-section--no-change .proposal-info-muted,
 #proposalInfoModal .proposal-option-section--no-change .proposal-info-muted {
   align-self: center;
@@ -2832,12 +3510,14 @@ input[type='file'].form-control::file-selector-button {
   text-align: right;
 }
 
+#addProposalModal .proposal-option-section--no-change,
 #confirmProposalModal .proposal-option-section--no-change,
 #proposalInfoModal .proposal-option-section--no-change {
   grid-template-rows: auto minmax(0, 1fr);
   min-height: 110px;
 }
 
+#addProposalModal .proposal-option-section--no-change .proposal-change-arrow,
 #confirmProposalModal .proposal-option-section--no-change .proposal-change-arrow,
 #proposalInfoModal .proposal-option-section--no-change .proposal-change-arrow {
   align-self: baseline;
@@ -2887,9 +3567,22 @@ input[type='file'].form-control::file-selector-button {
 }
 
 @media (max-width: 420px) {
+  #addProposalModal .proposal-info-row,
   #confirmProposalModal .proposal-info-row,
   #proposalInfoModal .proposal-info-row {
     flex-basis: calc((100% - 8px) / 2);
+  }
+
+  #proposalInfoModal .dao-project-review-milestone .proposal-info-row {
+    flex-basis: 100%;
+  }
+
+  #proposalInfoModal .dao-project-info-funding .proposal-info-row {
+    grid-template-columns: minmax(100px, auto) minmax(0, 1fr);
+  }
+
+  #proposalInfoModal .dao-project-info-funding .proposal-info-row:first-child {
+    grid-template-columns: auto minmax(0, 1fr);
   }
 }
 
@@ -5362,11 +6055,43 @@ input[type='number'].form-control::-webkit-inner-spin-button {
   transform: scale(0.99);
 }
 
+#signInModal .sign-in-account-item:focus-visible {
+  outline: none;
+}
+
+#signInModal .sign-in-account-item:focus-visible .sign-in-account-card {
+  outline: 2px solid var(--primary-color);
+  outline-offset: 2px;
+}
+
+#signInModal .sign-in-account-avatar {
+  display: inline-flex;
+  flex: 0 0 40px;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  overflow: hidden;
+  background-color: var(--light-color);
+  line-height: 0;
+}
+
+#signInModal .sign-in-account-avatar:empty {
+  display: none;
+}
+
+#signInModal .sign-in-account-avatar svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
 #signInModal .sign-in-account-name {
+  flex: 1;
   font-family: var(--font-primary);
   font-size: var(--font-size-base);
   font-weight: 600;
   color: var(--text-color);
+  text-align: left;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -8271,12 +8996,14 @@ small {
 .menu-item::before {
   content: '';
   display: inline-block;
+  flex: 0 0 20px;
   width: 20px;
   height: 20px;
   background-position: center;
   background-repeat: no-repeat;
   background-size: 20px;
   margin-right: 12px;
+  opacity: 0.75;
   transition: opacity 0.2s ease;
 }
 
@@ -8427,6 +9154,14 @@ small {
   width: 100%;
 }
 
+#daoModal .dao-project-filter-row {
+  display: grid;
+  gap: 4px;
+  grid-column: 1 / -1;
+  grid-template-columns: max-content repeat(3, minmax(0, 1fr));
+  min-width: 0;
+}
+
 #daoModal .dao-filter-chip {
   align-items: center;
   appearance: none;
@@ -8435,11 +9170,12 @@ small {
   border-radius: 6px;
   color: var(--text-color);
   cursor: pointer;
-  display: inline-flex;
+  display: grid;
   font-family: var(--font-primary);
   font-size: var(--font-size-xs);
   font-weight: var(--font-weight-medium);
   gap: 4px;
+  grid-template-columns: minmax(0, 1fr) auto;
   justify-content: center;
   line-height: 1.2;
   min-height: 36px;
@@ -8449,6 +9185,22 @@ small {
   position: relative;
   transition: background-color 0.15s ease, color 0.15s ease, box-shadow 0.15s ease;
   white-space: nowrap;
+}
+
+#daoModal .dao-filter-row-label {
+  align-items: center;
+  color: var(--secondary-text-color);
+  display: flex;
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-semibold);
+  min-height: 36px;
+  padding: 6px 4px;
+}
+
+#daoModal .dao-filter-chip-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: clip;
 }
 
 #daoModal .dao-filter-chip.has-notification::after {
@@ -8483,6 +9235,7 @@ small {
   font-variant-numeric: tabular-nums;
   font-weight: var(--font-weight-semibold);
   justify-content: center;
+  justify-self: end;
   min-height: 20px;
   min-width: 22px;
   padding: 2px 6px;
@@ -8491,6 +9244,22 @@ small {
 #daoModal .dao-filter-chip.active .dao-filter-chip-count {
   background: rgba(255, 255, 255, 0.18);
   color: var(--background-color);
+}
+
+@media (max-width: 640px) {
+  #daoModal .dao-project-filter-row {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+
+  #daoModal .dao-filter-chip,
+  #daoModal .dao-filter-row-label {
+    font-size: clamp(9px, 2.8vw, 12px);
+  }
+
+  #daoModal .dao-filter-chip {
+    padding-left: 2px;
+    padding-right: 6px;
+  }
 }
 
 #daoModal #daoProposalList {

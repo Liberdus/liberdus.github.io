@@ -113,11 +113,9 @@
           <button id="createAccountButton" class="btn btn--primary btn--pill btn--full hidden">Create Account</button>
           <button id="openWelcomeMenu" class="btn btn--secondary btn--pill btn--full hidden">Menu</button>
         </div>
-        <div style="font-size: 0.8rem; margin-top: 10px; text-align: center">
-          Version <span id="versionDisplay"></span>
-        </div>
-        <div style="font-size: 0.8rem; margin-top: 5px; text-align: center" id="appVersionDisplay" class="hidden">
-          App Version: <span id="appVersionText"></span>
+        <div class="welcome-version" aria-label="Version information">
+          <div>Web Version: <span id="versionDisplay"></span></div>
+          <div id="appVersionDisplay" class="hidden">App Version: <span id="appVersionText"></span></div>
         </div>
         <!-- Add a unused anchor tag with nothing in it and add a class to it so can't shift and end up on another modal. Should still be displayed but will just show nothing -->
         <a class="last-item" href="#" id="welcomeScreenLastItem"> </a>
@@ -417,7 +415,7 @@
         </div>
         <div class="modal-content">
           <div class="dao-toolbar">
-            <div class="dao-filter-bar" id="daoFilterBar" role="tablist" aria-label="Proposal filter">
+            <div class="dao-filter-bar" id="daoFilterBar" role="tablist" aria-label="Proposal and project filters">
               <button class="dao-filter-chip" type="button" role="tab" data-filter-key="review" aria-selected="false">
                 <span class="dao-filter-chip-label">Review</span>
                 <span class="dao-filter-chip-count" aria-label="0 review proposals">0</span>
@@ -450,6 +448,21 @@
                 <span class="dao-filter-chip-label">All</span>
                 <span class="dao-filter-chip-count" aria-label="0 all proposals">0</span>
               </button>
+              <div class="dao-project-filter-row" role="presentation">
+                <span class="dao-filter-row-label" aria-hidden="true">Projects:</span>
+                <button class="dao-filter-chip" type="button" role="tab" data-filter-key="executing" aria-selected="false">
+                  <span class="dao-filter-chip-label">Executing</span>
+                  <span class="dao-filter-chip-count" aria-label="0 executing projects">0</span>
+                </button>
+                <button class="dao-filter-chip" type="button" role="tab" data-filter-key="terminated" aria-selected="false">
+                  <span class="dao-filter-chip-label">Terminated</span>
+                  <span class="dao-filter-chip-count" aria-label="0 terminated projects">0</span>
+                </button>
+                <button class="dao-filter-chip" type="button" role="tab" data-filter-key="completed" aria-selected="false">
+                  <span class="dao-filter-chip-label">Completed</span>
+                  <span class="dao-filter-chip-count" aria-label="0 completed projects">0</span>
+                </button>
+              </div>
             </div>
           </div>
           <div class="dao-list-pane">
@@ -483,7 +496,7 @@
                     <option value="false">No</option>
                     <option value="true">Yes</option>
                   </select>
-                  <div class="dao-form-help">Emergency proposals allow only one additional option.</div>
+                  <div class="dao-form-help" id="addProposalEmergencyHelp">Emergency proposals allow only one additional option.</div>
                 </div>
                 <div class="form-group">
                   <label for="addProposalFee">Proposal Fee</label>
@@ -505,10 +518,11 @@
                   <option value="governance">Governance</option>
                   <option value="economic">Economic</option>
                   <option value="protocol">Protocol</option>
+                  <option value="project">Project</option>
                 </select>
-                <div class="dao-form-help">Choose governance, economic, or protocol. This controls which parameters can be selected below.</div>
+                <div class="dao-form-help" id="addProposalTypeHelp">Choose governance, economic, protocol, or Project.</div>
               </div>
-              <div class="form-group dao-form-section">
+              <div class="form-group dao-form-section" id="addProposalParameterEditor">
                 <div class="dao-form-label-with-help">
                   <label>Options and Parameter Changes <span class="dao-form-required" aria-hidden="true">*</span></label>
                   <button
@@ -526,6 +540,75 @@
                   <span>Add option</span>
                 </button>
               </div>
+              <section class="dao-project-editor hidden" id="addProposalProjectEditor" aria-labelledby="addProposalProjectHeading">
+                <div class="dao-project-preview-notice" role="status">
+                  <strong>Project UI preview</strong>
+                  <span>Project review and submission are not available yet.</span>
+                </div>
+                <div class="dao-form-section-header">
+                  <label id="addProposalProjectHeading">Project Details</label>
+                </div>
+                <div class="dao-form-section-header">
+                  <label>Milestones <span class="dao-form-required" aria-hidden="true">*</span></label>
+                  <span class="dao-form-help" id="addProposalProjectMilestoneLimit"></span>
+                </div>
+                <div class="dao-form-list" id="addProposalProjectMilestones"></div>
+                <button type="button" class="btn btn--secondary dao-form-add-button" id="addProposalProjectAddMilestone">
+                  <span class="dao-form-add-icon" aria-hidden="true"><span class="plus-glyph">+</span></span>
+                  <span>Add milestone</span>
+                </button>
+                <div class="sr-only" id="addProposalProjectLive" aria-live="polite"></div>
+                <div class="form-group">
+                  <label for="addProposalProjectAddress">Recipient Address <span class="dao-form-required" aria-hidden="true">*</span></label>
+                  <input
+                    id="addProposalProjectAddress"
+                    class="form-control"
+                    type="text"
+                    maxlength="66"
+                    placeholder="Recipient Liberdus address"
+                    autocomplete="off"
+                    autocapitalize="none"
+                    spellcheck="false"
+                    data-dao-project-field="address"
+                    required
+                  />
+                  <div class="dao-form-help">The recipient that will be eligible for approved project payments.</div>
+                </div>
+                <div class="form-group">
+                  <label>Budget Summary</label>
+                  <div class="proposal-info-grid dao-project-budget" aria-live="polite">
+                    <div class="proposal-info-row dao-project-budget-item">
+                      <span>Base cost</span>
+                      <div class="proposal-info-value dao-project-budget-value"><span class="dao-project-budget-amount" id="addProposalProjectBaseCost">0</span><span>USD</span></div>
+                    </div>
+                    <div class="proposal-info-row dao-project-budget-item">
+                      <span>Maximum bonuses</span>
+                      <div class="proposal-info-value dao-project-budget-value"><span class="dao-project-budget-amount" id="addProposalProjectMaximumBonus">0</span><span>USD</span></div>
+                    </div>
+                    <div class="proposal-info-row dao-project-budget-item">
+                      <span>Maximum authorized</span>
+                      <div class="proposal-info-value dao-project-budget-value"><span class="dao-project-budget-amount" id="addProposalProjectMaximumBudget">0</span><span>USD</span></div>
+                    </div>
+                  </div>
+                </div>
+                <div class="form-group">
+                  <label>Proposal Options</label>
+                  <div class="proposal-option-cards dao-project-ballot" aria-label="Project ballot choices">
+                    <div class="proposal-option-section">
+                      <span class="proposal-option-label">Reject</span>
+                      <div class="proposal-option-changes">
+                        <p class="proposal-info-muted">Project is not funded.</p>
+                      </div>
+                    </div>
+                    <div class="proposal-option-section">
+                      <span class="proposal-option-label">Fund project</span>
+                      <div class="proposal-option-changes">
+                        <p class="proposal-info-muted">Approve the recipient, milestones, and maximum budget below.</p>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </section>
               <div class="form-group dao-form-section">
                 <label>Timing</label>
                 <div class="dao-form-grid dao-form-grid--timing">
@@ -564,7 +647,7 @@
               </div>
               <div class="form-actions">
                 <button type="button" id="cancelAddProposal" class="btn btn--secondary btn--pill btn--full">Cancel</button>
-                <button type="submit" class="btn btn--primary btn--pill btn--full">Review Draft</button>
+                <button type="submit" class="btn btn--primary btn--pill btn--full" id="addProposalSubmitButton">Review Draft</button>
               </div>
             </form>
           </div>
@@ -827,7 +910,7 @@
               <p class="about-description">Liberdus is a decentralized messaging and wallet application.</p>
 
               <div class="about-info-section">
-                <div class="about-info-item">Version <span id="versionDisplayAbout"></span></div>
+                <div class="about-info-item">Web Version: <span id="versionDisplayAbout"></span></div>
                 <div class="about-info-item" id="appVersionAbout" style="display: none;">App Version: <span id="appVersionTextAbout"></span></div>
                 <div class="about-info-item">Network Name: <span id="networkNameAbout"></span></div>
                 <div class="about-info-item">
@@ -997,68 +1080,95 @@
         </div>
         <div class="modal-content">
           <div class="form-container">
-            <form id="createAccountForm" class="form--narrow">
+            <form id="createAccountForm" class="form--narrow create-account-form">
               <div class="form-group">
                 <label for="newUsername">
                   Username
-                  <span id="newUsernameAvailable" style="color: #28a745; display: none"> available </span>
+                  <span id="newUsernameAvailable" class="create-account-status"> available </span>
                 </label>
-                <div style="position: relative">
-                  <input
-                    type="text"
-                    id="newUsername"
-                    class="form-control"
-                    placeholder="Select a username"
-                    required
-                    pattern="[a-zA-Z0-9]*"
-                    inputmode="text"
-                    maxlength="20"
-                  />
-                </div>
+                <input
+                  type="text"
+                  id="newUsername"
+                  class="form-control"
+                  placeholder="Choose a username"
+                  required
+                  pattern="[a-zA-Z0-9]*"
+                  inputmode="text"
+                  maxlength="20"
+                  autocomplete="off"
+                />
+                <p class="create-account-help">
+                  This is how people find you, and it is permanent — a name cannot be changed once it is taken.
+                </p>
               </div>
-              <div id="privateKeySection" style="display: none">
-                <div class="form-group">
-                  <label for="newPrivateKey"
-                    >Private Key <span id="newPrivateKeyError" style="color: #dc3545; display: none"></span
-                  ></label>
-                  <div style="position: relative">
-                    <input
-                      type="password"
-                      id="newPrivateKey"
-                      class="form-control"
-                      placeholder="Optional private key in hex format"
-                    />
-                    <button type="button" id="togglePrivateKeyVisibility" class="password-toggle-btn"></button>
+
+              <details class="create-account-advanced" id="advancedOptions">
+                <summary id="advancedOptionsSummary">
+                  <span>Advanced</span>
+                  <span class="create-account-chevron" aria-hidden="true"></span>
+                </summary>
+                <div class="create-account-advanced-body">
+                  <div class="create-account-option">
+                    <div class="create-account-option-copy">
+                      <div class="create-account-option-heading">
+                        <label for="togglePrivateAccount">Private account</label>
+                        <button
+                          type="button"
+                          class="toll-info-icon private-account-help"
+                          data-icon="info"
+                          id="privateAccountHelpButton"
+                          aria-label="About private accounts"
+                        ></button>
+                      </div>
+                      <label class="create-account-option-help" for="togglePrivateAccount">
+                        Can only message and pay other private accounts. Cannot be changed later.
+                      </label>
+                    </div>
+                    <label class="create-account-option-toggle" for="togglePrivateAccount">
+                      <input type="checkbox" id="togglePrivateAccount" />
+                      <span class="create-account-check" aria-hidden="true"></span>
+                    </label>
                   </div>
-                  <small>
-                    If you want to use an existing private key enter it here. Otherwise you can leave this empty to have a
-                    private key automatically generated.
-                  </small>
+
+                  <div class="create-account-option">
+                    <div class="create-account-option-copy">
+                      <label class="create-account-option-title" for="togglePrivateKeyInput">Use my own private key</label>
+                      <label class="create-account-option-help" for="togglePrivateKeyInput">
+                        Otherwise one is generated for you.
+                      </label>
+                    </div>
+                    <label class="create-account-option-toggle" for="togglePrivateKeyInput">
+                      <input type="checkbox" id="togglePrivateKeyInput" />
+                      <span class="create-account-check" aria-hidden="true"></span>
+                    </label>
+                  </div>
+
+                  <div id="privateKeySection" hidden>
+                    <label class="create-account-private-key-label" for="newPrivateKey">
+                      Private key <span id="newPrivateKeyError" class="create-account-error"></span>
+                    </label>
+                    <div class="create-account-private-key">
+                      <input
+                        type="password"
+                        id="newPrivateKey"
+                        class="form-control"
+                        placeholder="Your key, in hex"
+                        autocomplete="off"
+                      />
+                      <button
+                        type="button"
+                        id="togglePrivateKeyVisibility"
+                        class="password-toggle-btn"
+                        aria-label="Show private key"
+                        aria-pressed="false"
+                      ></button>
+                    </div>
+                  </div>
                 </div>
-              </div>
-              <div class="form-actions">
+              </details>
+
+              <div class="form-actions create-account-actions">
                 <button type="submit" class="btn btn--primary btn--pill btn--full" disabled>Create Account</button>
-              </div>
-              
-              <div class="form-group u-mt-20">
-                <input type="checkbox" id="toggleMoreOptions" />
-                <label for="toggleMoreOptions" style="display: inline; margin-left: 5px">More Options</label>
-              </div>
-              
-              <div id="moreOptionsSection" style="display: none;">
-                <div class="form-group form-group--checkbox">
-                  <input type="checkbox" id="togglePrivateAccount" />
-                  <label for="togglePrivateAccount">
-                    Make this a private account
-                    <span class="toll-info-icon private-account-help" data-icon="info" id="privateAccountHelpButton"></span>
-                  </label>
-                </div>
-                <div class="form-group form-group--checkbox">
-                  <input type="checkbox" id="togglePrivateKeyInput" />
-                  <label for="togglePrivateKeyInput">
-                    Use my own private key (Advanced)
-                  </label>
-                </div>
               </div>
             </form>
             <div class="form-group" id="migrateAccountsSection" style="display: none; margin-top: 50px; padding: 0 16px">

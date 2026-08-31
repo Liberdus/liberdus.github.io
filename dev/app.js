@@ -1,8 +1,17 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
-//   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 'f'
+//   Versions should be YYYY.MMDD.HHmm like 2025.0125.1005
+const version = 'g'
 const BOOT_SPLASH_HANDOFF_MS = 1000;
 let myVersion = '0';
+
+function getComparableVersion(value) {
+  return Number(value.replace(/\D/g, ''));
+}
+
+function getWebVersionDisplay() {
+  return `${myVersion} ${version}`.trim();
+}
+
 async function checkVersion() {
   // Use network-specific version key to avoid false update alerts when switching networks
   const versionKey = network?.netid ? `version_${network.netid}` : 'version';
@@ -25,9 +34,10 @@ async function checkVersion() {
     }
     newVersion = myVersion; // Allow continuing with the old version
   }
-  //console.log('myVersion < newVersion then reload', myVersion, newVersion)
-  console.log(parseInt(myVersion.replace(/\D/g, '')), parseInt(newVersion.replace(/\D/g, '')));
-  if (parseInt(myVersion.replace(/\D/g, '')) != parseInt(newVersion.replace(/\D/g, ''))) {
+  const currentComparableVersion = getComparableVersion(myVersion);
+  const newComparableVersion = getComparableVersion(newVersion);
+  console.log(currentComparableVersion, newComparableVersion);
+  if (currentComparableVersion !== newComparableVersion) {
     alert('Updating to new version: ' + newVersion + ' ' + version);
     localStorage.setItem(versionKey, newVersion); // Save new version with network-specific key
     const newUrl = window.location.href.split('?')[0];
@@ -48,6 +58,10 @@ async function checkVersion() {
       'meet/index.html',
     ]);
     window.location.replace(newUrl);
+  } else if (myVersion !== newVersion) {
+    // Store the canonical format without reloading when only the separators changed.
+    myVersion = newVersion;
+    localStorage.setItem(versionKey, newVersion);
   }
   logsModal.log(`Started version: ${myVersion}`)
 }
@@ -86,15 +100,28 @@ import {
   DAO_PROPOSAL_DAY_MS,
   DAO_PROPOSAL_GRACE_PERIOD_MAX_MS,
   DAO_PROPOSAL_TITLE_MAX_LENGTH,
+  DAO_PROJECT_DURATION_MAX_DAYS,
+  DAO_PROJECT_MAX_MILESTONES,
+  DAO_PROJECT_MILESTONE_TEXT_MAX_LENGTH,
+  DAO_PROJECT_MILESTONE_TITLE_MAX_LENGTH,
+  DAO_PROJECT_FILTERS,
+  DAO_PROJECT_PREVIEW_KIND,
+  DAO_PROJECT_TYPE,
   DAO_PARAMETER_MAX_WHOLE_DIGITS,
+  buildDaoProjectProposalPreviewDraft,
   buildDaoProposalCreateDraft,
   daoRepo,
   DAO_STATES,
   getDaoFinalVoteResult,
   getDaoNotificationSummary,
+  getDaoProjectBudgetSummary,
+  getDaoProjectPresentation,
+  getDaoProposalInfoStateLabel,
+  getDaoProposalListFilterKey,
   getDaoTransactionMessage,
   getDaoTrackedProposalMetadataEntries,
   getDaoProposalClaimWindow,
+  getDaoProposalOptionLabels,
   getDaoPendingFinalizationOutcome,
   getDaoProposalTimeline,
   getDaoVoteReminderSchedule,
@@ -104,12 +131,15 @@ import {
   getDaoTypeLabel,
   getEffectiveDaoState,
   hasPendingDaoAction,
+  isDaoParameterProposalTypeKey,
   isValidDaoDecimalString,
   isDaoTransactionType,
   normalizeDaoAddress,
   normalizeDaoParameterInput,
   parseDaoUnsignedBigInt,
   setDaoBackendFetcher,
+  shouldOpenDaoProjectMilestoneByDefault,
+  shouldShowDaoProjectRuntime,
 } from './dao.js';
 
 // Import crypto functions from crypto.js
@@ -1109,7 +1139,7 @@ class WelcomeScreen {
     this.appVersionText = document.getElementById('appVersionText');
     
     
-    this.versionDisplay.textContent = myVersion + ' ' + version;
+    this.versionDisplay.textContent = getWebVersionDisplay();
     this.networkNameDisplay.textContent = network.name;
 
     if (reactNativeApp?.appVersion) {
@@ -2596,7 +2626,14 @@ async function refreshDaoNotificationSummary() {
 const DAO_PROPOSAL_PAGE_SIZE = 10;
 const DAO_ALL_FILTER = { key: 'all', label: 'All' };
 const DAO_CLAIMABLE_FILTER = { key: 'claimable', label: 'Claimable' };
-const DAO_FILTER_OPTIONS = [DAO_ALL_FILTER, ...DAO_STATES, DAO_CLAIMABLE_FILTER];
+const DAO_FILTER_OPTIONS = [
+  DAO_ALL_FILTER,
+  ...DAO_STATES,
+  DAO_CLAIMABLE_FILTER,
+  ...DAO_PROJECT_FILTERS,
+];
+const DAO_PROJECT_FILTER_KEYS = new Set(DAO_PROJECT_FILTERS.map(({ key }) => key));
+const DAO_PROJECT_CANDIDATE_STATES = new Set(['accepted', 'applied']);
 
 function formatDaoTimestamp(ts) {
   const n = Number(ts || 0);
@@ -2727,12 +2764,17 @@ class DaoModal {
       await daoRepo.refresh({ force: true });
       if (!this.isActive() || refreshId !== this.openRefreshId) return;
       this.acknowledgeNotifications(notificationCutoff);
+      const projectFilterProposalNumbers = await this.loadProjectFilterCandidates();
+      if (!this.isActive() || refreshId !== this.openRefreshId) return;
       const refreshedClaimProposalNumbers = await this.syncTrackedClaimWindows();
       if (!this.isActive() || refreshId !== this.openRefreshId) return;
       this.refreshState = 'ready';
       await this.loadSelectedFilter({
         reset: true,
-        reuseProposalNumbers: refreshedClaimProposalNumbers,
+        reuseProposalNumbers: new Set([
+          ...projectFilterProposalNumbers,
+          ...refreshedClaimProposalNumbers,
+        ]),
       });
       this.lastSuccessfulRefreshId = Math.max(this.lastSuccessfulRefreshId, refreshId);
       if (!this.isActive() || refreshId !== this.openRefreshId) return;
@@ -2849,7 +2891,26 @@ class DaoModal {
   getSelectedMetadataEntries(entries) {
     if (this.selectedFilterKey === DAO_ALL_FILTER.key) return entries;
     if (this.selectedFilterKey === DAO_CLAIMABLE_FILTER.key) return this.getClaimCandidateMetadataEntries(entries);
-    return entries.filter((entry) => entry.status === this.selectedFilterKey);
+    const proposalsByNumber = new Map(
+      daoRepo.getProposalsForUi().map((proposal) => [proposal.number, proposal]),
+    );
+    return entries.filter((entry) => {
+      const proposal = proposalsByNumber.get(entry.proposal);
+      const filterKey = proposal ? getDaoProposalListFilterKey(proposal) : entry.status;
+      return filterKey === this.selectedFilterKey;
+    });
+  }
+
+  async loadProjectFilterCandidates() {
+    const entries = daoRepo.getProposalMetaForUi()
+      .filter((entry) => DAO_PROJECT_CANDIDATE_STATES.has(entry.status));
+    await daoRepo.loadProposalEntries(entries, { append: true });
+    const candidateNumbers = new Set(entries.map((entry) => entry.proposal));
+    return new Set(
+      daoRepo.getProposalsForUi()
+        .map((proposal) => proposal.number)
+        .filter((proposalNumber) => candidateNumbers.has(proposalNumber)),
+    );
   }
 
   async loadSelectedFilter({ reset, reuseProposalNumbers = new Set() }) {
@@ -2859,9 +2920,8 @@ class DaoModal {
     const pageStart = reset ? 0 : Math.max(this.visibleProposalCount - DAO_PROPOSAL_PAGE_SIZE, 0);
     const entriesToLoad = entries.slice(pageStart, this.visibleProposalCount);
     const entriesToFetch = entriesToLoad.filter((entry) => !reuseProposalNumbers.has(entry.proposal));
-    const reusedFreshDetails = entriesToFetch.length < entriesToLoad.length;
 
-    const request = daoRepo.loadProposalEntries(entriesToFetch, { append: !reset || reusedFreshDetails });
+    const request = daoRepo.loadProposalEntries(entriesToFetch, { append: true });
     this.detailsRequest = request;
     this.render();
 
@@ -2903,11 +2963,15 @@ class DaoModal {
     let didRefreshDaoData = false;
     try {
       await daoRepo.refresh({ force: true });
+      const projectFilterProposalNumbers = await this.loadProjectFilterCandidates();
       const refreshedClaimProposalNumbers = await this.syncTrackedClaimWindows();
       if (this.isActive()) {
         await this.loadSelectedFilter({
           reset: true,
-          reuseProposalNumbers: refreshedClaimProposalNumbers,
+          reuseProposalNumbers: new Set([
+            ...projectFilterProposalNumbers,
+            ...refreshedClaimProposalNumbers,
+          ]),
         });
       }
       if (!daoRepo.getProposalById(pendingTxInfo?.proposalStoreId)) {
@@ -2971,8 +3035,11 @@ class DaoModal {
       : this.getSelectedMetadataEntries(metadataEntries);
 
     const counts = Object.fromEntries(DAO_FILTER_OPTIONS.map((filter) => [filter.key, 0]));
+    const proposalsByNumber = new Map(proposals.map((proposal) => [proposal.number, proposal]));
     for (const entry of metadataEntries) {
-      if (counts[entry.status] !== undefined) counts[entry.status] += 1;
+      const proposal = proposalsByNumber.get(entry.proposal);
+      const filterKey = proposal ? getDaoProposalListFilterKey(proposal) : entry.status;
+      if (counts[filterKey] !== undefined) counts[filterKey] += 1;
     }
     counts[DAO_ALL_FILTER.key] = metadataEntries.length;
     counts[DAO_CLAIMABLE_FILTER.key] = claimCandidateMetadataEntries.length;
@@ -2992,9 +3059,13 @@ class DaoModal {
         countEl.textContent = hasFreshData ? String(count) : '—';
         let countAriaLabel = `${filter.label} count unavailable`;
         if (hasFreshData) {
-          countAriaLabel = filter.key === DAO_CLAIMABLE_FILTER.key
-            ? `${count} tracked claim candidates`
-            : `${count} ${filter.label.toLowerCase()} proposals`;
+          if (filter.key === DAO_CLAIMABLE_FILTER.key) {
+            countAriaLabel = `${count} tracked claim candidates`;
+          } else if (DAO_PROJECT_FILTER_KEYS.has(filter.key)) {
+            countAriaLabel = `${count} ${filter.label.toLowerCase()} projects`;
+          } else {
+            countAriaLabel = `${count} ${filter.label.toLowerCase()} proposals`;
+          }
         }
         countEl.setAttribute('aria-label', countAriaLabel);
       }
@@ -3039,6 +3110,9 @@ class DaoModal {
       } else if (isClaimableFilter) {
         if (headlineEl) headlineEl.textContent = 'No claimable proposals found';
         if (sublineEl) sublineEl.textContent = 'Claimable proposals appear here when available';
+      } else if (DAO_PROJECT_FILTER_KEYS.has(this.selectedFilterKey)) {
+        if (headlineEl) headlineEl.textContent = `No ${label.toLowerCase()} projects found`;
+        if (sublineEl) sublineEl.textContent = 'Projects appear here after proposal acceptance';
       } else {
         if (headlineEl) headlineEl.textContent = 'No proposals found';
         if (sublineEl) sublineEl.textContent = 'Proposal data appears here when available';
@@ -3112,6 +3186,9 @@ class DaoModal {
   renderProposalRowPreview(proposal) {
     const chips = [];
     const state = getEffectiveDaoState(proposal);
+    const projectFilter = DAO_PROJECT_FILTERS.find(
+      ({ key }) => key === getDaoProposalListFilterKey(proposal),
+    );
     const result = getDaoProposalResultSummary(proposal);
     const reward = getDaoProposalRewardSummary(proposal);
 
@@ -3204,7 +3281,12 @@ class DaoModal {
         });
       }
     }
-    if (result && state !== 'accepted') {
+    if (projectFilter) {
+      chips.push({
+        value: projectFilter.label,
+        tone: getDaoProjectStatusTone(proposal?.project?.status) || 'neutral',
+      });
+    } else if (result && state !== 'accepted') {
       chips.push({
         value: result.headline,
         tone: result.tone,
@@ -3308,17 +3390,29 @@ class AddProposalModal {
     this.typeSelect = document.getElementById('addProposalType');
     this.descriptionInput = document.getElementById('addProposalDescription');
     this.proposalFeeInput = document.getElementById('addProposalFee');
+    this.typeHelp = document.getElementById('addProposalTypeHelp');
+    this.parameterEditor = document.getElementById('addProposalParameterEditor');
     this.optionsList = document.getElementById('addProposalOptionsList');
     this.optionsLimitHelp = document.getElementById('addProposalOptionsLimitHelp');
     this.addOptionButton = document.getElementById('addProposalOptionButton');
+    this.projectEditor = document.getElementById('addProposalProjectEditor');
+    this.projectAddressInput = document.getElementById('addProposalProjectAddress');
+    this.projectMilestonesList = document.getElementById('addProposalProjectMilestones');
+    this.projectAddMilestoneButton = document.getElementById('addProposalProjectAddMilestone');
+    this.projectMilestoneLimit = document.getElementById('addProposalProjectMilestoneLimit');
+    this.projectBaseCost = document.getElementById('addProposalProjectBaseCost');
+    this.projectMaximumBonus = document.getElementById('addProposalProjectMaximumBonus');
+    this.projectMaximumBudget = document.getElementById('addProposalProjectMaximumBudget');
+    this.projectLive = document.getElementById('addProposalProjectLive');
     this.emergencySelect = document.getElementById('addProposalEmergency');
+    this.emergencyHelp = document.getElementById('addProposalEmergencyHelp');
     this.reviewStartButton = document.getElementById('addProposalReviewStartTime');
     this.reviewStartHelp = document.getElementById('addProposalReviewStartHelp');
     this.gracePeriodButton = document.getElementById('addProposalGracePeriodMs');
     this.gracePeriodHelp = document.getElementById('addProposalGracePeriodHelp');
     this.gracePeriodLimit = document.getElementById('addProposalGracePeriodLimit');
     this.gracePeriodLoadError = false;
-    this.submitButton = this.form?.querySelector('button[type="submit"]');
+    this.submitButton = document.getElementById('addProposalSubmitButton');
     this.resetConfigCache();
 
     if (this.closeButton) this.closeButton.addEventListener('click', () => this.close());
@@ -3338,10 +3432,7 @@ class AddProposalModal {
     }
 
     if (this.typeSelect) {
-      this.typeSelect.addEventListener('change', () => {
-        this.options = this.options.map((proposalOption) => ({ ...proposalOption, changes: [] }));
-        this.refreshSelectedConfigOptions();
-      });
+      this.typeSelect.addEventListener('change', () => this.handleProposalTypeChange());
     }
 
     if (this.emergencySelect) {
@@ -3357,6 +3448,13 @@ class AddProposalModal {
       this.optionsList.addEventListener('click', (event) => this.handleOptionsClick(event));
       this.optionsList.addEventListener('input', (event) => this.handleOptionsInput(event));
       this.optionsList.addEventListener('change', (event) => this.handleOptionsChange(event));
+    }
+    if (this.projectAddMilestoneButton) {
+      this.projectAddMilestoneButton.addEventListener('click', () => this.addProjectMilestone());
+    }
+    if (this.projectEditor) {
+      this.projectEditor.addEventListener('input', (event) => this.handleProjectInput(event));
+      this.projectEditor.addEventListener('click', (event) => this.handleProjectClick(event));
     }
   }
 
@@ -3379,8 +3477,15 @@ class AddProposalModal {
     }
     this.reviewStartTimeMs = 0;
     this.gracePeriodMs = 0;
+    this.projectMilestoneSequence = 0;
+    this.projectDraft = {
+      address: '',
+      milestones: [this.createProjectMilestone()],
+    };
     this.renderReviewStartTime();
     this.options = [this.createOption()];
+    this.renderProposalTypeEditor();
+    this.renderProjectEditor();
     this.renderOptions('Loading current DAO config values...');
     this.renderGracePeriodLimitHint();
     this.refreshProposalDefaults();
@@ -3398,6 +3503,49 @@ class AddProposalModal {
 
   isActive() {
     return this.modal.classList.contains('active');
+  }
+
+  isProjectProposal() {
+    return this.typeSelect?.value === DAO_PROJECT_TYPE;
+  }
+
+  renderProposalTypeEditor() {
+    const isProject = this.isProjectProposal();
+    this.parameterEditor?.classList.toggle('hidden', isProject);
+    this.projectEditor?.classList.toggle('hidden', !isProject);
+
+    if (this.typeHelp) {
+      this.typeHelp.textContent = isProject
+        ? 'Project proposals fund a recipient through milestones. This editor is a UI preview.'
+        : 'Choose governance, economic, or protocol. This controls which parameters can be selected below.';
+    }
+
+    if (this.emergencySelect) {
+      if (isProject) this.emergencySelect.value = 'false';
+      this.emergencySelect.disabled = isProject;
+      PopupSelect.sync(this.emergencySelect);
+    }
+    if (this.emergencyHelp) {
+      this.emergencyHelp.textContent = isProject
+        ? 'Project proposals cannot be emergency proposals.'
+        : 'Emergency proposals allow only one additional option.';
+    }
+
+    this.renderProposalFee();
+  }
+
+  handleProposalTypeChange() {
+    this.clearValidationErrors();
+    this.renderProposalTypeEditor();
+
+    if (this.isProjectProposal()) {
+      this.configRequestId += 1;
+      this.renderProjectEditor();
+      return;
+    }
+
+    this.options = this.options.map((proposalOption) => ({ ...proposalOption, changes: [] }));
+    this.refreshSelectedConfigOptions();
   }
 
   resetConfigCache() {
@@ -3536,6 +3684,8 @@ class AddProposalModal {
 
   async refreshSelectedConfigOptions() {
     const proposalType = this.typeSelect?.value || 'governance';
+    if (!isDaoParameterProposalTypeKey(proposalType)) return;
+
     const requestId = ++this.configRequestId;
     this.renderConfigLoadingState();
 
@@ -3639,6 +3789,191 @@ class AddProposalModal {
     }
 
     return this.fetchNetworkAccountConfig();
+  }
+
+  createProjectMilestone() {
+    this.projectMilestoneSequence += 1;
+    return {
+      uiId: `milestone-${this.projectMilestoneSequence}`,
+      title: '',
+      description: '',
+      deliverable: '',
+      durationDays: '',
+      costUsdStr: '',
+      penaltyUsdStr: '0',
+      bonusUsdStr: '0',
+    };
+  }
+
+  renderProjectEditor() {
+    if (!this.projectMilestonesList || !this.projectDraft) return;
+
+    if (this.projectAddressInput) this.projectAddressInput.value = this.projectDraft.address;
+    this.projectMilestonesList.innerHTML = this.projectDraft.milestones
+      .map((milestone, index) => this.renderProjectMilestone(milestone, index))
+      .join('');
+
+    const milestoneCount = this.projectDraft.milestones.length;
+    if (this.projectMilestoneLimit) {
+      this.projectMilestoneLimit.textContent = `${milestoneCount} of ${DAO_PROJECT_MAX_MILESTONES}`;
+    }
+    if (this.projectAddMilestoneButton) {
+      this.projectAddMilestoneButton.disabled = milestoneCount >= DAO_PROJECT_MAX_MILESTONES;
+    }
+    this.renderProjectBudgetSummary();
+  }
+
+  renderProjectMilestone(milestone, index) {
+    const milestoneNumber = index + 1;
+    const uiId = escapeDaoFormAttribute(milestone.uiId);
+    const idPrefix = `addProposalProject${milestone.uiId}`;
+    const moveUpDisabled = index === 0 ? 'disabled' : '';
+    const moveDownDisabled = index === this.projectDraft.milestones.length - 1 ? 'disabled' : '';
+    const removeDisabled = this.projectDraft.milestones.length === 1 ? 'disabled' : '';
+
+    return `
+      <section class="dao-project-milestone" data-dao-milestone-id="${uiId}" aria-labelledby="${idPrefix}Heading">
+        <div class="dao-form-row-title">
+          <label id="${idPrefix}Heading">Milestone ${milestoneNumber}</label>
+          <div class="dao-project-milestone-actions">
+            <button type="button" class="btn btn--secondary dao-project-milestone-action" data-dao-milestone-move="-1" aria-label="Move milestone ${milestoneNumber} up" title="Move milestone ${milestoneNumber} up" ${moveUpDisabled}>
+              <svg class="dao-project-milestone-action-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                <line x1="12" y1="19" x2="12" y2="5"></line>
+                <polyline points="5 12 12 5 19 12"></polyline>
+              </svg>
+            </button>
+            <button type="button" class="btn btn--secondary dao-project-milestone-action" data-dao-milestone-move="1" aria-label="Move milestone ${milestoneNumber} down" title="Move milestone ${milestoneNumber} down" ${moveDownDisabled}>
+              <svg class="dao-project-milestone-action-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                <line x1="12" y1="5" x2="12" y2="19"></line>
+                <polyline points="19 12 12 19 5 12"></polyline>
+              </svg>
+            </button>
+            <button type="button" class="btn btn--secondary dao-form-remove-button" data-dao-remove-milestone aria-label="Remove milestone ${milestoneNumber}" title="Remove milestone ${milestoneNumber}" ${removeDisabled}>
+              <svg class="dao-project-milestone-action-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                <polyline points="3 6 5 6 21 6"></polyline>
+                <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+                <line x1="10" y1="11" x2="10" y2="17"></line>
+                <line x1="14" y1="11" x2="14" y2="17"></line>
+              </svg>
+            </button>
+          </div>
+        </div>
+        <div class="dao-form-grid dao-project-milestone-fields">
+          <div class="form-group form-group--full">
+            <label for="${idPrefix}Title">Title <span class="dao-form-required" aria-hidden="true">*</span></label>
+            <input id="${idPrefix}Title" class="form-control" type="text" maxlength="${DAO_PROJECT_MILESTONE_TITLE_MAX_LENGTH}" value="${escapeDaoFormAttribute(milestone.title)}" data-dao-milestone-field="title" data-dao-milestone-id="${uiId}" required />
+          </div>
+          <div class="form-group form-group--full">
+            <label for="${idPrefix}Description">Description <span class="dao-form-required" aria-hidden="true">*</span></label>
+            <textarea id="${idPrefix}Description" class="form-control" rows="3" maxlength="${DAO_PROJECT_MILESTONE_TEXT_MAX_LENGTH}" data-dao-milestone-field="description" data-dao-milestone-id="${uiId}" required>${escapeHtml(milestone.description)}</textarea>
+          </div>
+          <div class="form-group form-group--full">
+            <label for="${idPrefix}Deliverable">Deliverable / Acceptance Criteria <span class="dao-form-required" aria-hidden="true">*</span></label>
+            <textarea id="${idPrefix}Deliverable" class="form-control" rows="3" maxlength="${DAO_PROJECT_MILESTONE_TEXT_MAX_LENGTH}" data-dao-milestone-field="deliverable" data-dao-milestone-id="${uiId}" required>${escapeHtml(milestone.deliverable)}</textarea>
+          </div>
+          <div class="form-group">
+            <label for="${idPrefix}Duration">Duration (days) <span class="dao-form-required" aria-hidden="true">*</span></label>
+            <input id="${idPrefix}Duration" class="form-control" type="text" inputmode="numeric" maxlength="4" placeholder="30" value="${escapeDaoFormAttribute(milestone.durationDays)}" data-dao-milestone-field="durationDays" data-dao-milestone-id="${uiId}" required />
+            <div class="dao-form-help">1–${DAO_PROJECT_DURATION_MAX_DAYS} days</div>
+          </div>
+          <div class="form-group">
+            <label for="${idPrefix}Cost">Cost (USD) <span class="dao-form-required" aria-hidden="true">*</span></label>
+            <input id="${idPrefix}Cost" class="form-control" type="text" inputmode="decimal" maxlength="34" placeholder="0" value="${escapeDaoFormAttribute(milestone.costUsdStr)}" data-dao-milestone-field="costUsdStr" data-dao-milestone-id="${uiId}" required />
+          </div>
+          <div class="form-group">
+            <label for="${idPrefix}Penalty">Late Penalty (USD) <span class="dao-form-required" aria-hidden="true">*</span></label>
+            <input id="${idPrefix}Penalty" class="form-control" type="text" inputmode="decimal" maxlength="34" value="${escapeDaoFormAttribute(milestone.penaltyUsdStr)}" data-dao-milestone-field="penaltyUsdStr" data-dao-milestone-id="${uiId}" required />
+          </div>
+          <div class="form-group">
+            <label for="${idPrefix}Bonus">Early Bonus (USD) <span class="dao-form-required" aria-hidden="true">*</span></label>
+            <input id="${idPrefix}Bonus" class="form-control" type="text" inputmode="decimal" maxlength="34" value="${escapeDaoFormAttribute(milestone.bonusUsdStr)}" data-dao-milestone-field="bonusUsdStr" data-dao-milestone-id="${uiId}" required />
+          </div>
+        </div>
+      </section>
+    `;
+  }
+
+  handleProjectInput(event) {
+    if (event.target.matches('[data-dao-project-field="address"]')) {
+      this.projectDraft.address = event.target.value;
+      return;
+    }
+    if (!event.target.matches('[data-dao-milestone-field]')) return;
+
+    const milestone = this.projectDraft.milestones.find(
+      (item) => item.uiId === event.target.dataset.daoMilestoneId
+    );
+    if (!milestone) return;
+
+    const field = event.target.dataset.daoMilestoneField;
+    let value = event.target.value;
+    if (field === 'durationDays') {
+      value = value.replace(/\D/g, '').slice(0, String(DAO_PROJECT_DURATION_MAX_DAYS).length);
+    } else if (field === 'costUsdStr' || field === 'penaltyUsdStr' || field === 'bonusUsdStr') {
+      value = normalizeDaoParameterInput(value);
+    }
+
+    event.target.value = value;
+    milestone[field] = value;
+    if (field === 'costUsdStr' || field === 'bonusUsdStr') this.renderProjectBudgetSummary();
+  }
+
+  handleProjectClick(event) {
+    const actionButton = event.target.closest('[data-dao-milestone-move], [data-dao-remove-milestone]');
+    if (!actionButton) return;
+
+    const milestoneElement = actionButton.closest('[data-dao-milestone-id]');
+    const uiId = milestoneElement?.dataset.daoMilestoneId;
+    const index = this.projectDraft.milestones.findIndex((milestone) => milestone.uiId === uiId);
+    if (index < 0) return;
+
+    if (actionButton.matches('[data-dao-remove-milestone]')) {
+      if (this.projectDraft.milestones.length === 1) return;
+      this.projectDraft.milestones.splice(index, 1);
+      this.renderProjectEditor();
+      const nextIndex = Math.min(index, this.projectDraft.milestones.length - 1);
+      this.focusProjectMilestone(this.projectDraft.milestones[nextIndex].uiId);
+      this.announceProjectChange(`Removed milestone ${index + 1}`);
+      return;
+    }
+
+    const destination = index + Number(actionButton.dataset.daoMilestoneMove);
+    if (destination < 0 || destination >= this.projectDraft.milestones.length) return;
+    const [milestone] = this.projectDraft.milestones.splice(index, 1);
+    this.projectDraft.milestones.splice(destination, 0, milestone);
+    this.renderProjectEditor();
+    this.focusProjectMilestone(uiId);
+    this.announceProjectChange(`Moved milestone to position ${destination + 1}`);
+  }
+
+  addProjectMilestone() {
+    if (this.projectDraft.milestones.length >= DAO_PROJECT_MAX_MILESTONES) {
+      showToast(`Projects can have at most ${DAO_PROJECT_MAX_MILESTONES} milestones`, 2500, 'warning');
+      return;
+    }
+
+    const milestone = this.createProjectMilestone();
+    this.projectDraft.milestones.push(milestone);
+    this.renderProjectEditor();
+    this.focusProjectMilestone(milestone.uiId);
+    this.announceProjectChange(`Added milestone ${this.projectDraft.milestones.length}`);
+  }
+
+  focusProjectMilestone(uiId) {
+    this.projectMilestonesList?.querySelector(
+      `[data-dao-milestone-id="${uiId}"] [data-dao-milestone-field="title"]`
+    )?.focus();
+  }
+
+  announceProjectChange(message) {
+    if (this.projectLive) this.projectLive.textContent = message;
+  }
+
+  renderProjectBudgetSummary() {
+    const summary = getDaoProjectBudgetSummary(this.projectDraft?.milestones);
+    if (this.projectBaseCost) this.projectBaseCost.textContent = summary.baseCostUsdStr;
+    if (this.projectMaximumBonus) this.projectMaximumBonus.textContent = summary.maximumBonusUsdStr;
+    if (this.projectMaximumBudget) this.projectMaximumBudget.textContent = summary.maximumAuthorizedUsdStr;
   }
 
   createOption() {
@@ -4103,6 +4438,22 @@ class AddProposalModal {
     };
   }
 
+  getProjectValidationTarget(error) {
+    const field = error?.daoProjectField;
+    if (field === 'address') return this.projectAddressInput;
+    if (field === 'milestones') return this.projectMilestonesList;
+
+    const index = error?.daoProjectMilestoneIndex;
+    const uiId = Number.isSafeInteger(index) ? this.projectDraft?.milestones?.[index]?.uiId : '';
+    if (!uiId || !field) return null;
+
+    const milestoneElement = this.projectMilestonesList?.querySelector(
+      `[data-dao-milestone-id="${uiId}"]`
+    );
+    return milestoneElement?.querySelector(`[data-dao-milestone-field="${field}"]`)
+      || milestoneElement;
+  }
+
   async handleCreate() {
     this.clearValidationErrors();
     const title = (this.titleInput?.value || '').trim();
@@ -4117,7 +4468,7 @@ class AddProposalModal {
       this.showValidationError(this.createValidationError(`Title must be ${DAO_PROPOSAL_TITLE_MAX_LENGTH} characters or less`, this.titleInput));
       return;
     }
-    if (!DAO_CONFIG_CHANGE_OPTIONS[proposalType]) {
+    if (proposalType !== DAO_PROJECT_TYPE && !isDaoParameterProposalTypeKey(proposalType)) {
       this.showValidationError(this.createValidationError('Please select a DAO proposal type', this.typeSelect));
       return;
     }
@@ -4127,7 +4478,6 @@ class AddProposalModal {
     }
 
     try {
-      const { options, changes } = this.getValidatedOptions();
       const reviewStartTimeMs = this.getReviewStartTimeMs();
       const gracePeriodMs = this.gracePeriodMs;
       if (!Number.isSafeInteger(this.maxGracePeriodMs) || this.maxGracePeriodMs < 0) {
@@ -4141,6 +4491,21 @@ class AddProposalModal {
         throw this.createValidationError('Current DAO proposal fee is not loaded yet', this.proposalFeeInput);
       }
 
+      if (proposalType === DAO_PROJECT_TYPE) {
+        const draft = buildDaoProjectProposalPreviewDraft({
+          displayTitle: title,
+          description,
+          project: this.projectDraft,
+          proposalFeeUsdStr: this.proposalFeeUsdStr,
+          reviewStartTimeMs,
+          gracePeriodMs,
+          maxGracePeriodMs: this.maxGracePeriodMs,
+        });
+        confirmProposalModal.open(draft);
+        return;
+      }
+
+      const { options, changes } = this.getValidatedOptions();
       const draft = buildDaoProposalCreateDraft({
         from: myAccount?.keys?.address ? longAddress(myAccount.keys.address) : '',
         displayTitle: title,
@@ -4156,6 +4521,9 @@ class AddProposalModal {
       });
       confirmProposalModal.open(draft);
     } catch (e) {
+      if (!e.validationTarget && proposalType === DAO_PROJECT_TYPE) {
+        e.validationTarget = this.getProjectValidationTarget(e);
+      }
       this.showValidationError(e);
     }
   }
@@ -4217,8 +4585,20 @@ function renderDaoProposalHeading(proposal) {
   `;
 }
 
-function renderDaoProposalSection(title, rows) {
-  const rowHtml = rows
+function renderDaoProposalSection(title, rows, sectionClass = '') {
+  const rowHtml = renderDaoProposalRows(rows);
+  const className = sectionClass ? ` ${sectionClass}` : '';
+
+  return `
+    <section class="proposal-info-section${className}">
+      <h3>${escapeHtml(title)}</h3>
+      <div class="proposal-info-grid">${rowHtml}</div>
+    </section>
+  `;
+}
+
+function renderDaoProposalRows(rows) {
+  return rows
     .map(([label, value, tone]) => {
       const displayValue = formatDaoDetailValue(value);
       const toneClass = tone ? ` proposal-info-row--${tone}` : '';
@@ -4231,24 +4611,20 @@ function renderDaoProposalSection(title, rows) {
     `;
     })
     .join('');
-
-  return `
-    <section class="proposal-info-section">
-      <h3>${escapeHtml(title)}</h3>
-      <div class="proposal-info-grid">${rowHtml}</div>
-    </section>
-  `;
 }
 
 function renderDaoProposalOptions(proposal) {
-  const options = getDaoProposalOptions(proposal);
+  const options = getDaoProposalOptionLabels(proposal);
   const changeSets = proposal?.[proposal?.proposalType]?.changes;
+  const isProject = proposal?.proposalType === DAO_PROJECT_TYPE;
   const optionCards = options.map((option, index) => {
-    const noChangeClass = index === 0 ? ' proposal-option-section--no-change' : '';
+    const noChangeClass = index === 0 && !isProject ? ' proposal-option-section--no-change' : '';
     return `
       <div class="proposal-option-section${noChangeClass}">
         <span class="proposal-option-label">${escapeHtml(option)}</span>
-        ${renderDaoProposalOptionDetails(index, changeSets)}
+        ${isProject
+          ? renderDaoProjectProposalOptionDetails(index)
+          : renderDaoProposalOptionDetails(index, changeSets)}
       </div>
     `;
   }).join('');
@@ -4256,9 +4632,16 @@ function renderDaoProposalOptions(proposal) {
   return `
     <section class="proposal-info-section">
       <h3>Proposal Options</h3>
-      <div class="proposal-option-cards">${optionCards}</div>
+      <div class="proposal-option-cards${isProject ? ' dao-project-ballot' : ''}">${optionCards}</div>
     </section>
   `;
+}
+
+function renderDaoProjectProposalOptionDetails(optionIndex) {
+  const description = optionIndex === 0
+    ? 'Project is not funded.'
+    : 'Approve the recipient, milestones, and maximum budget below.';
+  return `<div class="proposal-option-changes"><p class="proposal-info-muted">${description}</p></div>`;
 }
 
 function renderDaoProposalOptionDetails(optionIndex, changeSets) {
@@ -4295,6 +4678,163 @@ function renderDaoProposalChangeRows(changes) {
       `;
     })
     .join('');
+}
+
+function renderDaoProjectMilestones(milestones) {
+  const milestoneHtml = milestones.map((milestone, index) => `
+    <article class="dao-project-review-milestone">
+      <h4><span>Milestone ${index + 1}</span><strong>${escapeHtml(milestone.title)}</strong></h4>
+      <div class="dao-project-review-copy">
+        <div>
+          <span>Description</span>
+          <p>${escapeHtml(milestone.description)}</p>
+        </div>
+        <div>
+          <span>Deliverable / Acceptance Criteria</span>
+          <p>${escapeHtml(milestone.deliverable)}</p>
+        </div>
+      </div>
+      <div class="proposal-info-grid">
+        ${renderDaoProposalRows([
+          ['Duration', `${milestone.durationDays} days`],
+          ['Cost', `${milestone.costUsdStr} USD`],
+          ['Late penalty', `${milestone.penaltyUsdStr} USD`],
+          ['Early bonus', `${milestone.bonusUsdStr} USD`],
+        ])}
+      </div>
+    </article>
+  `).join('');
+
+  return `
+    <section class="proposal-info-section dao-project-review-milestones">
+      <h3>Milestones</h3>
+      <div class="dao-project-review-milestone-list">${milestoneHtml}</div>
+    </section>
+  `;
+}
+
+function formatDaoProjectUsd(value) {
+  return value === null ? 'Unavailable' : `${value} USD`;
+}
+
+function getDaoProjectStatusTone(status) {
+  if (status === 'completed') return 'accept';
+  if (status === 'terminated') return 'rejected';
+  return '';
+}
+
+function renderDaoProjectInfoMilestones(project, proposalState, showRuntimeStatus) {
+  if (project.milestones.length === 0) {
+    return `
+      <section class="proposal-info-section dao-project-info-milestones">
+        <h3>Milestones</h3>
+        <div class="dao-project-info-notice dao-project-info-notice--unavailable" role="status">
+          <strong>Milestones unavailable</strong>
+          <span>This proposal does not include readable milestone data.</span>
+        </div>
+      </section>
+    `;
+  }
+
+  const milestoneHtml = project.milestones.map((milestone, index) => {
+    const milestoneNumber = index + 1;
+    const title = formatDaoDetailValue(milestone.title);
+    const description = formatDaoDetailValue(milestone.description);
+    const deliverable = formatDaoDetailValue(milestone.deliverable);
+    const statusLabel = milestone.status?.label || 'Unavailable';
+    const statusTone = getDaoProjectStatusTone(milestone.status?.key);
+    const isDefaultOpen = shouldOpenDaoProjectMilestoneByDefault(project, proposalState, index);
+
+    return `
+      <details class="dao-project-review-milestone dao-project-info-milestone"${isDefaultOpen ? ' open' : ''}>
+        <summary>
+          <span class="dao-project-info-milestone-heading">
+            <span>Milestone ${milestoneNumber}</span>
+            <strong>${escapeHtml(title)}</strong>
+          </span>
+          <span class="dao-project-info-milestone-status">${escapeHtml(statusLabel)}</span>
+        </summary>
+        <div class="dao-project-info-milestone-content">
+          <div class="dao-project-review-copy">
+            <div>
+              <span>Description</span>
+              <p>${escapeHtml(description)}</p>
+            </div>
+            <div>
+              <span>Deliverable / Acceptance Criteria</span>
+              <p>${escapeHtml(deliverable)}</p>
+            </div>
+          </div>
+          <div class="proposal-info-grid" aria-label="Milestone ${milestoneNumber} terms">
+            ${renderDaoProposalRows([
+              ['Duration', milestone.durationDays === null ? null : `${milestone.durationDays} days`],
+              ['Cost', formatDaoProjectUsd(milestone.costUsdStr)],
+              ['Late penalty', formatDaoProjectUsd(milestone.penaltyUsdStr)],
+              ['Early bonus', formatDaoProjectUsd(milestone.bonusUsdStr)],
+            ])}
+          </div>
+          ${showRuntimeStatus ? `
+          <div class="proposal-info-grid dao-project-info-runtime" aria-label="Milestone ${milestoneNumber} runtime status">
+            ${renderDaoProposalRows([
+              ['Milestone status', statusLabel, statusTone],
+              ['Started', milestone.startedAt === null ? null : formatDaoDetailTimestamp(milestone.startedAt)],
+              ['Completed', milestone.completedAt === null ? null : formatDaoDetailTimestamp(milestone.completedAt)],
+              ['Payout', milestone.payoutWei === null ? null : formatDaoLibWei(milestone.payoutWei)],
+              ['Paid', milestone.paid === null ? null : milestone.paid ? 'Yes' : 'No'],
+              ['Paid at', milestone.paidAt === null ? null : formatDaoDetailTimestamp(milestone.paidAt)],
+            ])}
+          </div>
+          ` : ''}
+        </div>
+      </details>
+    `;
+  }).join('');
+
+  return `
+    <section class="proposal-info-section dao-project-info-milestones">
+      <h3>Milestones</h3>
+      <div class="dao-project-review-milestone-list">${milestoneHtml}</div>
+    </section>
+  `;
+}
+
+function renderDaoProjectProposalInfo(proposal, proposalState) {
+  const project = getDaoProjectPresentation(proposal);
+  if (project.kind === 'unavailable') {
+    return `
+      <section class="proposal-info-section dao-project-info">
+        <h3>Project Details</h3>
+        <div class="dao-project-info-notice dao-project-info-notice--unavailable" role="status">
+          <strong>Project details unavailable</strong>
+          <span>${escapeHtml(project.message)}</span>
+        </div>
+      </section>
+    `;
+  }
+
+  const partialNotice = project.completeness === 'partial'
+    ? `
+      <div class="dao-project-info-notice dao-project-info-notice--partial" role="status">
+        <strong>Some project details are unavailable</strong>
+        <span>Available fields are shown below. ${project.issueCount} ${project.issueCount === 1 ? 'field needs' : 'fields need'} backend confirmation.</span>
+      </div>
+    `
+    : '';
+  const budget = project.budget;
+  const showRuntimeStatus = shouldShowDaoProjectRuntime(project);
+
+  return [
+    partialNotice,
+    renderDaoProposalSection('Project Funding', [
+      ['Recipient', project.address],
+      ['Base cost', budget ? `${budget.baseCostUsdStr} USD` : null],
+      ['Maximum bonuses', budget ? `${budget.maximumBonusUsdStr} USD` : null],
+      ['Maximum authorized', budget ? `${budget.maximumAuthorizedUsdStr} USD` : null],
+      ['Treasury balance', project.balanceWei === null ? null : formatDaoLibWei(project.balanceWei)],
+      ['Claimable balance', project.claimableBalanceWei === null ? null : formatDaoLibWei(project.claimableBalanceWei)],
+    ], 'dao-project-info-funding'),
+    renderDaoProjectInfoMilestones(project, proposalState, showRuntimeStatus),
+  ].filter(Boolean).join('');
 }
 
 class ConfirmProposalModal {
@@ -4334,15 +4874,22 @@ class ConfirmProposalModal {
 
   setSubmitting(isSubmitting) {
     this.isSubmitting = Boolean(isSubmitting);
+    const isProjectPreview = this.currentDraft?.kind === DAO_PROJECT_PREVIEW_KIND;
     if (this.closeButton) this.closeButton.disabled = this.isSubmitting;
     if (this.backButton) this.backButton.disabled = this.isSubmitting;
     if (this.signButton) {
-      this.signButton.disabled = this.isSubmitting;
-      this.signButton.textContent = this.isSubmitting ? 'Signing...' : this.signButtonLabel;
+      this.signButton.disabled = this.isSubmitting || isProjectPreview;
+      this.signButton.textContent = isProjectPreview
+        ? 'Project submission unavailable'
+        : (this.isSubmitting ? 'Signing...' : this.signButtonLabel);
     }
   }
 
   async handleSign() {
+    if (this.currentDraft?.kind === DAO_PROJECT_PREVIEW_KIND) {
+      showToast('Project submission is unavailable until backend support is implemented', 3000, 'info');
+      return;
+    }
     if (this.isSubmitting) return;
     if (!this.currentDraft?.transaction?.from) {
       showToast('Proposal draft is unavailable', 3000, 'warning');
@@ -4431,6 +4978,10 @@ class ConfirmProposalModal {
   render() {
     if (!this.content) return;
     const draft = this.currentDraft;
+    if (draft?.kind === DAO_PROJECT_PREVIEW_KIND) {
+      this.renderProjectPreview(draft);
+      return;
+    }
     if (!draft?.transaction?.from) {
       this.setTitle('Review Proposal');
       this.content.innerHTML = '<section class="proposal-info-section"><h3>Review Proposal</h3><p class="proposal-info-muted">Proposal draft is unavailable.</p></section>';
@@ -4458,6 +5009,47 @@ class ConfirmProposalModal {
         ['Grace period', formatDaoDurationSummary(tx.gracePeriod)],
       ]),
       '<p class="proposal-info-muted">The proposal fee is derived from DAO params and seeds the voter reward pool for regular proposals. Signing submits this proposal for review.</p>',
+    ].join('');
+  }
+
+  renderProjectPreview(draft) {
+    const proposal = draft.proposal;
+    const project = proposal?.project;
+    if (!project) {
+      this.setTitle('Review Project Draft');
+      this.content.innerHTML = '<section class="proposal-info-section"><h3>Review Project Draft</h3><p class="proposal-info-muted">Project draft is unavailable.</p></section>';
+      return;
+    }
+
+    const budget = getDaoProjectBudgetSummary(project.milestones);
+    const reviewDelayIfSubmittedNowMs = draft.reviewStartTimeMs > 0
+      ? Math.max(0, draft.reviewStartTimeMs - getTransactionTimestamp())
+      : 0;
+    this.setTitle('Review Project Draft');
+    this.content.innerHTML = [
+      renderDaoProposalHeading(proposal),
+      '<div class="dao-project-review-notice" role="status"><strong>Project UI preview</strong><span>Project submission is unavailable until backend support is implemented.</span></div>',
+      renderDaoProposalOptions(proposal),
+      renderDaoProposalSection('Project Funding', [
+        ['Recipient', normalizeDaoAddress(project.address)],
+        ['Base cost', `${budget.baseCostUsdStr} USD`],
+        ['Maximum bonuses', `${budget.maximumBonusUsdStr} USD`],
+        ['Maximum authorized', `${budget.maximumAuthorizedUsdStr} USD`],
+      ], 'dao-project-review-funding'),
+      renderDaoProjectMilestones(project.milestones),
+      renderDaoProposalSection('Overview', [
+        ['Type', getDaoTypeLabel(proposal.proposalType)],
+        ['Proposal fee', `${draft.proposalFeeUsdStr || '0'} USD`],
+        ['Initial state', 'Not submitted (preview only)'],
+      ]),
+      renderDaoProposalSection('Review Timeline', [
+        ['Scheduled review start', draft.reviewStartTimeMs
+          ? formatDaoTimestamp(draft.reviewStartTimeMs)
+          : 'Start now'],
+        ['Time until start if submitted now', formatDaoDurationSummary(reviewDelayIfSubmittedNowMs)],
+        ['Grace period', formatDaoDurationSummary(proposal.gracePeriod)],
+      ]),
+      '<p class="proposal-info-muted">The proposal fee is derived from DAO params. This preview cannot be signed, submitted, or saved to the DAO.</p>',
     ].join('');
   }
 
@@ -4667,17 +5259,11 @@ function formatDaoBigIntPercent(part, total) {
   return fraction === 0n ? `${whole}%` : `${whole}.${fraction}%`;
 }
 
-function getDaoProposalOptions(proposal) {
-  return proposal.options.map((option, index) => (
-    index === 0 && String(option).toLowerCase() === 'no' ? 'No change' : String(option)
-  ));
-}
-
 function getDaoVoteTotals(proposal) {
   const totalVote = proposal.totalVote;
   if (totalVote.length === 0) return [];
 
-  const options = getDaoProposalOptions(proposal);
+  const options = getDaoProposalOptionLabels(proposal);
   const rowCount = Math.max(options.length, totalVote.length);
   return Array.from({ length: rowCount }, (_, index) => ({
     index,
@@ -4817,6 +5403,7 @@ function getDaoProposalApplyLifecycleAction(
   now = getTransactionTimestamp(),
 ) {
   if (getEffectiveDaoState(proposal) !== 'accepted') return null;
+  if (proposal?.proposalType === DAO_PROJECT_TYPE) return null;
 
   if (!isDaoParameterProposalType(proposal)) {
     return getDaoApplyParametersLifecycleAction(
@@ -5118,6 +5705,7 @@ class ProposalInfoModal {
 
     openModal(this.modal);
     enterFullscreen();
+    this.renderLoading();
 
     let p = null;
     try {
@@ -5138,6 +5726,18 @@ class ProposalInfoModal {
     this.renderProposal(p);
   }
 
+  renderLoading() {
+    this.setTitle('Loading proposal');
+    if (this.content) {
+      this.content.innerHTML = '<section class="proposal-info-section"><h3>Proposal</h3><p class="proposal-info-muted" role="status">Loading proposal details…</p></section>';
+    }
+    if (this.detailsContent) this.detailsContent.innerHTML = '';
+    this.hideCommitteeActions();
+    this.hideReviewResultAction();
+    this.hideLifecycleAction();
+    this.hideVoteActions();
+  }
+
   renderNotFound() {
     this.setTitle('Proposal not found');
     if (this.content) {
@@ -5155,7 +5755,7 @@ class ProposalInfoModal {
   renderProposal(proposal) {
     const now = getTransactionTimestamp();
     const state = getEffectiveDaoState(proposal);
-    this.setTitle(getDaoStateLabel(state) || state || 'Proposal');
+    this.setTitle(getDaoProposalInfoStateLabel(proposal));
     const reviewWindow = getDaoProposalReviewWindow(proposal, now);
     const committeeReview = getDaoCommitteeReview(proposal);
     const { committeeAddresses, committeeAddressSet, votes } = committeeReview;
@@ -5167,7 +5767,17 @@ class ProposalInfoModal {
       currentAddress,
       committeeAddressSet,
     });
+    const isProjectProposal = proposal.proposalType === DAO_PROJECT_TYPE;
+    const projectProposalInfoSection = isProjectProposal
+      ? renderDaoProjectProposalInfo(proposal, state)
+      : '';
+    const proposalOptionsSection = renderDaoProposalOptions(proposal);
     const resultSummary = getDaoProposalResultSummary(proposal);
+    const proposalResultsSection = this.renderProposalResults(
+      resultSummary,
+      committeeReview,
+      currentAddress,
+    );
     const rewardSummary = getDaoProposalRewardSummary(proposal, currentAddress);
     const lifecycleActions = getDaoProposalLifecycleActions(proposal, rewardSummary, currentAddress, now);
     const pendingFinalizationOutcome = getDaoPendingFinalizationOutcome(proposal, now);
@@ -5185,9 +5795,10 @@ class ProposalInfoModal {
     if (this.content) {
       this.content.innerHTML = [
         renderDaoProposalHeading(proposal),
-        renderDaoProposalOptions(proposal),
+        projectProposalInfoSection,
+        isProjectProposal ? '' : proposalOptionsSection,
         state === 'voting' ? this.renderCurrentVoteTotals(proposal) : '',
-        this.renderProposalResults(resultSummary, committeeReview, currentAddress),
+        isProjectProposal ? '' : proposalResultsSection,
         state === 'review'
           ? this.renderCommitteeReviewStatus(committeeReview, reviewWindow, currentAddress)
           : '',
@@ -5200,6 +5811,9 @@ class ProposalInfoModal {
         reviewWindow,
         rewardSummary,
         committeeReviewSection,
+        projectProposalSections: isProjectProposal
+          ? [proposalOptionsSection, proposalResultsSection]
+          : [],
       });
     }
 
@@ -5255,7 +5869,7 @@ class ProposalInfoModal {
   }
 
   getCurrentVoteTotalRows(proposal) {
-    const options = getDaoProposalOptions(proposal);
+    const options = getDaoProposalOptionLabels(proposal);
     const totalVote = proposal.totalVote;
     return options.map((option, index) => ({
       option,
@@ -5520,8 +6134,16 @@ class ProposalInfoModal {
     ]);
   }
 
-  renderProposalDetails({ proposal, state, reviewWindow, rewardSummary, committeeReviewSection }) {
+  renderProposalDetails({
+    proposal,
+    state,
+    reviewWindow,
+    rewardSummary,
+    committeeReviewSection,
+    projectProposalSections,
+  }) {
     const sections = [
+      ...projectProposalSections,
       renderDaoProposalSection('Overview', [
         ['Number', proposal.number ? `#${proposal.number}` : 'Unavailable'],
         ['Type', getDaoTypeLabel(proposal.proposalType) || 'Unavailable'],
@@ -5542,15 +6164,21 @@ class ProposalInfoModal {
       <details class="proposal-more">
         <summary>
           <span class="proposal-more-title">Show proposal details</span>
-          <span class="proposal-more-note">${escapeHtml(this.getProposalDetailsSummary(state, rewardSummary))}</span>
+          <span class="proposal-more-note">${escapeHtml(this.getProposalDetailsSummary(
+            proposal,
+            state,
+            rewardSummary,
+          ))}</span>
         </summary>
         <div class="proposal-more-content">${sections.join('')}</div>
       </details>
     `;
   }
 
-  getProposalDetailsSummary(state, rewardSummary) {
-    const parts = ['Overview', 'review timeline'];
+  getProposalDetailsSummary(proposal, state, rewardSummary) {
+    const parts = proposal.proposalType === DAO_PROJECT_TYPE
+      ? ['Proposal options', 'results', 'overview', 'review timeline']
+      : ['Overview', 'review timeline'];
     if (state === 'review') parts.push('committee review');
     if (rewardSummary) parts.push('reward accounting');
     return parts.join(', ');
@@ -5689,7 +6317,7 @@ class ProposalInfoModal {
   }
 
   resetVoteState(proposal) {
-    const options = getDaoProposalOptions(proposal);
+    const options = getDaoProposalOptionLabels(proposal);
     this.voteWeights = options.map(() => 0);
     this.voteSpendMultiple = '1';
     if (this.voteSpendMultipleInput) this.voteSpendMultipleInput.value = '1';
@@ -5708,7 +6336,7 @@ class ProposalInfoModal {
       return;
     }
 
-    const options = getDaoProposalOptions(proposal);
+    const options = getDaoProposalOptionLabels(proposal);
     if (this.voteWeights.length !== options.length) {
       this.voteWeights = options.map(() => 0);
     }
@@ -5904,7 +6532,7 @@ class ProposalInfoModal {
     }
     this.votePreview.classList.remove('proposal-vote-preview--message');
 
-    const optionRows = getDaoProposalOptions(proposal)
+    const optionRows = getDaoProposalOptionLabels(proposal)
       .map((option, index) => {
         const weight = this.voteWeights[index] || 0;
         const share = weight / submission.totalWeight;
@@ -7368,12 +7996,21 @@ class SignInModal {
       'SignInModal DOM is incomplete'
     );
 
-    this.accountList.addEventListener('click', (event) => {
-      const item = event.target.closest('.sign-in-account-item');
+    const selectAccountItem = (item) => {
       if (!item || this.isSigningIn) return;
       const username = item.dataset.username;
       assert(username, 'Sign-in account item is missing username');
       void this.handleAccountClick(username);
+    };
+    this.accountList.addEventListener('click', (event) => {
+      selectAccountItem(event.target.closest('.sign-in-account-item'));
+    });
+    this.accountList.addEventListener('keydown', (event) => {
+      if (event.key !== 'Enter' && event.key !== ' ') return;
+      const item = event.target.closest('.sign-in-account-item');
+      if (!item) return;
+      event.preventDefault();
+      selectAccountItem(item);
     });
 
     this.actionSheetOverlay.addEventListener('click', (event) => {
@@ -7442,11 +8079,8 @@ class SignInModal {
     assert(accountData?.account?.keys?.secret, `Missing private key for ${username}`);
     const privateKey = accountData.account.keys.secret;
 
-    createAccountModal.usernameInput.value = username;
-    createAccountModal.privateKeyInput.value = privateKey;
     this.forceClose();
-    createAccountModal.open();
-    createAccountModal.usernameInput.dispatchEvent(new Event('input'));
+    createAccountModal.openWithPrivateKey(username, privateKey);
   }
 
   /**
@@ -7465,21 +8099,24 @@ class SignInModal {
    * Split current usernames into the same account groups shown in the sign-in list.
    * @param {string[]} usernames Current network usernames in registry order.
    * @param {string} netid Active network id.
-   * @returns {{ usernameGroups: { public: string[], private: string[] }, isPrivateMap: Object }}
+   * @returns {{ usernameGroups: { public: string[], private: string[] }, isPrivateMap: Object, avatarIdMap: Object }}
    */
   getSignInUsernameGroups(usernames, netid) {
     const usernameGroups = { public: [], private: [] };
     const isPrivateMap = Object.create(null);
+    const avatarIdMap = Object.create(null);
 
     for (const username of usernames) {
       const localState = loadState(`${username}_${netid}`);
       const isPrivate = localState?.account?.private === true;
+      const avatarId = localState?.account?.avatarId;
       const usernameType = isPrivate ? 'private' : 'public';
       isPrivateMap[username] = isPrivate;
+      avatarIdMap[username] = typeof avatarId === 'string' && avatarId ? avatarId : null;
       usernameGroups[usernameType].push(username);
     }
 
-    return { usernameGroups, isPrivateMap };
+    return { usernameGroups, isPrivateMap, avatarIdMap };
   }
 
   /**
@@ -7628,13 +8265,59 @@ class SignInModal {
   }
 
   /**
+   * Render the same address-derived avatar used elsewhere in the client.
+   * Accounts without a valid saved address intentionally have no avatar.
+   * @param {unknown} address Saved account address.
+   * @returns {string} Avatar SVG markup or an empty string.
+   */
+  getSignInAccountFallbackAvatar(address) {
+    if (!address) return '';
+
+    try {
+      return generateIdenticon(normalizeAddress(address), 40);
+    } catch {
+      return '';
+    }
+  }
+
+  /**
+   * Replace an address-derived fallback with the account's cached uploaded avatar.
+   * Detached rows indicate that the list closed or rerendered while IndexedDB loaded.
+   * @param {HTMLElement} item Rendered sign-in account row.
+   * @param {string} avatarId Saved account avatar id.
+   * @returns {Promise<void>}
+   */
+  async loadUploadedSignInAvatar(item, avatarId) {
+    try {
+      const blobUrl = await contactAvatarCache.getBlobUrl(avatarId);
+      if (!blobUrl || !item.isConnected) return;
+
+      const image = document.createElement('img');
+      image.className = 'contact-avatar-img';
+      image.width = 40;
+      image.height = 40;
+      image.alt = '';
+      await new Promise((resolve, reject) => {
+        image.addEventListener('load', resolve, { once: true });
+        image.addEventListener('error', reject, { once: true });
+        image.src = blobUrl;
+      });
+
+      if (!item.isConnected) return;
+      item.querySelector('.sign-in-account-avatar')?.replaceChildren(image);
+    } catch {
+      // Keep the deterministic fallback when the local cache is unavailable.
+    }
+  }
+
+  /**
    * Render the account list with notification indicators and sort by notification status.
    * @returns {string[]} Usernames for the current network (registry order, not display order)
    */
   renderAccountList() {
     const { usernames, netidAccounts } = this.getSignInUsernames();
     const { netid } = network;
-    const { usernameGroups, isPrivateMap } = this.getSignInUsernameGroups(usernames, netid);
+    const { usernameGroups, isPrivateMap, avatarIdMap } = this.getSignInUsernameGroups(usernames, netid);
     const usernameOrder = this.getSignInUsernameOrder(usernameGroups, netidAccounts);
     const notifiedAddresses = reactNativeApp.isReactNativeWebView ? reactNativeApp.getNotificationAddresses() : [];
     const normalizedNotifiedSet = new Set();
@@ -7671,15 +8354,17 @@ class SignInModal {
 
     const renderListItem = (username) => {
       const isPrivateAccount = isPrivateMap[username];
-      const displayName = isPrivateAccount ? `- ${username}` : username;
       const privateClass = isPrivateAccount ? ' is-private' : '';
       const notificationBadge = notifiedUsernameSet.has(username)
         ? '<span class="sign-in-account-badge" aria-label="Has notifications">🔔</span>'
         : '';
+      const address = netidAccounts.usernames[username]?.address;
+      const avatar = this.getSignInAccountFallbackAvatar(address);
       return `
-        <li class="sign-in-account-item${privateClass}" data-username="${username}">
+        <li class="sign-in-account-item${privateClass}" data-username="${username}" role="button" tabindex="0">
           <div class="sign-in-account-card">
-            <span class="sign-in-account-name">${escapeHtml(displayName)}</span>
+            <span class="sign-in-account-avatar" aria-hidden="true">${avatar}</span>
+            <span class="sign-in-account-name">${escapeHtml(username)}</span>
             ${notificationBadge}
           </div>
         </li>
@@ -7695,6 +8380,11 @@ class SignInModal {
       sections.push(...privateRemaining.map(renderListItem));
     }
     this.accountList.innerHTML = sections.join('');
+    this.accountList.querySelectorAll('.sign-in-account-item').forEach((item) => {
+      const avatarId = avatarIdMap[item.dataset.username];
+      const hasFallbackAvatar = item.querySelector('.sign-in-account-avatar:not(:empty)');
+      if (avatarId && hasFallbackAvatar) void this.loadUploadedSignInAvatar(item, avatarId);
+    });
     this.updateRecentSignInResetButtonVisibility();
 
     return usernames;
@@ -17124,7 +17814,7 @@ class AboutModal {
     });
 
     // Set version and network information once during initialization
-    this.versionDisplay.textContent = myVersion + ' ' + version;
+    this.versionDisplay.textContent = getWebVersionDisplay();
     this.networkName.textContent = network.name;
     this.netId.textContent = network.netid;
 
@@ -29955,8 +30645,8 @@ class CreateAccountModal {
     this.togglePrivateKeyVisibility = document.getElementById('togglePrivateKeyVisibility');
     this.migrateAccountsSection = document.getElementById('migrateAccountsSection');
     this.migrateAccountsButton = document.getElementById('migrateAccountsButton');
-    this.toggleMoreOptions = document.getElementById('toggleMoreOptions');
-    this.moreOptionsSection = document.getElementById('moreOptionsSection');
+    this.advancedSection = document.getElementById('advancedOptions');
+    this.advancedSummary = document.getElementById('advancedOptionsSummary');
     this.privateAccountCheckbox = document.getElementById('togglePrivateAccount');
     this.privateAccountHelpButton = document.getElementById('privateAccountHelpButton');
     this.privateAccountTemplate = document.getElementById('privateAccountHelpMessageTemplate');
@@ -29966,16 +30656,15 @@ class CreateAccountModal {
     this.form.addEventListener('submit', (event) => this.handleSubmit(event));
     this.usernameInput.addEventListener('input', (e) => this.handleUsernameInput(e));
     this.toggleButton.addEventListener('change', () => this.handleTogglePrivateKeyInput());
-    this.toggleMoreOptions.addEventListener('change', () => this.handleToggleMoreOptions());
+    this.advancedSection.addEventListener('toggle', () => this.handleAdvancedToggle());
+    this.advancedSummary.addEventListener('click', (event) => {
+      if (this.isCreatingAccount) event.preventDefault();
+    });
     this.backButton.addEventListener('click', () => this.closeWithReload());
 
     // Add listener for the password visibility toggle
     this.togglePrivateKeyVisibility.addEventListener('click', () => {
-      // Toggle the type attribute
-      const type = this.privateKeyInput.getAttribute('type') === 'password' ? 'text' : 'password';
-      this.privateKeyInput.setAttribute('type', type);
-      // Toggle the visual state class on the button
-      this.togglePrivateKeyVisibility.classList.toggle('toggled-visible');
+      this.setPrivateKeyVisibility(this.privateKeyInput.type === 'password');
     });
 
     // Add listener for the private account help button
@@ -30029,21 +30718,33 @@ class CreateAccountModal {
 
     // Clear form fields
     this.usernameInput.value = '';
-    this.privateKeyInput.value = '';
     this.usernameAvailable.style.display = 'none';
-    this.privateKeyError.style.display = 'none';
     this.isUsernameAvailable = false;
     this.refreshSubmitButton();
     
-    // Reset More Options section
-    this.toggleMoreOptions.checked = false;
-    this.moreOptionsSection.style.display = 'none';
-    this.toggleButton.checked = false;
-    this.privateKeySection.style.display = 'none';
-    this.privateAccountCheckbox.checked = false;
+    this.advancedSection.open = false;
+    this.resetAdvancedOptions();
     
     // Open the modal
     this.open();
+  }
+
+  /**
+   * Open the recreate flow with the saved username and private key exposed.
+   * @param {string} username
+   * @param {string} privateKey
+   */
+  openWithPrivateKey(username, privateKey) {
+    if (this.isCreatingAccount) return;
+
+    this.resetAdvancedOptions();
+    this.usernameInput.value = username;
+    this.advancedSection.open = true;
+    this.toggleButton.checked = true;
+    this.privateKeySection.hidden = false;
+    this.privateKeyInput.value = privateKey;
+    this.open();
+    this.usernameInput.dispatchEvent(new Event('input'));
   }
 
   /**
@@ -30076,6 +30777,8 @@ class CreateAccountModal {
         (migrateAccountsModal.isOpening || migrateAccountsModal.isMigrating);
       control.disabled = this.isCreatingAccount || isMigrationBusy || (requiresConnection && !isOnline);
     });
+    this.advancedSummary.setAttribute('aria-disabled', String(this.isCreatingAccount));
+    this.advancedSection.classList.toggle('is-disabled', this.isCreatingAccount);
     this.refreshSubmitButton();
   }
 
@@ -30136,27 +30839,37 @@ class CreateAccountModal {
   }
 
   handleTogglePrivateKeyInput() {
-    const isChecked = this.toggleButton.checked;
-    this.privateKeySection.style.display = isChecked ? 'block' : 'none';
-    this.privateKeyInput.value = '';
-    
-    if (!isChecked) {
-      this.privateKeyError.style.display = 'none';
+    if (this.toggleButton.checked) {
+      this.privateKeySection.hidden = false;
+      return;
     }
+
+    this.resetPrivateKeyOption();
   }
-  
-  handleToggleMoreOptions() {
-    const isChecked = this.toggleMoreOptions.checked;
-    this.moreOptionsSection.style.display = isChecked ? 'block' : 'none';
-    
-    if (!isChecked) {
-      // Reset private key options when more options is unchecked
-      this.toggleButton.checked = false;
-      // Hide private key section if More Options is unchecked
-      this.privateKeySection.style.display = 'none';
-      this.privateKeyInput.value = '';
-      this.privateKeyError.style.display = 'none';
-    }
+
+  handleAdvancedToggle() {
+    if (this.advancedSection.open) return;
+    this.resetAdvancedOptions();
+  }
+
+  resetAdvancedOptions() {
+    this.privateAccountCheckbox.checked = false;
+    this.resetPrivateKeyOption();
+  }
+
+  resetPrivateKeyOption() {
+    this.toggleButton.checked = false;
+    this.privateKeySection.hidden = true;
+    this.privateKeyInput.value = '';
+    this.privateKeyError.style.display = 'none';
+    this.setPrivateKeyVisibility(false);
+  }
+
+  setPrivateKeyVisibility(isVisible) {
+    this.privateKeyInput.type = isVisible ? 'text' : 'password';
+    this.togglePrivateKeyVisibility.classList.toggle('toggled-visible', isVisible);
+    this.togglePrivateKeyVisibility.setAttribute('aria-label', isVisible ? 'Hide private key' : 'Show private key');
+    this.togglePrivateKeyVisibility.setAttribute('aria-pressed', String(isVisible));
   }
 
   validatePrivateKey(key) {
@@ -33985,10 +34698,8 @@ class ReactNativeApp {
    * @returns {number} -1 if version1 is older, 1 if newer, 0 if equal
    */
   compareVersions(version1, version2) {
-    // Convert version strings to comparable numbers
-    // Format: YYYY.MMDD.HHmm -> YYYYMMDDHHmm
-    const v1 = parseInt(version1.replace(/\D/g, ''));
-    const v2 = parseInt(version2.replace(/\D/g, ''));
+    const v1 = getComparableVersion(version1);
+    const v2 = getComparableVersion(version2);
     
     if (v1 < v2) return -1;  // version1 is older
     if (v1 > v2) return 1;   // version1 is newer
