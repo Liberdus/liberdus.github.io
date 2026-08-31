@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MMDD.HHmm like 2025.0125.1005
-const version = 'g'
+const version = 'h'
 const BOOT_SPLASH_HANDOFF_MS = 1000;
 let myVersion = '0';
 

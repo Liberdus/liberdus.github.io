@@ -119,8 +119,8 @@ fi
 # Update the version in the newly copied dev/app.js with the incremented version
 sed -i "s/^const version = .*/const version = '$new_version_char_increment'/" "$TARGET_DIR/app.js"
 
-# Get the current date and time for version.html
-current_date=$(date +"%Y.%m.%d.%H.%M")
+# Get the current date and time for version.html (YYYY.MMDD.HHmm)
+current_date=$(date +"%Y.%m%d.%H%M")
 
 # Update the version in dev/version.html
 echo "$current_date" > "$TARGET_DIR/version.html"
