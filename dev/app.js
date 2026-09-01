@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MMDD.HHmm like 2025.0125.1005
-const version = 'k'
+const version = 'l'
 const BOOT_SPLASH_HANDOFF_MS = 1000;
 let myVersion = '0';
 
@@ -1414,10 +1414,10 @@ class WelcomeMenuModal {
     this.lockButton.addEventListener('click', () => lockModal.open());
     this.helpButton.addEventListener('click', () => helpModal.open());
 
-    this.launchButton.addEventListener('click', () => launchModal.open());
-    this.launchButton.style.display = 'flex';
-
+    // Show launch button if ReactNativeWebView is available
     if (window?.ReactNativeWebView) {
+      this.launchButton.addEventListener('click', () => launchModal.open());
+      this.launchButton.style.display = 'flex';
       this.updateButton.addEventListener('click', () => aboutModal.openStore());
       this.updateButton.style.display = 'flex';
     }
@@ -2420,11 +2420,12 @@ class MenuModal {
     this.farmButton.addEventListener('click', () => farmModal.open());
     
     
-    this.launchButton = document.getElementById('openLaunchUrl');
-    this.launchButton.addEventListener('click', () => launchModal.open());
-    this.launchButton.style.display = 'flex';
-
+    // Show launch button if ReactNativeWebView is available
     if (window?.ReactNativeWebView) {
+      this.launchButton = document.getElementById('openLaunchUrl');
+      this.launchButton.addEventListener('click', () => launchModal.open());
+      this.launchButton.style.display = 'flex';
+
       this.updateButton = document.getElementById('openUpdate');
       this.updateButton.addEventListener('click', () => updateWarningModal.open());
       this.updateButton.style.display = 'flex';
