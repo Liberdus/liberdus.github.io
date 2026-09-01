@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MMDD.HHmm like 2025.0125.1005
-const version = 'l'
+const version = 'm'
 const BOOT_SPLASH_HANDOFF_MS = 1000;
 let myVersion = '0';
 
@@ -834,6 +834,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   // Chat Modal
   chatModal.load();
+  fullImageModal.load();
 
   // Contact Info Modal
   contactInfoModal.load();
@@ -2483,6 +2484,7 @@ class MenuModal {
     saveState();
 
     // clear storage
+    fullImageModal.close();
     clearMyData();
 
     // Lock the app
@@ -11938,8 +11940,8 @@ async function processChats(chats, keys) {
                   
                   if (!messageToDelete.my && originalSender === from) {
                     // This is a message received from sender, who is now deleting it - valid
-                    // Purge cached thumbnails for image attachments, if any
-                    chatModal.purgeThumbnail(messageToDelete.xattach);
+                    // Purge cached image data for attachments, if any
+                    chatModal.purgeImageCaches(messageToDelete.xattach);
 
                     // Mark the message as deleted
                     messageToDelete.deleted = MESSAGE_DELETED_STATE_ALL;
@@ -11964,8 +11966,8 @@ async function processChats(chats, keys) {
                     );
                   } else if (messageToDelete.my && normalizeAddress(keys.address) === normalizeAddress(tx.from)) {
                     // This is our own message, and we're deleting it - valid
-                    // Purge cached thumbnails for image attachments, if any
-                    chatModal.purgeThumbnail(messageToDelete.xattach);
+                    // Purge cached image data for attachments, if any
+                    chatModal.purgeImageCaches(messageToDelete.xattach);
 
                     // Mark the message as deleted
                     messageToDelete.deleted = MESSAGE_DELETED_STATE_ALL;
@@ -20368,7 +20370,7 @@ class ChatModal {
     if (!Array.isArray(this.fileAttachments) || this.fileAttachments.length === 0) return;
 
     const removedAttachments = this.fileAttachments.splice(0, this.fileAttachments.length);
-    this.purgeThumbnail(removedAttachments);
+    this.purgeImageCaches(removedAttachments);
 
     if (deleteFromServer) {
       this.deleteAttachmentsFromServer(removedAttachments);
@@ -22909,7 +22911,7 @@ class ChatModal {
   removeAttachment(index) {
     if (this.fileAttachments && index >= 0 && index < this.fileAttachments.length) {
       const removedFile = this.fileAttachments.splice(index, 1)[0];
-      this.purgeThumbnail([removedFile]);
+      this.purgeImageCaches([removedFile]);
       this.showAttachmentPreview(); // Refresh the preview
       showToast(`"${removedFile.name}" removed`, 2000, 'info');
 
@@ -23290,11 +23292,52 @@ class ChatModal {
     }
   }
 
+  /**
+   * Resolves image metadata from the backing message record.
+   * The attachment URL is the cache identity; filenames are export metadata only.
+   * @param {Object} item - message containing the attachment metadata
+   * @param {HTMLElement} linkEl - rendered attachment row
+   * @returns {{url: string, type: string}}
+   */
+  getFullImageAttachment(item, linkEl) {
+    const attachmentUrl = linkEl?.dataset?.url;
+    const attachment = Array.isArray(item?.xattach)
+      ? item.xattach.find(candidate => candidate?.url === attachmentUrl)
+      : null;
+
+    assert(attachment, 'Image attachment entry not found');
+    assert(attachment.type?.startsWith('image/'), 'Full-image cache accepts only image attachments');
+
+    return {
+      url: attachment.url,
+      type: attachment.type,
+    };
+  }
+
+  /**
+   * Gets the decrypted full image from IndexedDB, downloading it on a cache miss.
+   * @param {Object} item - message containing the attachment metadata and keys
+   * @param {HTMLElement} linkEl - rendered attachment row
+   * @returns {Promise<Blob>}
+   */
+  async getFullImageBlob(item, linkEl) {
+    const attachment = this.getFullImageAttachment(item, linkEl);
+    return fullImageCache.getOrCache({
+      attachment,
+      downloadAndDecrypt: () => this.decryptAttachmentToBlob(item, linkEl),
+      shouldCache: () => Array.isArray(item?.xattach)
+        && item.xattach.some(candidate => candidate?.url === attachment.url),
+    });
+  }
+
   async handleAttachmentDownload(item, linkEl) {
     let loadingToastId;
     try {
-      loadingToastId = showToast(`Decrypting attachment...`, 0, 'loading');
-      const blob = await this.decryptAttachmentToBlob(item, linkEl);
+      const isImage = item.type !== 'vm' && (linkEl.dataset.type || '').startsWith('image/');
+      loadingToastId = showToast(isImage ? 'Preparing image...' : 'Decrypting attachment...', 0, 'loading');
+      const blob = isImage
+        ? await this.getFullImageBlob(item, linkEl)
+        : await this.decryptAttachmentToBlob(item, linkEl);
       const blobUrl = URL.createObjectURL(blob);
       const filename = decodeURIComponent(linkEl.dataset.name || 'download');
 
@@ -23343,13 +23386,9 @@ class ChatModal {
         
         try {
           if (isViewable) {
-            // Open in new tab and download
-            const newTab = window.open(blobUrl, '_blank');
-            this.triggerFileDownload(blobUrl, filename);
-          } else {
-            // Non-viewable files: download only
-            this.triggerFileDownload(blobUrl, filename);
+            window.open(blobUrl, '_blank');
           }
+          this.triggerFileDownload(blobUrl, filename);
         } finally {
           // Clean up blob URL after enough time for downloads/tabs to initialize
           setTimeout(() => URL.revokeObjectURL(blobUrl), 2000);
@@ -24216,20 +24255,24 @@ class ChatModal {
   }
 
   /**
-   * Removes cached thumbnails for any image attachments in an xattach array.
-   * Safe to call even if thumbnails don't exist.
+   * Removes cached thumbnails and full images for image attachments.
+   * Safe to call even if cached records don't exist.
    * @param {any} xattach
    */
-  purgeThumbnail(xattach) {
+  purgeImageCaches(xattach) {
     if (!Array.isArray(xattach) || !xattach.length) return;
-    for (const att of xattach) {
-      const url = att?.url;
-      const type = att?.type || '';
-      if (!url || url === '#') continue;
-      if (typeof type === 'string' && type.startsWith('image/')) {
-        // Fire-and-forget; deletion errors shouldn't block UI actions
-        void thumbnailCache.delete(url).catch((e) => console.warn('Failed to delete thumbnail:', e));
-      }
+
+    for (const attachment of xattach) {
+      const url = attachment?.url;
+      const type = attachment?.type;
+      if (!url || url === '#' || typeof type !== 'string' || !type.startsWith('image/')) continue;
+
+      void thumbnailCache.delete(url).catch((error) => {
+        console.warn('Failed to delete thumbnail:', error);
+      });
+      void fullImageCache.delete(url).catch((error) => {
+        console.warn('Failed to delete full image:', error);
+      });
     }
   }
 
@@ -24717,12 +24760,11 @@ class ChatModal {
 
   /**
    * Shows context menu for an attachment row.
-   * - Images/Videos: "Preview" when no thumbnail exists in IndexedDB; "Save" when it exists
-   * - Non-images/videos: always "Save"
+   * Images include an Open action; all attachment types include Save.
    * @param {Event} e
    * @param {HTMLElement} attachmentRow
    */
-  async showAttachmentContextMenu(e, attachmentRow) {
+  showAttachmentContextMenu(e, attachmentRow) {
     if (!this.imageAttachmentContextMenu || !attachmentRow) return;
     e.preventDefault();
     e.stopPropagation();
@@ -24733,7 +24775,7 @@ class ChatModal {
     this.currentImageAttachmentRow = attachmentRow;
 
     // Toggle delete-for-all visibility similar to regular message context menu gating
-    const { messageEl, url } = this.getAttachmentContextFromRow(attachmentRow);
+    const { messageEl } = this.getAttachmentContextFromRow(attachmentRow);
 
     // Show copy only if parent message has actual message text
     const copyOption = this.imageAttachmentContextMenu.querySelector('[data-action="copy"]');
@@ -24749,28 +24791,8 @@ class ChatModal {
     }
 
     const isImageAttachment = attachmentRow.dataset.imageAttachment === 'true';
-    const isVideoAttachment = attachmentRow.dataset.videoAttachment === 'true';
-    const hasThumbnailSupport = isImageAttachment || isVideoAttachment;
-
-    // Decide Preview/Save vs Save:
-    // - Images/Videos: Show both Preview and Save when no thumbnail exists; Show only Save when it exists
-    // - Non-images/videos: always Save (no thumbnail concept)
-    let hasThumb = true;
-    if (hasThumbnailSupport) {
-      hasThumb = false;
-      if (url !== '#') {
-        try {
-          const thumb = await thumbnailCache.get(url);
-          hasThumb = !!thumb;
-        } catch (_) {
-          hasThumb = false;
-        }
-      }
-    }
-
-    // Show Preview only for images/videos without a thumbnail; Save is always visible
-    const previewOpt = this.imageAttachmentContextMenu.querySelector('[data-action="preview"]');
-    if (previewOpt) previewOpt.style.display = (hasThumbnailSupport && !hasThumb) ? '' : 'none';
+    const openOption = this.imageAttachmentContextMenu.querySelector('[data-action="open"]');
+    if (openOption) openOption.style.display = isImageAttachment ? 'flex' : 'none';
 
     // Show Import Contacts option for VCF files
     const importContactsOpt = this.imageAttachmentContextMenu.querySelector('[data-action="import-contacts"]');
@@ -24802,8 +24824,8 @@ class ChatModal {
       case 'import-contacts':
         void this.openImportContactsModal(row);
         break;
-      case 'preview':
-        void this.previewMediaAttachment(row);
+      case 'open':
+        void this.openImageAttachment(row);
         break;
       case 'save':
         void this.saveImageAttachment(row);
@@ -24865,46 +24887,39 @@ class ChatModal {
   }
 
   /**
-   * Preview a media attachment (image or video): download + decrypt thumbnail from pUrl + cache in IndexedDB.
-   * Does NOT trigger full file download - uses the pre-generated thumbnail from server.
+   * Opens an image attachment using the cache-first full-image flow.
    * @param {HTMLElement} attachmentRow
    */
-  async previewMediaAttachment(attachmentRow) {
+  async openImageAttachment(attachmentRow) {
+    if (this.attachmentDownloadInProgress) return;
+    this.attachmentDownloadInProgress = true;
+
     let loadingToastId;
     try {
       const { item, url } = this.getAttachmentContextFromRow(attachmentRow);
       if (url === '#') return;
-      
-      // Get pUrl from data attributes
-      const pUrl = attachmentRow.dataset.pUrl;
-      if (!pUrl) {
-        showToast('Preview not available for this attachment', 2000, 'info');
-        return;
-      }
-      
-      loadingToastId = showToast(`Loading preview...`, 0, 'loading');
-      
-      // Decrypt thumbnail using pUrl (reuses same key derivation as main file)
-      const thumbnailBlob = await this.decryptAttachmentToBlob(item, attachmentRow, pUrl);
-      
-      // Cache and display thumbnail
-      await thumbnailCache.save(url, thumbnailBlob, 'image/jpeg');
-      await this.updateThumbnailInPlace(attachmentRow, thumbnailBlob);
-      
+
+      const filename = decodeURIComponent(attachmentRow.dataset.name || 'Image');
+      loadingToastId = showToast('Opening image...', 0, 'loading');
+      const blob = await this.getFullImageBlob(item, attachmentRow);
       hideToast(loadingToastId);
+      loadingToastId = null;
+      fullImageModal.open(blob, filename);
     } catch (err) {
-      console.error('Preview failed:', err);
-      hideToast(loadingToastId);
-      this.handleAttachmentError(err, 'Preview failed.');
+      console.error('Image open failed:', err);
+      this.handleAttachmentError(err, 'Failed to open image.');
+    } finally {
+      if (loadingToastId) hideToast(loadingToastId);
+      this.attachmentDownloadInProgress = false;
     }
   }
 
   /**
-   * Save an image attachment using the existing download/decrypt flow.
+   * Save an image attachment using the cache-first download/decrypt flow.
    * @param {HTMLElement} attachmentRow
    */
   async saveImageAttachment(attachmentRow) {
-    // Reuse normal attachment download flow (decrypt + download)
+    // Reuse normal attachment download flow (cache/decrypt + download)
     const { item } = this.getAttachmentContextFromRow(attachmentRow);
 
     // Concurent download prevention
@@ -25709,8 +25724,8 @@ class ChatModal {
           DELETED_MESSAGE_LOCAL_TEXT
         );
       }
-      // Remove cached thumbnails for image attachments, then remove attachments
-      this.purgeThumbnail(message.xattach);
+      // Remove cached image data for attachments, then remove attachments
+      this.purgeImageCaches(message.xattach);
       delete message.xattach;
       purgeContactReactionsForTarget(contact, message.txid);
       purgePendingReactionsForTarget(this.address, message.txid);
@@ -26816,6 +26831,269 @@ class ChatModal {
 }
 
 const chatModal = new ChatModal();
+
+class FullImageModal {
+  constructor() {
+    this.objectUrl = null;
+    this.scale = 1;
+    this.translateX = 0;
+    this.translateY = 0;
+    this.touchGesture = null;
+    this.dragPointerId = null;
+  }
+
+  load() {
+    this.modal = document.getElementById('fullImageModal');
+    this.closeButton = document.getElementById('closeFullImageModal');
+    this.title = document.getElementById('fullImageModalTitle');
+    this.viewer = document.getElementById('fullImageViewer');
+    this.loading = document.getElementById('fullImageLoading');
+    this.image = document.getElementById('fullImageViewerImage');
+    this.zoomControls = document.getElementById('fullImageZoomControls');
+    this.zoomInButton = document.getElementById('fullImageZoomIn');
+    this.zoomOutButton = document.getElementById('fullImageZoomOut');
+
+    assert(this.modal && this.closeButton && this.title && this.viewer && this.loading && this.image
+      && this.zoomControls && this.zoomInButton && this.zoomOutButton,
+      'Full image modal elements are required');
+
+    this.closeButton.addEventListener('click', () => this.close());
+    this.zoomInButton.addEventListener('click', () => this.zoomBy(0.5));
+    this.zoomOutButton.addEventListener('click', () => this.zoomBy(-0.5));
+    this.viewer.addEventListener('touchstart', (event) => this.handleTouchStart(event), { passive: false });
+    this.viewer.addEventListener('touchmove', (event) => this.handleTouchMove(event), { passive: false });
+    this.viewer.addEventListener('touchend', (event) => this.handleTouchEnd(event));
+    this.viewer.addEventListener('touchcancel', (event) => this.handleTouchEnd(event));
+    this.viewer.addEventListener('pointerdown', (event) => this.handlePointerDown(event));
+    this.viewer.addEventListener('pointermove', (event) => this.handlePointerMove(event));
+    this.viewer.addEventListener('pointerup', (event) => this.handlePointerEnd(event));
+    this.viewer.addEventListener('pointercancel', (event) => this.handlePointerEnd(event));
+    document.addEventListener('keydown', (event) => {
+      if (event.key !== 'Escape' || !this.modal.classList.contains('active')) return;
+      event.preventDefault();
+      this.close();
+    });
+    this.updateZoomControls();
+  }
+
+  open(blob, filename = 'Image') {
+    assert(blob instanceof Blob, 'Full image modal requires a Blob');
+
+    const isAlreadyOpen = this.modal.classList.contains('active');
+    if (!isAlreadyOpen && !openModal(this.modal)) return false;
+
+    this.clearImage();
+
+    this.title.textContent = filename;
+    this.image.alt = filename;
+    this.loading.hidden = false;
+    this.viewer.setAttribute('aria-busy', 'true');
+
+    const objectUrl = URL.createObjectURL(blob);
+    this.objectUrl = objectUrl;
+    this.image.onload = () => {
+      if (this.objectUrl !== objectUrl) return;
+      this.loading.hidden = true;
+      this.image.hidden = false;
+      this.viewer.setAttribute('aria-busy', 'false');
+      this.updateZoomControls();
+    };
+    this.image.onerror = () => {
+      if (this.objectUrl !== objectUrl) return;
+      this.close();
+      showToast('Unable to display image.', 0, 'error');
+    };
+    this.image.src = objectUrl;
+    return true;
+  }
+
+  getTouchMidpoint(touches) {
+    return {
+      x: (touches[0].clientX + touches[1].clientX) / 2,
+      y: (touches[0].clientY + touches[1].clientY) / 2,
+    };
+  }
+
+  getTouchDistance(touches) {
+    return Math.hypot(
+      touches[0].clientX - touches[1].clientX,
+      touches[0].clientY - touches[1].clientY,
+    );
+  }
+
+  startPinch(touches) {
+    const midpoint = this.getTouchMidpoint(touches);
+    const viewerRect = this.viewer.getBoundingClientRect();
+    const centerX = viewerRect.left + viewerRect.width / 2;
+    const centerY = viewerRect.top + viewerRect.height / 2;
+
+    this.touchGesture = {
+      type: 'pinch',
+      startDistance: Math.max(this.getTouchDistance(touches), 1),
+      startScale: this.scale,
+      anchorX: (midpoint.x - centerX - this.translateX) / this.scale,
+      anchorY: (midpoint.y - centerY - this.translateY) / this.scale,
+    };
+  }
+
+  startPan(touch) {
+    this.touchGesture = {
+      type: 'pan',
+      startX: touch.clientX,
+      startY: touch.clientY,
+      translateX: this.translateX,
+      translateY: this.translateY,
+    };
+  }
+
+  handleTouchStart(event) {
+    if (this.image.hidden || event.target.closest('.full-image-zoom-controls')) return;
+
+    if (event.touches.length === 2) {
+      event.preventDefault();
+      this.startPinch(event.touches);
+    } else if (event.touches.length === 1 && this.scale > 1) {
+      this.startPan(event.touches[0]);
+    }
+  }
+
+  handleTouchMove(event) {
+    if (event.touches.length === 2) {
+      event.preventDefault();
+      if (this.touchGesture?.type !== 'pinch') this.startPinch(event.touches);
+
+      const midpoint = this.getTouchMidpoint(event.touches);
+      const viewerRect = this.viewer.getBoundingClientRect();
+      const centerX = viewerRect.left + viewerRect.width / 2;
+      const centerY = viewerRect.top + viewerRect.height / 2;
+      this.scale = Math.min(4, Math.max(1,
+        this.touchGesture.startScale * this.getTouchDistance(event.touches) / this.touchGesture.startDistance));
+      this.translateX = midpoint.x - centerX - this.touchGesture.anchorX * this.scale;
+      this.translateY = midpoint.y - centerY - this.touchGesture.anchorY * this.scale;
+      this.constrainTranslation();
+      this.applyTransform();
+    } else if (event.touches.length === 1 && this.touchGesture?.type === 'pan') {
+      event.preventDefault();
+      this.panTo(event.touches[0]);
+    }
+  }
+
+  handleTouchEnd(event) {
+    if (event.touches.length === 1 && this.scale > 1) {
+      this.startPan(event.touches[0]);
+    } else if (event.touches.length === 0) {
+      this.touchGesture = null;
+    }
+  }
+
+  handlePointerDown(event) {
+    if (event.pointerType === 'touch' || event.button !== 0 || event.target !== this.image
+      || this.image.hidden || this.scale <= 1) return;
+
+    event.preventDefault();
+    this.dragPointerId = event.pointerId;
+    this.startPan(event);
+    this.viewer.setPointerCapture?.(event.pointerId);
+    this.viewer.classList.add('is-dragging');
+  }
+
+  handlePointerMove(event) {
+    if (event.pointerId !== this.dragPointerId || this.touchGesture?.type !== 'pan') return;
+    event.preventDefault();
+    this.panTo(event);
+  }
+
+  handlePointerEnd(event) {
+    if (event.pointerId !== this.dragPointerId) return;
+
+    if (this.viewer.hasPointerCapture?.(event.pointerId)) {
+      this.viewer.releasePointerCapture(event.pointerId);
+    }
+    this.dragPointerId = null;
+    this.touchGesture = null;
+    this.viewer.classList.remove('is-dragging');
+  }
+
+  panTo(point) {
+    this.translateX = this.touchGesture.translateX + point.clientX - this.touchGesture.startX;
+    this.translateY = this.touchGesture.translateY + point.clientY - this.touchGesture.startY;
+    this.constrainTranslation();
+    this.applyTransform();
+  }
+
+  constrainTranslation() {
+    const maxX = Math.max(0, (this.image.clientWidth * this.scale - this.viewer.clientWidth) / 2);
+    const maxY = Math.max(0, (this.image.clientHeight * this.scale - this.viewer.clientHeight) / 2);
+    this.translateX = Math.min(maxX, Math.max(-maxX, this.translateX));
+    this.translateY = Math.min(maxY, Math.max(-maxY, this.translateY));
+  }
+
+  applyTransform() {
+    this.image.style.transform = this.scale === 1
+      ? ''
+      : `translate3d(${this.translateX}px, ${this.translateY}px, 0) scale(${this.scale})`;
+    this.viewer.classList.toggle('is-zoomed', this.scale > 1);
+    this.updateZoomControls();
+  }
+
+  zoomBy(amount) {
+    if (this.image.hidden) return;
+
+    const previousScale = this.scale;
+    this.scale = Math.min(4, Math.max(1, this.scale + amount));
+    const scaleRatio = this.scale / previousScale;
+    this.translateX *= scaleRatio;
+    this.translateY *= scaleRatio;
+    this.constrainTranslation();
+    this.applyTransform();
+  }
+
+  updateZoomControls() {
+    if (!this.zoomInButton || !this.zoomOutButton) return;
+
+    const imageUnavailable = this.image.hidden;
+    this.zoomControls.hidden = imageUnavailable;
+    this.zoomInButton.disabled = imageUnavailable || this.scale >= 4;
+    this.zoomOutButton.disabled = imageUnavailable || this.scale <= 1;
+  }
+
+  resetTransform() {
+    this.scale = 1;
+    this.translateX = 0;
+    this.translateY = 0;
+    this.touchGesture = null;
+    this.dragPointerId = null;
+    if (this.image) this.image.style.transform = '';
+    this.viewer?.classList.remove('is-zoomed', 'is-dragging');
+  }
+
+  clearImage() {
+    if (!this.image) return;
+
+    this.resetTransform();
+    this.image.onload = null;
+    this.image.onerror = null;
+    this.image.removeAttribute('src');
+    this.image.hidden = true;
+    this.loading.hidden = true;
+    this.viewer.setAttribute('aria-busy', 'false');
+    this.image.alt = '';
+    this.title.textContent = 'Image';
+    this.updateZoomControls();
+
+    if (this.objectUrl) {
+      URL.revokeObjectURL(this.objectUrl);
+      this.objectUrl = null;
+    }
+  }
+
+  close() {
+    this.modal?.classList.remove('active');
+    this.clearImage();
+  }
+}
+
+const fullImageModal = new FullImageModal();
 
 class CallInviteModal {
   constructor() {
@@ -36070,8 +36348,10 @@ class ThumbnailCache {
   constructor() {
     this.dbName = 'liberdus_thumbnails';
     this.storeName = 'thumbnails';
-    this.dbVersion = 1;
+    this.fullImageStoreName = 'fullImages';
+    this.dbVersion = 2;
     this.db = null;
+    this.openPromise = null;
     this.maxCacheSize = 50 * 1024 * 1024; // 50MB in bytes
   }
 
@@ -36094,17 +36374,31 @@ class ThumbnailCache {
    * @returns {Promise<void>}
    */
   async init() {
-    return new Promise((resolve, reject) => {
+    if (this.db) return this.db;
+    if (this.openPromise) return this.openPromise;
+
+    this.openPromise = new Promise((resolve, reject) => {
       const request = indexedDB.open(this.dbName, this.dbVersion);
 
       request.onerror = () => {
         console.error('Failed to open thumbnail database:', request.error);
+        this.openPromise = null;
         reject(request.error);
+      };
+
+      request.onblocked = () => {
+        console.warn('Thumbnail database upgrade is blocked by another tab');
+        reject(new Error('Thumbnail database upgrade blocked'));
       };
 
       request.onsuccess = () => {
         this.db = request.result;
-        resolve();
+        this.db.onversionchange = () => {
+          this.db.close();
+          this.db = null;
+          this.openPromise = null;
+        };
+        resolve(this.db);
       };
 
       request.onupgradeneeded = (event) => {
@@ -36114,8 +36408,15 @@ class ThumbnailCache {
           const store = db.createObjectStore(this.storeName, { keyPath: 'url' });
           store.createIndex('cachedAt', 'cachedAt', { unique: false });
         }
+
+        if (!db.objectStoreNames.contains(this.fullImageStoreName)) {
+          const store = db.createObjectStore(this.fullImageStoreName, { keyPath: 'url' });
+          store.createIndex('cachedAt', 'cachedAt', { unique: false });
+        }
       };
     });
+
+    return this.openPromise;
   }
 
   /**
@@ -36769,7 +37070,7 @@ function createModalCloseHandlers(modals) {
 
 const modalCloseHandlers = new Map([
   ...createModalCloseHandlers({
-    chatModal, menuModal, daoModal, addProposalModal,
+    chatModal, fullImageModal, menuModal, daoModal, addProposalModal,
     confirmProposalModal, proposalInfoModal, settingsModal, manageContactsModal,
     welcomeMenuModal, sendAssetFormModal, historyModal, newChatModal,
     createAccountModal, tollModal, inviteModal, aboutModal,
@@ -37202,3 +37503,128 @@ class PopupSelect {
     }
   }
 }
+
+const FULL_IMAGE_CACHE_MAX_SIZE = 250 * 1024 * 1024;
+
+class FullImageCache {
+  constructor(database, maxCacheSize = FULL_IMAGE_CACHE_MAX_SIZE) {
+    this.database = database;
+    this.maxCacheSize = maxCacheSize;
+  }
+
+  getRequestResult(request) {
+    return new Promise((resolve, reject) => {
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+  }
+
+  waitForTransaction(transaction) {
+    return new Promise((resolve, reject) => {
+      transaction.oncomplete = () => resolve();
+      transaction.onerror = () => reject(transaction.error);
+      transaction.onabort = () => reject(transaction.error);
+    });
+  }
+
+  async get(attachmentUrl) {
+    const record = await this.getRecord(attachmentUrl);
+    return record?.blob || null;
+  }
+
+  async getRecord(attachmentUrl) {
+    const db = await this.database.init();
+    const transaction = db.transaction(this.database.fullImageStoreName, 'readonly');
+    const store = transaction.objectStore(this.database.fullImageStoreName);
+    return this.getRequestResult(store.get(attachmentUrl));
+  }
+
+  async getCacheSize() {
+    const db = await this.database.init();
+    const transaction = db.transaction(this.database.fullImageStoreName, 'readonly');
+    const store = transaction.objectStore(this.database.fullImageStoreName);
+    const records = await this.getRequestResult(store.getAll());
+    return records.reduce((total, record) => total + Number(record.size || 0), 0);
+  }
+
+  async put(attachment, blob, shouldCache) {
+    const attachmentUrl = attachment?.url;
+    const mimeType = attachment?.type || blob?.type || '';
+    if (!attachmentUrl) throw new Error('Cannot cache an image without an attachment URL');
+    if (!mimeType.startsWith('image/')) throw new Error('Full-image cache accepts only image attachments');
+    if (!(blob instanceof Blob)) throw new Error('Full-image cache requires a Blob');
+    if (blob.size > this.maxCacheSize) return false;
+
+    const db = await this.database.init();
+    if (shouldCache && !shouldCache()) return false;
+
+    const transaction = db.transaction(this.database.fullImageStoreName, 'readwrite');
+    const store = transaction.objectStore(this.database.fullImageStoreName);
+    const cachedAtIndex = store.index('cachedAt');
+    const evictionCandidates = [];
+    let currentSize = 0;
+    let existingSize = 0;
+
+    const cursorRequest = cachedAtIndex.openCursor(null, 'next');
+    cursorRequest.onsuccess = (event) => {
+      const cursor = event.target.result;
+      if (cursor) {
+        const recordSize = Number(cursor.value?.size || 0);
+        currentSize += recordSize;
+        if (cursor.value?.url === attachmentUrl) {
+          existingSize = recordSize;
+        } else {
+          evictionCandidates.push({ url: cursor.primaryKey, size: recordSize });
+        }
+        cursor.continue();
+        return;
+      }
+
+      let bytesToFree = Math.max(0, currentSize - existingSize + blob.size - this.maxCacheSize);
+      for (const record of evictionCandidates) {
+        if (bytesToFree <= 0) break;
+        store.delete(record.url);
+        bytesToFree -= record.size;
+      }
+
+      store.put({
+        url: attachmentUrl,
+        mimeType,
+        size: blob.size,
+        blob,
+        cachedAt: Date.now(),
+      });
+    };
+
+    await this.waitForTransaction(transaction);
+    return true;
+  }
+
+  async delete(attachmentUrl) {
+    const db = await this.database.init();
+    const transaction = db.transaction(this.database.fullImageStoreName, 'readwrite');
+    transaction.objectStore(this.database.fullImageStoreName).delete(attachmentUrl);
+    await this.waitForTransaction(transaction);
+  }
+
+  async getOrCache({ attachment, downloadAndDecrypt, shouldCache }) {
+    try {
+      const cachedBlob = await this.get(attachment.url);
+      if (cachedBlob) return cachedBlob;
+    } catch (error) {
+      console.warn('Failed to read full image from cache:', error);
+    }
+
+    const blob = await downloadAndDecrypt();
+
+    try {
+      await this.put(attachment, blob, shouldCache);
+    } catch (error) {
+      console.warn('Failed to cache full image:', error);
+    }
+
+    return blob;
+  }
+}
+
+const fullImageCache = new FullImageCache(thumbnailCache);
