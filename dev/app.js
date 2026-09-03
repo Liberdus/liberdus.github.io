@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MMDD.HHmm like 2025.0125.1005
-const version = 'm'
+const version = 'n'
 const BOOT_SPLASH_HANDOFF_MS = 1000;
 let myVersion = '0';
 
@@ -104,17 +104,19 @@ import {
   DAO_PROJECT_MAX_MILESTONES,
   DAO_PROJECT_MILESTONE_TEXT_MAX_LENGTH,
   DAO_PROJECT_MILESTONE_TITLE_MAX_LENGTH,
+  DAO_PROJECT_RECLAIM_DELAY_MS,
+  DAO_PROJECT_TERMINATION_REASON_MAX_LENGTH,
   DAO_PROJECT_FILTERS,
-  DAO_PROJECT_PREVIEW_KIND,
   DAO_PROJECT_TYPE,
   DAO_PARAMETER_MAX_WHOLE_DIGITS,
-  buildDaoProjectProposalPreviewDraft,
+  buildDaoProjectProposalCreateDraft,
   buildDaoProposalCreateDraft,
   daoRepo,
   DAO_STATES,
   getDaoFinalVoteResult,
   getDaoNotificationSummary,
   getDaoProjectBudgetSummary,
+  getDaoProjectMilestonePayout,
   getDaoProjectPresentation,
   getDaoProposalInfoStateLabel,
   getDaoProposalListFilterKey,
@@ -2635,7 +2637,6 @@ const DAO_FILTER_OPTIONS = [
   ...DAO_PROJECT_FILTERS,
 ];
 const DAO_PROJECT_FILTER_KEYS = new Set(DAO_PROJECT_FILTERS.map(({ key }) => key));
-const DAO_PROJECT_CANDIDATE_STATES = new Set(['accepted', 'applied']);
 
 function formatDaoTimestamp(ts) {
   const n = Number(ts || 0);
@@ -2766,17 +2767,12 @@ class DaoModal {
       await daoRepo.refresh({ force: true });
       if (!this.isActive() || refreshId !== this.openRefreshId) return;
       this.acknowledgeNotifications(notificationCutoff);
-      const projectFilterProposalNumbers = await this.loadProjectFilterCandidates();
-      if (!this.isActive() || refreshId !== this.openRefreshId) return;
       const refreshedClaimProposalNumbers = await this.syncTrackedClaimWindows();
       if (!this.isActive() || refreshId !== this.openRefreshId) return;
       this.refreshState = 'ready';
       await this.loadSelectedFilter({
         reset: true,
-        reuseProposalNumbers: new Set([
-          ...projectFilterProposalNumbers,
-          ...refreshedClaimProposalNumbers,
-        ]),
+        reuseProposalNumbers: refreshedClaimProposalNumbers,
       });
       this.lastSuccessfulRefreshId = Math.max(this.lastSuccessfulRefreshId, refreshId);
       if (!this.isActive() || refreshId !== this.openRefreshId) return;
@@ -2903,18 +2899,6 @@ class DaoModal {
     });
   }
 
-  async loadProjectFilterCandidates() {
-    const entries = daoRepo.getProposalMetaForUi()
-      .filter((entry) => DAO_PROJECT_CANDIDATE_STATES.has(entry.status));
-    await daoRepo.loadProposalEntries(entries, { append: true });
-    const candidateNumbers = new Set(entries.map((entry) => entry.proposal));
-    return new Set(
-      daoRepo.getProposalsForUi()
-        .map((proposal) => proposal.number)
-        .filter((proposalNumber) => candidateNumbers.has(proposalNumber)),
-    );
-  }
-
   async loadSelectedFilter({ reset, reuseProposalNumbers = new Set() }) {
     const entries = this.getSelectedMetadataEntries(daoRepo.getProposalMetaForUi());
 
@@ -2965,15 +2949,11 @@ class DaoModal {
     let didRefreshDaoData = false;
     try {
       await daoRepo.refresh({ force: true });
-      const projectFilterProposalNumbers = await this.loadProjectFilterCandidates();
       const refreshedClaimProposalNumbers = await this.syncTrackedClaimWindows();
       if (this.isActive()) {
         await this.loadSelectedFilter({
           reset: true,
-          reuseProposalNumbers: new Set([
-            ...projectFilterProposalNumbers,
-            ...refreshedClaimProposalNumbers,
-          ]),
+          reuseProposalNumbers: refreshedClaimProposalNumbers,
         });
       }
       if (!daoRepo.getProposalById(pendingTxInfo?.proposalStoreId)) {
@@ -3262,7 +3242,7 @@ class DaoModal {
     } else {
       const lifecycleActions = getDaoProposalLifecycleActions(proposal, reward);
       const claimAction = lifecycleActions.find((action) => action.kind === 'claim_reward');
-      const applyAction = lifecycleActions.find((action) => action.kind === 'apply_parameters');
+      const readyAction = lifecycleActions.find((action) => action.rowPreviewLabel);
 
       if (claimAction) {
         chips.push({
@@ -3276,17 +3256,17 @@ class DaoModal {
           tone: 'neutral',
         });
       }
-      if (applyAction?.rowPreviewLabel) {
+      if (readyAction) {
         chips.push({
-          value: applyAction.rowPreviewLabel,
-          tone: applyAction.canSubmit ? 'accepted' : 'neutral',
+          value: readyAction.rowPreviewLabel,
+          tone: readyAction.canSubmit ? 'accepted' : 'neutral',
         });
       }
     }
     if (projectFilter) {
       chips.push({
         value: projectFilter.label,
-        tone: getDaoProjectStatusTone(proposal?.project?.status) || 'neutral',
+        tone: getDaoProjectStatusTone(state) || 'neutral',
       });
     } else if (result && state !== 'accepted') {
       chips.push({
@@ -4494,7 +4474,8 @@ class AddProposalModal {
       }
 
       if (proposalType === DAO_PROJECT_TYPE) {
-        const draft = buildDaoProjectProposalPreviewDraft({
+        const draft = buildDaoProjectProposalCreateDraft({
+          from: myAccount?.keys?.address ? longAddress(myAccount.keys.address) : '',
           displayTitle: title,
           description,
           project: this.projectDraft,
@@ -4698,7 +4679,7 @@ function renderDaoProjectMilestones(milestones) {
       </div>
       <div class="proposal-info-grid">
         ${renderDaoProposalRows([
-          ['Duration', `${milestone.durationDays} days`],
+          ['Duration', formatDaoDurationSummary(milestone.duration)],
           ['Cost', `${milestone.costUsdStr} USD`],
           ['Late penalty', `${milestone.penaltyUsdStr} USD`],
           ['Early bonus', `${milestone.bonusUsdStr} USD`],
@@ -4717,6 +4698,12 @@ function renderDaoProjectMilestones(milestones) {
 
 function formatDaoProjectUsd(value) {
   return value === null ? 'Unavailable' : `${value} USD`;
+}
+
+function formatDaoProjectDeliverySpeed(speed) {
+  if (speed === 'early') return 'Early';
+  if (speed === 'late') return 'Late';
+  return speed === 'ontime' ? 'On time' : 'Unavailable';
 }
 
 function getDaoProjectStatusTone(status) {
@@ -4746,6 +4733,9 @@ function renderDaoProjectInfoMilestones(project, proposalState, showRuntimeStatu
     const statusLabel = milestone.status?.label || 'Unavailable';
     const statusTone = getDaoProjectStatusTone(milestone.status?.key);
     const isDefaultOpen = shouldOpenDaoProjectMilestoneByDefault(project, proposalState, index);
+    const pendingPayout = milestone.status?.key === 'completed' && milestone.paidWei === 0n
+      ? getDaoProjectMilestonePayout(project, milestone)
+      : null;
 
     return `
       <details class="dao-project-review-milestone dao-project-info-milestone"${isDefaultOpen ? ' open' : ''}>
@@ -4769,7 +4759,7 @@ function renderDaoProjectInfoMilestones(project, proposalState, showRuntimeStatu
           </div>
           <div class="proposal-info-grid" aria-label="Milestone ${milestoneNumber} terms">
             ${renderDaoProposalRows([
-              ['Duration', milestone.durationDays === null ? null : `${milestone.durationDays} days`],
+              ['Duration', milestone.durationMs === null ? null : formatDaoDurationSummary(milestone.durationMs)],
               ['Cost', formatDaoProjectUsd(milestone.costUsdStr)],
               ['Late penalty', formatDaoProjectUsd(milestone.penaltyUsdStr)],
               ['Early bonus', formatDaoProjectUsd(milestone.bonusUsdStr)],
@@ -4779,11 +4769,16 @@ function renderDaoProjectInfoMilestones(project, proposalState, showRuntimeStatu
           <div class="proposal-info-grid dao-project-info-runtime" aria-label="Milestone ${milestoneNumber} runtime status">
             ${renderDaoProposalRows([
               ['Milestone status', statusLabel, statusTone],
-              ['Started', milestone.startedAt === null ? null : formatDaoDetailTimestamp(milestone.startedAt)],
-              ['Completed', milestone.completedAt === null ? null : formatDaoDetailTimestamp(milestone.completedAt)],
-              ['Payout', milestone.payoutWei === null ? null : formatDaoLibWei(milestone.payoutWei)],
-              ['Paid', milestone.paid === null ? null : milestone.paid ? 'Yes' : 'No'],
-              ['Paid at', milestone.paidAt === null ? null : formatDaoDetailTimestamp(milestone.paidAt)],
+              ['Started', milestone.startTime === null ? null : formatDaoDetailTimestamp(milestone.startTime)],
+              ['Ended', milestone.endTime === null ? null : formatDaoDetailTimestamp(milestone.endTime)],
+              ['Proposed time', milestone.proposedTime === null ? null : formatDaoDetailTimestamp(milestone.proposedTime)],
+              ['Time endorsements', String(milestone.endorsedTime.length)],
+              ['Termination votes', String(milestone.terminateVotes.length)],
+              ['Paid amount', milestone.paidWei === null ? null : formatDaoLibWei(milestone.paidWei)],
+              ...(pendingPayout ? [
+                ['Expected payout', formatDaoLibWei(pendingPayout.amountWei)],
+                ['Delivery timing', formatDaoProjectDeliverySpeed(pendingPayout.speed)],
+              ] : []),
             ])}
           </div>
           ` : ''}
@@ -4832,8 +4827,14 @@ function renderDaoProjectProposalInfo(proposal, proposalState) {
       ['Base cost', budget ? `${budget.baseCostUsdStr} USD` : null],
       ['Maximum bonuses', budget ? `${budget.maximumBonusUsdStr} USD` : null],
       ['Maximum authorized', budget ? `${budget.maximumAuthorizedUsdStr} USD` : null],
-      ['Treasury balance', project.balanceWei === null ? null : formatDaoLibWei(project.balanceWei)],
-      ['Claimable balance', project.claimableBalanceWei === null ? null : formatDaoLibWei(project.claimableBalanceWei)],
+      ...(showRuntimeStatus ? [
+        ['Treasury balance', project.balanceWei === null ? null : formatDaoLibWei(project.balanceWei)],
+        ['Fixed USD/LIB rate', project.rateUsdStr === null ? null : `${project.rateUsdStr} USD/LIB`],
+        ['Started', project.startTime === null ? null : formatDaoDetailTimestamp(project.startTime)],
+        ['Ended', project.endTime === null ? null : formatDaoDetailTimestamp(project.endTime)],
+        ['Proposed recipient', project.proposedAddress],
+        ['Recipient endorsements', String(project.endorsedAddress.length)],
+      ] : []),
     ], 'dao-project-info-funding'),
     renderDaoProjectInfoMilestones(project, proposalState, showRuntimeStatus),
   ].filter(Boolean).join('');
@@ -4876,22 +4877,15 @@ class ConfirmProposalModal {
 
   setSubmitting(isSubmitting) {
     this.isSubmitting = Boolean(isSubmitting);
-    const isProjectPreview = this.currentDraft?.kind === DAO_PROJECT_PREVIEW_KIND;
     if (this.closeButton) this.closeButton.disabled = this.isSubmitting;
     if (this.backButton) this.backButton.disabled = this.isSubmitting;
     if (this.signButton) {
-      this.signButton.disabled = this.isSubmitting || isProjectPreview;
-      this.signButton.textContent = isProjectPreview
-        ? 'Project submission unavailable'
-        : (this.isSubmitting ? 'Signing...' : this.signButtonLabel);
+      this.signButton.disabled = this.isSubmitting;
+      this.signButton.textContent = this.isSubmitting ? 'Signing...' : this.signButtonLabel;
     }
   }
 
   async handleSign() {
-    if (this.currentDraft?.kind === DAO_PROJECT_PREVIEW_KIND) {
-      showToast('Project submission is unavailable until backend support is implemented', 3000, 'info');
-      return;
-    }
     if (this.isSubmitting) return;
     if (!this.currentDraft?.transaction?.from) {
       showToast('Proposal draft is unavailable', 3000, 'warning');
@@ -4980,8 +4974,8 @@ class ConfirmProposalModal {
   render() {
     if (!this.content) return;
     const draft = this.currentDraft;
-    if (draft?.kind === DAO_PROJECT_PREVIEW_KIND) {
-      this.renderProjectPreview(draft);
+    if (draft?.transaction?.proposalType === DAO_PROJECT_TYPE) {
+      this.renderProjectProposal(draft);
       return;
     }
     if (!draft?.transaction?.from) {
@@ -5014,12 +5008,12 @@ class ConfirmProposalModal {
     ].join('');
   }
 
-  renderProjectPreview(draft) {
-    const proposal = draft.proposal;
+  renderProjectProposal(draft) {
+    const proposal = draft.transaction;
     const project = proposal?.project;
     if (!project) {
-      this.setTitle('Review Project Draft');
-      this.content.innerHTML = '<section class="proposal-info-section"><h3>Review Project Draft</h3><p class="proposal-info-muted">Project draft is unavailable.</p></section>';
+      this.setTitle('Review Project Proposal');
+      this.content.innerHTML = '<section class="proposal-info-section"><h3>Review Project Proposal</h3><p class="proposal-info-muted">Project proposal is unavailable.</p></section>';
       return;
     }
 
@@ -5027,10 +5021,9 @@ class ConfirmProposalModal {
     const reviewDelayIfSubmittedNowMs = draft.reviewStartTimeMs > 0
       ? Math.max(0, draft.reviewStartTimeMs - getTransactionTimestamp())
       : 0;
-    this.setTitle('Review Project Draft');
+    this.setTitle('Review Project Proposal');
     this.content.innerHTML = [
       renderDaoProposalHeading(proposal),
-      '<div class="dao-project-review-notice" role="status"><strong>Project UI preview</strong><span>Project submission is unavailable until backend support is implemented.</span></div>',
       renderDaoProposalOptions(proposal),
       renderDaoProposalSection('Project Funding', [
         ['Recipient', normalizeDaoAddress(project.address)],
@@ -5042,7 +5035,7 @@ class ConfirmProposalModal {
       renderDaoProposalSection('Overview', [
         ['Type', getDaoTypeLabel(proposal.proposalType)],
         ['Proposal fee', `${draft.proposalFeeUsdStr || '0'} USD`],
-        ['Initial state', 'Not submitted (preview only)'],
+        ['Initial state', 'Review after submission'],
       ]),
       renderDaoProposalSection('Review Timeline', [
         ['Scheduled review start', draft.reviewStartTimeMs
@@ -5051,7 +5044,7 @@ class ConfirmProposalModal {
         ['Time until start if submitted now', formatDaoDurationSummary(reviewDelayIfSubmittedNowMs)],
         ['Grace period', formatDaoDurationSummary(proposal.gracePeriod)],
       ]),
-      '<p class="proposal-info-muted">The proposal fee is derived from DAO params. This preview cannot be signed, submitted, or saved to the DAO.</p>',
+      '<p class="proposal-info-muted">The proposal fee is derived from DAO params and seeds the voter reward pool. Signing submits this project proposal for review.</p>',
     ].join('');
   }
 
@@ -5275,7 +5268,13 @@ function getDaoVoteTotals(proposal) {
 }
 
 function isDaoFinalResultState(state) {
-  return state === 'accepted' || state === 'rejected' || state === 'applied';
+  return state === 'accepted'
+    || state === 'rejected'
+    || state === 'applied'
+    || state === 'canceled'
+    || state === 'executing'
+    || state === 'completed'
+    || state === 'terminated';
 }
 
 function isDaoFinalizedState(state) {
@@ -5440,6 +5439,307 @@ function getDaoProposalApplyLifecycleAction(
   );
 }
 
+function getDaoProjectStartLifecycleAction(
+  proposal,
+  currentAddress = getDaoCurrentAccountAddress(),
+  now = getTransactionTimestamp(),
+) {
+  if (getEffectiveDaoState(proposal) !== 'accepted') return null;
+  if (proposal?.proposalType !== DAO_PROJECT_TYPE) return null;
+
+  const action = {
+    kind: 'project_start',
+    title: 'Start project',
+    buttonLabel: 'Start project',
+    loadingLabel: 'Starting project...',
+    canSubmit: false,
+  };
+  if (!isDaoProposalCommitteeMember(proposal, currentAddress)) {
+    return {
+      ...action,
+      help: 'Only a proposal committee member can start this project.',
+    };
+  }
+
+  const applyWindow = getDaoProposalApplyWindow(proposal, now);
+  if (!applyWindow.isReady) {
+    const eligibleAt = applyWindow.eligibleAt ? formatDaoTimestamp(applyWindow.eligibleAt) : '';
+    return {
+      ...action,
+      help: eligibleAt
+        ? `Project start becomes available after the grace period ends: ${eligibleAt}.`
+        : 'Project start timing is unavailable until the proposal includes grace-period timing.',
+      rowPreviewLabel: formatDaoReadyAtLabel(applyWindow.eligibleAt, now),
+    };
+  }
+
+  return {
+    ...action,
+    help: 'Starting this project mints its approved budget into escrow at the current network rate.',
+    rowPreviewLabel: 'Ready to start',
+    canSubmit: true,
+  };
+}
+
+function isDaoProjectContractor(project, currentAddress) {
+  const normalizedAddress = normalizeDaoAddress(currentAddress);
+  return Boolean(normalizedAddress && normalizedAddress === project?.address);
+}
+
+function getDaoProjectRequiredEndorsements(proposal, contractorMayPropose) {
+  const committeeSize = Array.isArray(proposal?.committeeAddresses)
+    ? proposal.committeeAddresses.length
+    : 0;
+  const reachable = committeeSize + (contractorMayPropose ? 1 : 0);
+  return Math.min(3, Math.max(reachable, 1));
+}
+
+function getDaoProjectMilestoneTimeAction({
+  proposal,
+  project,
+  milestone,
+  milestoneNumber,
+  kind,
+  currentAddress,
+}) {
+  const isStart = kind === 'project_milestone_start';
+  const verb = isStart ? 'start' : 'completion';
+  const title = isStart ? 'Start' : 'Complete';
+  const hasProposedTime = milestone.proposedTime !== null;
+  const isCommitteeMember = isDaoProposalCommitteeMember(proposal, currentAddress);
+  const isContractor = isDaoProjectContractor(project, currentAddress);
+  const hasEndorsed = milestone.endorsedTime.includes(normalizeDaoAddress(currentAddress));
+  const endorsementCount = milestone.endorsedTime.length;
+  const requiredEndorsements = getDaoProjectRequiredEndorsements(proposal, true);
+  const action = {
+    kind,
+    title: `${title} milestone ${milestoneNumber}`,
+    milestoneNumber,
+    proposesCurrentTime: !hasProposedTime,
+    canSubmit: false,
+  };
+
+  if (!hasProposedTime) {
+    return {
+      ...action,
+      help: isCommitteeMember || isContractor
+        ? `Propose the current time as milestone ${milestoneNumber}'s ${verb} time. ${requiredEndorsements} total endorsements are required.`
+        : 'Only a proposal committee member or the contractor can propose this time.',
+      buttonLabel: `Propose ${verb} now`,
+      loadingLabel: `Proposing milestone ${verb}...`,
+      canSubmit: isCommitteeMember || isContractor,
+    };
+  }
+
+  const proposedTimeLabel = formatDaoTimestamp(milestone.proposedTime) || 'the proposed time';
+  let help = `Endorse ${proposedTimeLabel} as milestone ${milestoneNumber}'s ${verb} time. ${endorsementCount} of ${requiredEndorsements} endorsements have been submitted.`;
+  if (!isCommitteeMember) {
+    help = 'Only a proposal committee member can endorse the proposed time.';
+  } else if (hasEndorsed) {
+    help = 'You already endorsed the proposed time.';
+  }
+  return {
+    ...action,
+    help,
+    buttonLabel: `Endorse proposed ${verb}`,
+    loadingLabel: `Endorsing milestone ${verb}...`,
+    canSubmit: isCommitteeMember && !hasEndorsed,
+  };
+}
+
+function getDaoProjectMilestoneLifecycleActions(proposal, currentAddress) {
+  if (getEffectiveDaoState(proposal) !== 'executing') return [];
+
+  const project = getDaoProjectPresentation(proposal);
+  if (project.kind !== 'available') return [];
+
+  const actions = [];
+  const executingMilestones = project.milestones
+    .map((milestone, index) => ({ milestone, index }))
+    .filter(({ milestone }) => milestone.status?.key === 'executing');
+  if (executingMilestones.length === 1) {
+    const { milestone, index } = executingMilestones[0];
+    actions.push(getDaoProjectMilestoneTimeAction({
+      proposal,
+      project,
+      milestone,
+      milestoneNumber: index + 1,
+      kind: 'project_milestone_end',
+      currentAddress,
+    }));
+  }
+
+  const nextPendingIndex = project.milestones.findIndex(
+    (milestone) => milestone.status?.key === 'pending',
+  );
+  const canStartNextMilestone = nextPendingIndex >= 0
+    && project.milestones.slice(0, nextPendingIndex).every((milestone) => (
+      milestone.status?.key === 'completed' || milestone.status?.key === 'terminated'
+    ));
+  if (canStartNextMilestone) {
+    actions.push(getDaoProjectMilestoneTimeAction({
+      proposal,
+      project,
+      milestone: project.milestones[nextPendingIndex],
+      milestoneNumber: nextPendingIndex + 1,
+      kind: 'project_milestone_start',
+      currentAddress,
+    }));
+  }
+
+  if (!isDaoProposalCommitteeMember(proposal, currentAddress)) return actions;
+
+  const requiredTerminationVotes = getDaoProjectRequiredEndorsements(proposal, false);
+  const normalizedCurrentAddress = normalizeDaoAddress(currentAddress);
+  for (const [index, milestone] of project.milestones.entries()) {
+    if (milestone.status?.key !== 'pending' && milestone.status?.key !== 'executing') continue;
+
+    const milestoneNumber = index + 1;
+    const alreadyVoted = milestone.terminateVotes.some(
+      (vote) => vote.address === normalizedCurrentAddress,
+    );
+    actions.push({
+      kind: 'project_milestone_terminate',
+      title: `Terminate milestone ${milestoneNumber}`,
+      help: alreadyVoted
+        ? 'You already voted to terminate this milestone.'
+        : `${milestone.terminateVotes.length} of ${requiredTerminationVotes} committee termination votes have been submitted.`,
+      buttonLabel: 'Submit termination vote',
+      loadingLabel: 'Submitting termination vote...',
+      milestoneNumber,
+      reasonRequired: !alreadyVoted,
+      canSubmit: !alreadyVoted,
+    });
+  }
+  return actions;
+}
+
+function getDaoProjectMilestoneClaimActions(proposal, currentAddress) {
+  const state = getEffectiveDaoState(proposal);
+  if (state !== 'executing' && state !== 'completed' && state !== 'terminated') return [];
+
+  const project = getDaoProjectPresentation(proposal);
+  if (project.kind !== 'available' || !isDaoProjectContractor(project, currentAddress)) return [];
+
+  return project.milestones.flatMap((milestone, index) => {
+    if (milestone.status?.key !== 'completed' || milestone.paidWei !== 0n) return [];
+
+    const milestoneNumber = index + 1;
+    const payout = getDaoProjectMilestonePayout(project, milestone);
+    const hasSufficientBalance = payout !== null
+      && project.balanceWei !== null
+      && payout.amountWei <= project.balanceWei;
+    let help;
+    if (!payout) {
+      help = 'Payout details are unavailable until the completed milestone data is refreshed.';
+    } else if (project.balanceWei === null) {
+      help = 'The project balance is unavailable. Refresh the proposal before claiming.';
+    } else if (payout.amountWei > project.balanceWei) {
+      help = 'The calculated payout exceeds the project balance. Refresh the proposal before retrying.';
+    } else {
+      help = `Claim ${formatDaoLibWei(payout.amountWei)} for ${formatDaoProjectDeliverySpeed(payout.speed).toLowerCase()} delivery.`;
+    }
+
+    return [{
+      kind: 'project_milestone_claim',
+      title: `Claim milestone ${milestoneNumber}`,
+      help,
+      buttonLabel: 'Claim milestone payment',
+      loadingLabel: 'Claiming milestone payment...',
+      milestoneNumber,
+      canSubmit: hasSufficientBalance,
+    }];
+  });
+}
+
+function getDaoProjectAddressChangeActions(proposal, project, currentAddress) {
+  const state = getEffectiveDaoState(proposal);
+  const hasRemainingBalance = project.balanceWei !== null && project.balanceWei > 0n;
+  const canChangeAddress = state === 'executing'
+    || ((state === 'completed' || state === 'terminated') && hasRemainingBalance);
+  if (!canChangeAddress) return [];
+
+  const pendingAddress = project.proposedAddress;
+  const normalizedCurrentAddress = normalizeDaoAddress(currentAddress);
+  const requiredEndorsements = getDaoProjectRequiredEndorsements(proposal, false);
+  const proposeAction = {
+    kind: 'project_change_address',
+    title: pendingAddress ? 'Replace proposed contractor' : 'Change contractor address',
+    help: pendingAddress
+      ? `Propose a different contractor address. This replaces ${pendingAddress} and restarts its endorsements.`
+      : `Propose a new contractor address. ${requiredEndorsements} committee endorsements are required.`,
+    buttonLabel: pendingAddress ? 'Propose replacement address' : 'Propose contractor address',
+    loadingLabel: 'Proposing contractor address...',
+    addressRequired: true,
+    currentContractorAddress: project.address,
+    pendingContractorAddress: pendingAddress,
+    canSubmit: true,
+  };
+  if (!pendingAddress) return [proposeAction];
+
+  const hasEndorsed = project.endorsedAddress.includes(normalizedCurrentAddress);
+  return [{
+    kind: 'project_change_address',
+    title: 'Endorse contractor address',
+    help: hasEndorsed
+      ? `You already endorsed ${pendingAddress}.`
+      : `Endorse ${pendingAddress}. ${project.endorsedAddress.length} of ${requiredEndorsements} committee endorsements have been submitted.`,
+    buttonLabel: 'Endorse proposed address',
+    loadingLabel: 'Endorsing contractor address...',
+    canSubmit: !hasEndorsed,
+  }, proposeAction];
+}
+
+function getDaoProjectBalanceReclaimHelp(project, reclaimableAt, canReclaim) {
+  if (reclaimableAt === null) {
+    return 'The project end time is unavailable. Refresh the proposal before reclaiming its balance.';
+  }
+  if (canReclaim) {
+    return `Reclaim the remaining ${formatDaoLibWei(project.balanceWei)} from project escrow.`;
+  }
+  return `The contractor can claim earned payments until ${formatDaoTimestamp(reclaimableAt)}.`;
+}
+
+function getDaoProjectCloseoutActions(proposal, currentAddress, now) {
+  if (!isDaoProposalCommitteeMember(proposal, currentAddress)) return [];
+
+  const project = getDaoProjectPresentation(proposal);
+  if (project.kind !== 'available') return [];
+
+  const state = getEffectiveDaoState(proposal);
+  const actions = getDaoProjectAddressChangeActions(proposal, project, currentAddress);
+  const allMilestonesFinished = project.milestones.every((milestone) => (
+    milestone.status?.key === 'completed' || milestone.status?.key === 'terminated'
+  ));
+  if (state === 'executing' && allMilestonesFinished) {
+    actions.push({
+      kind: 'project_end',
+      title: 'End project',
+      help: 'All milestones are finished. End the project and retain only completed, unpaid milestone payouts in escrow.',
+      buttonLabel: 'End project',
+      loadingLabel: 'Ending project...',
+      canSubmit: true,
+    });
+  }
+
+  const isEnded = state === 'completed' || state === 'terminated';
+  if (!isEnded || project.balanceWei === null || project.balanceWei <= 0n) return actions;
+
+  const reclaimableAt = project.endTime === null
+    ? null
+    : project.endTime + DAO_PROJECT_RECLAIM_DELAY_MS;
+  const canReclaim = reclaimableAt !== null && now >= reclaimableAt;
+  actions.push({
+    kind: 'project_reclaim_balance',
+    title: 'Reclaim project balance',
+    help: getDaoProjectBalanceReclaimHelp(project, reclaimableAt, canReclaim),
+    buttonLabel: 'Reclaim remaining balance',
+    loadingLabel: 'Reclaiming project balance...',
+    canSubmit: canReclaim,
+  });
+  return actions;
+}
+
 function formatDaoClaimWindowLabel(claimWindow, now) {
   if (!claimWindow.start || !claimWindow.end) return 'Unavailable';
   const start = formatDaoTimestamp(claimWindow.start) || 'Unavailable';
@@ -5474,7 +5774,7 @@ function getDaoProposalRewardSummary(
   now = getTransactionTimestamp(),
 ) {
   const state = getEffectiveDaoState(proposal);
-  const isRewardState = state === 'accepted' || state === 'rejected' || state === 'applied' || state === 'withheld';
+  const isRewardState = state === 'withheld' || isDaoFinalResultState(state);
   if (!isRewardState) return null;
 
   const pool = parseDaoUnsignedBigInt(proposal?.voterRewardPool);
@@ -5588,6 +5888,11 @@ function getDaoProposalLifecycleActions(
 
   const applyAction = getDaoProposalApplyLifecycleAction(proposal, currentAddress, now);
   if (applyAction) actions.push(applyAction);
+  const projectStartAction = getDaoProjectStartLifecycleAction(proposal, currentAddress, now);
+  if (projectStartAction) actions.push(projectStartAction);
+  actions.push(...getDaoProjectMilestoneLifecycleActions(proposal, currentAddress));
+  actions.push(...getDaoProjectMilestoneClaimActions(proposal, currentAddress));
+  actions.push(...getDaoProjectCloseoutActions(proposal, currentAddress, now));
   return actions;
 }
 
@@ -6289,12 +6594,45 @@ class ProposalInfoModal {
         const help = actionType && this.isDaoActionPending(actionType)
           ? getDaoTransactionMessage(actionType, 'pending')
           : action.help;
+        const reasonField = action.reasonRequired
+          ? `
+          <div class="form-group">
+            <label for="proposalLifecycleReason${index}">Termination reason</label>
+            <textarea
+              id="proposalLifecycleReason${index}"
+              class="form-control"
+              rows="3"
+              maxlength="${DAO_PROJECT_TERMINATION_REASON_MAX_LENGTH}"
+              data-lifecycle-action-reason="${index}"
+              placeholder="Explain why this milestone should be terminated"
+            ></textarea>
+          </div>`
+          : '';
+        const addressField = action.addressRequired
+          ? `
+          <div class="form-group">
+            <label for="proposalLifecycleAddress${index}">New contractor address</label>
+            <input
+              id="proposalLifecycleAddress${index}"
+              class="form-control"
+              type="text"
+              inputmode="text"
+              maxlength="66"
+              autocomplete="off"
+              spellcheck="false"
+              data-lifecycle-action-address="${index}"
+              placeholder="Enter a Liberdus address"
+            >
+          </div>`
+          : '';
         return `
         <div class="proposal-lifecycle-action">
           <div class="proposal-committee-actions-header">
             <h3>${escapeHtml(action.title)}</h3>
             <p>${escapeHtml(help)}</p>
           </div>
+          ${reasonField}
+          ${addressField}
           <button
             type="button"
             class="btn btn--primary btn--pill btn--full"
@@ -6780,10 +7118,19 @@ class ProposalInfoModal {
       const pendingLifecycle = Boolean(actionType && this.isDaoActionPending(actionType));
       const isSubmittingAction = this.isSubmitting && action === this.submittingLifecycleAction;
       const canSubmitLifecycle = action?.canSubmit !== false;
-      button.disabled = this.isSubmitting || !action || !canSubmitLifecycle || pendingLifecycle;
+      const isDisabled = this.isSubmitting || !action || !canSubmitLifecycle || pendingLifecycle;
+      button.disabled = isDisabled;
       button.textContent = action?.buttonLabel || '';
       if (isSubmittingAction) button.textContent = action.loadingLabel;
       if (pendingLifecycle) button.textContent = pendingLabel;
+      const reasonInput = this.lifecycleActionSection?.querySelector(
+        `[data-lifecycle-action-reason="${button.dataset.lifecycleActionIndex}"]`,
+      );
+      if (reasonInput) reasonInput.disabled = isDisabled;
+      const addressInput = this.lifecycleActionSection?.querySelector(
+        `[data-lifecycle-action-address="${button.dataset.lifecycleActionIndex}"]`,
+      );
+      if (addressInput) addressInput.disabled = isDisabled;
     }
     if (this.voteSubmitButton) {
       this.voteSubmitButton.disabled = disableVote;
@@ -7027,6 +7374,51 @@ class ProposalInfoModal {
       return;
     }
 
+    const actionIndex = this.currentLifecycleActions.indexOf(action);
+    const reasonInput = this.lifecycleActionSection?.querySelector(
+      `[data-lifecycle-action-reason="${actionIndex}"]`,
+    );
+    const addressInput = this.lifecycleActionSection?.querySelector(
+      `[data-lifecycle-action-address="${actionIndex}"]`,
+    );
+    const reason = String(reasonInput?.value || '').trim();
+    if (action.reasonRequired && !reason) {
+      showToast('Enter a milestone termination reason', 2500, 'warning');
+      reasonInput?.focus();
+      return;
+    }
+    if (reason.length > DAO_PROJECT_TERMINATION_REASON_MAX_LENGTH) {
+      showToast(`Milestone termination reason must be ${DAO_PROJECT_TERMINATION_REASON_MAX_LENGTH} characters or less`, 2500, 'warning');
+      reasonInput?.focus();
+      return;
+    }
+    const proposedAddress = action.addressRequired
+      ? normalizeDaoAddress(addressInput?.value)
+      : '';
+    if (action.addressRequired && !proposedAddress) {
+      showToast('Enter a valid Liberdus contractor address', 2500, 'warning');
+      addressInput?.focus();
+      return;
+    }
+    if (proposedAddress === action.currentContractorAddress) {
+      showToast('Enter an address different from the current contractor', 2500, 'warning');
+      addressInput?.focus();
+      return;
+    }
+    if (proposedAddress === action.pendingContractorAddress) {
+      showToast('That contractor address is already proposed', 2500, 'warning');
+      addressInput?.focus();
+      return;
+    }
+    if (action.kind === 'project_milestone_terminate'
+      && !window.confirm(`Submit a vote to terminate milestone ${action.milestoneNumber}?`)) return;
+    if (action.kind === 'project_change_address' && action.addressRequired
+      && !window.confirm(`Propose ${proposedAddress} as the new project contractor?`)) return;
+    if (action.kind === 'project_end'
+      && !window.confirm('End this project and release funds not owed for completed milestones?')) return;
+    if (action.kind === 'project_reclaim_balance'
+      && !window.confirm('Reclaim this project’s remaining balance? Unclaimed contractor payments will no longer be available.')) return;
+
     this.submittingLifecycleAction = action;
     this.setSubmitting(true);
     const loadingToastId = showToast(action.loadingLabel, 0, 'loading');
@@ -7039,6 +7431,10 @@ class ProposalInfoModal {
         networkId: network?.netid || '',
         submitTransaction: (transaction) => this.submitDaoTransaction(transaction),
       };
+      if (action.proposesCurrentTime) request.proposedTime = request.timestamp;
+      if (action.milestoneNumber) request.milestoneNumber = action.milestoneNumber;
+      if (action.reasonRequired) request.reason = reason;
+      if (action.addressRequired) request.proposedAddress = proposedAddress;
       let result;
       switch (action.kind) {
         case 'vote_result':
@@ -7052,6 +7448,30 @@ class ProposalInfoModal {
           break;
         case 'apply_parameters':
           result = await daoRepo.applyParameters(request);
+          break;
+        case 'project_start':
+          result = await daoRepo.startProject(request);
+          break;
+        case 'project_milestone_start':
+          result = await daoRepo.startProjectMilestone(request);
+          break;
+        case 'project_milestone_end':
+          result = await daoRepo.endProjectMilestone(request);
+          break;
+        case 'project_milestone_terminate':
+          result = await daoRepo.terminateProjectMilestone(request);
+          break;
+        case 'project_milestone_claim':
+          result = await daoRepo.claimProjectMilestone(request);
+          break;
+        case 'project_change_address':
+          result = await daoRepo.changeProjectAddress(request);
+          break;
+        case 'project_end':
+          result = await daoRepo.endProject(request);
+          break;
+        case 'project_reclaim_balance':
+          result = await daoRepo.reclaimProjectBalance(request);
           break;
         default:
           throw new Error(`Unknown DAO lifecycle action: ${action.kind}`);
