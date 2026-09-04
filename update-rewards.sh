@@ -13,18 +13,11 @@
 # Frontend source is always <repo>/frontend
 #
 # USAGE:
-#   ./update-rewards.sh <source-branch>
-#   SOURCE_BRANCH=<source-branch> ./update-rewards.sh
-#
-# Required input:
-#   source-branch               Branch to deploy (argument or SOURCE_BRANCH)
-#
-# Optional environment variables:
-#   SKIP_SOURCE_GIT_SYNC=1      Skip fetch/checkout/pull; require requested branch
+#   ./update-rewards.sh
 #
 # WHAT IT DOES:
-# - Ensures liberdus-airdrop is on SOURCE_BRANCH with latest origin (ff-only pull)
-# - Initializes vendor/liberdus-wallet-module at repo root before sync
+# - Reads the current liberdus-airdrop working tree without changing its branch
+# - Requires vendor/liberdus-wallet-module to already exist in the source tree
 # - Rsyncs frontend/ into rewards/ (excludes local config variants)
 # - Rsyncs vendor/liberdus-wallet-module into rewards/vendor/
 # - Rewrites wallet import paths for flat rewards/ layout (../../../vendor -> ../../vendor)
@@ -41,27 +34,15 @@ PARENT_DIR="$(dirname "$REPO_DIR")"
 PREFERRED_AIRDROP_REPO="$PARENT_DIR/follower-campaign/liberdus-airdrop"
 FALLBACK_AIRDROP_REPO="$PARENT_DIR/liberdus-airdrop"
 TARGET_DIR="$REPO_DIR/rewards"
-SOURCE_BRANCH_FROM_ENV="${SOURCE_BRANCH:-}"
 WALLET_VENDOR_REL="vendor/liberdus-wallet-module"
 SOURCE_CONFIG_FILE="config.prod.json"
 TARGET_CONFIG_FILE="config.json"
+SOURCE_BRANCH=""
 SOURCE_COMMIT=""
+SOURCE_STATUS=""
 
-if [ "$#" -gt 1 ]; then
-  echo "Usage: $0 <source-branch>"
-  exit 1
-fi
-
-if [ -n "$SOURCE_BRANCH_FROM_ENV" ] && [ "$#" -eq 1 ]; then
-  echo "Error: Set the source branch using either the argument or SOURCE_BRANCH, not both."
-  exit 1
-fi
-
-SOURCE_BRANCH="${SOURCE_BRANCH_FROM_ENV:-${1:-}}"
-if [ -z "$SOURCE_BRANCH" ]; then
-  echo "Error: An explicit source branch is required."
-  echo "Usage: $0 main"
-  echo "   or: SOURCE_BRANCH=main $0"
+if [ "$#" -ne 0 ]; then
+  echo "Usage: $0"
   exit 1
 fi
 
@@ -98,68 +79,32 @@ fi
 
 mkdir -p "$TARGET_DIR"
 
-assert_source_clean() {
-  local source_status
-  source_status="$(git -C "$AIRDROP_REPO" status --porcelain --untracked-files=normal)"
-  if [ -n "$source_status" ]; then
-    echo "Error: liberdus-airdrop has uncommitted or untracked changes."
-    echo "$source_status"
-    echo "Commit or stash them before migrating."
-    exit 1
-  fi
-}
-
-sync_source_repo() {
+inspect_source_repo() {
   if [ ! -d "$AIRDROP_REPO/.git" ]; then
     echo "Error: $AIRDROP_REPO is not a git repository"
     exit 1
   fi
 
-  assert_source_clean
-
-  if [ "${SKIP_SOURCE_GIT_SYNC:-}" = "1" ]; then
-    local current_branch
-    current_branch="$(git -C "$AIRDROP_REPO" branch --show-current)"
-    if [ "$current_branch" != "$SOURCE_BRANCH" ]; then
-      echo "Error: Source is on $current_branch, but $SOURCE_BRANCH was requested."
-      exit 1
-    fi
-    SOURCE_COMMIT="$(git -C "$AIRDROP_REPO" rev-parse HEAD)"
-    echo "Skipping source git sync (SKIP_SOURCE_GIT_SYNC=1)"
-    echo "Source at: ${SOURCE_COMMIT:0:7} ($(git -C "$AIRDROP_REPO" log -1 --format='%s'))"
-    return 0
+  SOURCE_BRANCH="$(git -C "$AIRDROP_REPO" branch --show-current)"
+  if [ -z "$SOURCE_BRANCH" ]; then
+    SOURCE_BRANCH="detached HEAD"
   fi
-
-  echo "Syncing source repo: $AIRDROP_REPO"
-  echo "Target branch: $SOURCE_BRANCH"
-
-  git -C "$AIRDROP_REPO" fetch origin
-
-  if ! git -C "$AIRDROP_REPO" checkout "$SOURCE_BRANCH"; then
-    echo "Error: Could not checkout branch $SOURCE_BRANCH in $AIRDROP_REPO"
-    exit 1
-  fi
-
-  if ! git -C "$AIRDROP_REPO" pull --ff-only origin "$SOURCE_BRANCH"; then
-    echo "Error: fast-forward pull failed for origin/$SOURCE_BRANCH"
-    echo "Resolve the source repo manually, then re-run this script."
-    exit 1
-  fi
-
-  assert_source_clean
   SOURCE_COMMIT="$(git -C "$AIRDROP_REPO" rev-parse HEAD)"
+  SOURCE_STATUS="$(git -C "$AIRDROP_REPO" status --porcelain --untracked-files=normal)"
+
+  echo "Using current source working tree without fetch, checkout, or pull."
+  echo "Source branch: $SOURCE_BRANCH"
   echo "Source at: ${SOURCE_COMMIT:0:7} ($(git -C "$AIRDROP_REPO" log -1 --format='%s'))"
+  if [ -n "$SOURCE_STATUS" ]; then
+    echo "Warning: Source has local changes; current working-tree contents will be migrated."
+    echo "$SOURCE_STATUS"
+  fi
 }
 
-init_source_submodules() {
-  echo "Initializing source submodules..."
-  if ! git -C "$AIRDROP_REPO" submodule update --init --recursive "$WALLET_VENDOR_REL"; then
-    echo "Error: Failed to initialize $WALLET_VENDOR_REL in $AIRDROP_REPO"
-    exit 1
-  fi
-
+validate_source_vendor() {
   if [ ! -f "$AIRDROP_REPO/$WALLET_VENDOR_REL/index.js" ]; then
-    echo "Error: Missing $AIRDROP_REPO/$WALLET_VENDOR_REL/index.js after submodule init"
+    echo "Error: Missing $AIRDROP_REPO/$WALLET_VENDOR_REL/index.js"
+    echo "Initialize the source submodule before running this migration."
     exit 1
   fi
 
@@ -235,8 +180,8 @@ verify_deployment_sync() {
   fi
 }
 
-sync_source_repo
-init_source_submodules
+inspect_source_repo
+validate_source_vendor
 
 echo "Updating rewards..."
 echo "Airdrop repo: $AIRDROP_REPO"
