@@ -130,11 +130,19 @@ init_source_submodules() {
 
 fix_wallet_import_paths() {
   local wallet_js="$TARGET_DIR/js/shared/wallet.js"
+  local wallet_js_tmp="${wallet_js}.tmp"
   if [ ! -f "$wallet_js" ]; then
     echo "Error: Missing $wallet_js after sync"
     exit 1
   fi
-  sed -i 's|\.\./\.\./\.\./vendor/|../../vendor/|g' "$wallet_js"
+
+  sed 's|\.\./\.\./\.\./vendor/|../../vendor/|g' "$wallet_js" > "$wallet_js_tmp"
+  mv "$wallet_js_tmp" "$wallet_js"
+
+  if grep -q '\.\./\.\./\.\./vendor/' "$wallet_js"; then
+    echo "Error: Failed to rewrite wallet import paths in $wallet_js"
+    exit 1
+  fi
 }
 
 sync_source_repo
