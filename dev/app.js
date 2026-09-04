@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MMDD.HHmm like 2025.0125.1005
-const version = 'n'
+const version = 'o'
 const BOOT_SPLASH_HANDOFF_MS = 1000;
 let myVersion = '0';
 
@@ -4673,13 +4673,13 @@ function renderDaoProjectMilestones(milestones) {
           <p>${escapeHtml(milestone.description)}</p>
         </div>
         <div>
-          <span>Deliverable / Acceptance Criteria</span>
+          <span>Deliverable</span>
           <p>${escapeHtml(milestone.deliverable)}</p>
         </div>
       </div>
       <div class="proposal-info-grid">
         ${renderDaoProposalRows([
-          ['Duration', formatDaoDurationSummary(milestone.duration)],
+          ['Duration', formatDaoDurationEstimate(milestone.duration)],
           ['Cost', `${milestone.costUsdStr} USD`],
           ['Late penalty', `${milestone.penaltyUsdStr} USD`],
           ['Early bonus', `${milestone.bonusUsdStr} USD`],
@@ -4753,13 +4753,13 @@ function renderDaoProjectInfoMilestones(project, proposalState, showRuntimeStatu
               <p>${escapeHtml(description)}</p>
             </div>
             <div>
-              <span>Deliverable / Acceptance Criteria</span>
+              <span>Deliverable</span>
               <p>${escapeHtml(deliverable)}</p>
             </div>
           </div>
           <div class="proposal-info-grid" aria-label="Milestone ${milestoneNumber} terms">
             ${renderDaoProposalRows([
-              ['Duration', milestone.durationMs === null ? null : formatDaoDurationSummary(milestone.durationMs)],
+              ['Duration', milestone.durationMs === null ? null : formatDaoDurationEstimate(milestone.durationMs)],
               ['Cost', formatDaoProjectUsd(milestone.costUsdStr)],
               ['Late penalty', formatDaoProjectUsd(milestone.penaltyUsdStr)],
               ['Early bonus', formatDaoProjectUsd(milestone.bonusUsdStr)],
@@ -23738,13 +23738,17 @@ class ChatModal {
    * Gets the decrypted full image from IndexedDB, downloading it on a cache miss.
    * @param {Object} item - message containing the attachment metadata and keys
    * @param {HTMLElement} linkEl - rendered attachment row
+   * @param {() => void} [onDownloadStart] - called before downloading and decrypting
    * @returns {Promise<Blob>}
    */
-  async getFullImageBlob(item, linkEl) {
+  async getFullImageBlob(item, linkEl, onDownloadStart) {
     const attachment = this.getFullImageAttachment(item, linkEl);
     return fullImageCache.getOrCache({
       attachment,
-      downloadAndDecrypt: () => this.decryptAttachmentToBlob(item, linkEl),
+      downloadAndDecrypt: () => {
+        onDownloadStart?.();
+        return this.decryptAttachmentToBlob(item, linkEl);
+      },
       shouldCache: () => Array.isArray(item?.xattach)
         && item.xattach.some(candidate => candidate?.url === attachment.url),
     });
@@ -25320,9 +25324,11 @@ class ChatModal {
       if (url === '#') return;
 
       const filename = decodeURIComponent(attachmentRow.dataset.name || 'Image');
-      loadingToastId = showToast('Opening image...', 0, 'loading');
-      const blob = await this.getFullImageBlob(item, attachmentRow);
-      hideToast(loadingToastId);
+
+      const blob = await this.getFullImageBlob(item, attachmentRow, () => {
+        loadingToastId = showToast('Opening image...', 0, 'loading');
+      });
+      if (loadingToastId) hideToast(loadingToastId);
       loadingToastId = null;
       fullImageModal.open(blob, filename);
     } catch (err) {
