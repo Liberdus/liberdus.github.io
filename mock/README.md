@@ -1,7 +1,7 @@
 # Liberdus UI mock
 
 Standalone rendering files copied from web-client-v2 branch `dao-mock-proposal-states`,
-commit `300b7859`. The updater copies the source working tree, including any
+commit `f03727f2`. The updater copies the source working tree, including any
 uncommitted mock edits.
 
 Open `/mock/` on the website, or `/mock/?tab=proposals` for the proposal gallery.
