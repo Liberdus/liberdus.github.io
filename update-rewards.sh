@@ -20,6 +20,7 @@
 # - Requires vendor/liberdus-wallet-module to already exist in the source tree
 # - Rsyncs frontend/ into rewards/ (excludes local config variants)
 # - Rsyncs vendor/liberdus-wallet-module into rewards/vendor/
+# - Uses checksums to detect changes and excludes vendor Git metadata
 # - Rewrites wallet import paths for flat rewards/ layout (../../../vendor -> ../../vendor)
 # - Copies config.prod.json to rewards/config.json
 #
@@ -80,7 +81,7 @@ fi
 mkdir -p "$TARGET_DIR"
 
 inspect_source_repo() {
-  if [ ! -d "$AIRDROP_REPO/.git" ]; then
+  if ! git -C "$AIRDROP_REPO" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
     echo "Error: $AIRDROP_REPO is not a git repository"
     exit 1
   fi
@@ -194,7 +195,7 @@ if ! command -v rsync &> /dev/null; then
   exit 1
 fi
 
-rsync -av --delete --delete-excluded \
+rsync -acv --delete --delete-excluded \
   --exclude='.git' \
   --exclude='.github' \
   --exclude='.DS_Store' \
@@ -211,7 +212,8 @@ rsync -av --delete --delete-excluded \
 
 mkdir -p "$TARGET_DIR/$WALLET_VENDOR_REL"
 
-rsync -av --delete \
+rsync -acv --delete --delete-excluded \
+  --exclude='.git' \
   --exclude='test' \
   --exclude='demo.html' \
   "$AIRDROP_REPO/$WALLET_VENDOR_REL/" "$TARGET_DIR/$WALLET_VENDOR_REL/"
@@ -251,6 +253,6 @@ echo "Rewards update completed successfully."
 echo "Airdrop repo: $AIRDROP_REPO"
 echo "Source branch: $SOURCE_BRANCH"
 echo "Source commit: $SOURCE_COMMIT"
-echo "Deployed config: $TARGET_CONFIG_FILE -> $TARGET_CONFIG_FILE"
+echo "Deployed config: $TARGET_CONFIG_FILE (from $SOURCE_CONFIG_FILE)"
 echo "Published wallet module files from source pin: $(git -C "$AIRDROP_REPO/$WALLET_VENDOR_REL" rev-parse --short HEAD)"
 echo "Total files in rewards folder: $file_count"
