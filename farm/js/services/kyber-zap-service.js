@@ -73,13 +73,27 @@
         }
 
         validateRouterAddress(routerAddress, networkConfig = this.getNetworkConfig()) {
-            const expectedRouter = networkConfig?.ROUTER_ADDRESS || null;
-            if (!expectedRouter || !routerAddress) {
-                return;
-            }
-
-            if (this.normalizeAddress(routerAddress) !== this.normalizeAddress(expectedRouter)) {
-                throw new Error('Kyber returned an unexpected zap router. Refresh the quote and try again.');
+            const expectedRouters = networkConfig?.ROUTER_ADDRESSES
+                || [networkConfig?.ROUTER_ADDRESS];
+            const isAddress = address => typeof address === 'string'
+                && /^0x[0-9a-f]{40}$/i.test(address)
+                && !/^0x0{40}$/i.test(address);
+            const isTrusted = isAddress(routerAddress) && expectedRouters.some(expected =>
+                isAddress(expected) && this.normalizeAddress(routerAddress) === this.normalizeAddress(expected)
+            );
+            if (!isTrusted) {
+                const error = new Error('Kyber returned an unexpected zap router. The app may need an update before this route can be used.');
+                error.code = 'KYBER_ROUTER_REVIEW_REQUIRED';
+                error.userMessage = {
+                    title: 'Zap temporarily unavailable',
+                    message: 'Kyber returned an unrecognized contract. The team needs to verify it and update the app before this route can be used. Please report code KYBER_ROUTER_REVIEW_REQUIRED to support.'
+                };
+                error.details = {
+                    chain: networkConfig?.CHAIN || 'unknown',
+                    returnedAddress: routerAddress || null,
+                    allowedAddresses: expectedRouters.filter(isAddress)
+                };
+                throw error;
             }
         }
 

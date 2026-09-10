@@ -99,20 +99,6 @@ window.CONFIG = {
         DEBOUNCE_DELAY: 500 // 500ms
     },
 
-    // Farm 1.0 migration notice shown on the Farm page (retired)
-    FARM_MIGRATION: {
-        ENABLED: false,
-        POSITION_CHECK_ENABLED: false,
-        HIDE_WHEN_CONNECTED_WALLET_HAS_NO_POSITION: true,
-        OLD_FARM_LABEL: 'Farm 1.0',
-        OLD_FARM_URL: '',
-        OLD_FARM_CONTRACTS: {
-            BSC_MAINNET: '0x89E662CB5d784582DB631e2Cbc81bB6643BB2EF4',
-            BSC_TESTNET: '0x24F28129B65E9AeDdAfE3f1Fc67ab82DDCF30dF9'
-        },
-        LEGACY_LP_TOKENS: {}
-    },
-
     // Support Links
     SUPPORT: {
         DISCORD_URL: 'https://liberdus.com/discord/',
@@ -179,6 +165,14 @@ window.CONFIG = {
                 CHAIN: 'bsc',
                 DEX: 'DEX_UNISWAPV2',
                 ROUTER_ADDRESS: '0x0e97C887b61cCd952a53578B04763E7134429e05',
+                // Explicitly trusted targets; never populate this list from a quote.
+                ROUTER_ADDRESSES: [
+                    // Legacy KSZapRouterPosition remains listed in Kyber's BSC V2 deployments.
+                    '0x0e97C887b61cCd952a53578B04763E7134429e05',
+                    // KSAllowanceHub: official deployment config lists this address for chain 56.
+                    // https://github.com/KyberNetwork/ks-allowance-hub/blob/9a156979a61c309f21e82056bce3b8aac156333b/script/config/allowance-hub.json
+                    '0x455C51505E90819aBdC691B98Aee6a11ED41d618'
+                ],
                 WRAPPED_NATIVE_TOKEN_ADDRESS: '0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c',
                 DEX_CANDIDATES: [
                     'DEX_UNISWAPV2',
@@ -272,7 +266,7 @@ window.CONFIG = {
 
     // Development Configuration
     DEV: {
-        DEBUG: false
+        DEBUG: true
     },
 
     // Default Values for Contract Stats
