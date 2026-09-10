@@ -21,7 +21,9 @@
 #
 # Optional environment variables:
 #   SOURCE_BRANCH=main          Branch to checkout in source (default: main)
-#   SKIP_SOURCE_GIT_SYNC=1      Skip fetch/checkout/pull/submodule (use current tree)
+#   SKIP_SOURCE_GIT_SYNC=1      Skip fetch/checkout/pull (use current tree)
+# To migrate the currently selected source branch:
+#   SOURCE_BRANCH="$(git -C ../lib-lp-staking-frontend branch --show-current)" ./update-farm.sh
 #
 # WHAT IT DOES:
 # - Ensures lib-lp-staking-frontend is on SOURCE_BRANCH with latest origin (ff-only pull)
@@ -130,7 +132,15 @@ if ! command -v rsync &> /dev/null; then
     exit 1
 fi
 
-rsync -av --delete \
+rsync -acv --delete --delete-excluded \
+    --exclude='node_modules/' \
+    --exclude='.DS_Store' \
+    --exclude='.env' \
+    --exclude='.env.*' \
+    --exclude='*.log' \
+    --exclude='/coverage/' \
+    --exclude='/test-results/' \
+    --exclude='/playwright-report/' \
     --exclude='README.md' \
     --exclude='README' \
     --exclude='legacy/' \
@@ -188,5 +198,5 @@ echo "Farm update completed successfully!"
 echo "Files copied from: $SOURCE_DIR"
 echo "Files copied to: $TARGET_DIR"
 echo "Version updated from $current_version to $new_version"
-echo "Published wallet module: $(git -C "$TARGET_DIR/$WALLET_VENDOR_REL" rev-parse --short HEAD 2>/dev/null || echo unknown)"
+echo "Published wallet module: $(git -C "$SOURCE_DIR/$WALLET_VENDOR_REL" rev-parse --short HEAD)"
 echo "Total files in farm folder: $file_count"
