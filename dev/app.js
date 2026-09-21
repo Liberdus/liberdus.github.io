@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MMDD.HHmm like 2025.0125.1005
-const version = 'q'
+const version = 'r'
 const BOOT_SPLASH_HANDOFF_MS = 1000;
 let myVersion = '0';
 
@@ -5566,6 +5566,7 @@ function getDaoProjectMilestoneTimeAction({
     title: `${title} milestone ${milestoneNumber}`,
     milestoneNumber,
     proposesCurrentTime: !hasProposedTime,
+    expectedProposedTime: milestone.proposedTime,
     canSubmit: false,
   };
 
@@ -5736,6 +5737,8 @@ function getDaoProjectAddressChangeActions(proposal, project, currentAddress) {
       : `Endorse ${pendingAddress}. ${project.endorsedAddress.length} of ${requiredEndorsements} committee endorsements have been submitted.`,
     buttonLabel: 'Endorse proposed address',
     loadingLabel: 'Endorsing contractor address...',
+    currentContractorAddress: project.address,
+    pendingContractorAddress: pendingAddress,
     canSubmit: !hasEndorsed,
   }, proposeAction];
 }
@@ -7465,6 +7468,46 @@ class ProposalInfoModal {
     this.handleLifecycleActionSubmit(action);
   }
 
+  async refreshProjectActionProposal(action, proposal) {
+    const currentAddress = getDaoCurrentAccountAddress();
+    const networkId = network?.netid || '';
+    const proposalId = this._currentProposalId;
+    const refreshed = await daoRepo.refreshProposal(proposal.number);
+    if (currentAddress !== getDaoCurrentAccountAddress()
+      || networkId !== (network?.netid || '')
+      || proposalId !== this._currentProposalId
+      || !this.modal.classList.contains('active')) {
+      throw new Error('Account or proposal changed. Reopen the proposal before submitting.');
+    }
+    if (!refreshed) {
+      throw new Error('Could not refresh the proposal. Try again before submitting.');
+    }
+
+    if (action.kind === 'project_change_address') {
+      const refreshedAction = getDaoProjectCloseoutActions(refreshed, currentAddress, getTransactionTimestamp())
+        .find((candidate) => candidate.kind === action.kind
+          && candidate.addressRequired === action.addressRequired);
+      if (!refreshedAction?.canSubmit
+        || refreshedAction.currentContractorAddress !== action.currentContractorAddress
+        || refreshedAction.pendingContractorAddress !== action.pendingContractorAddress) {
+        this.renderProposal(refreshed);
+        throw new Error('Contractor address changed. Review the updated proposal before submitting.');
+      }
+      return refreshed;
+    }
+
+    const refreshedAction = getDaoProjectMilestoneLifecycleActions(refreshed, currentAddress)
+      .find((candidate) => candidate.kind === action.kind
+        && candidate.milestoneNumber === action.milestoneNumber);
+    if (!refreshedAction?.canSubmit
+      || refreshedAction.proposesCurrentTime !== action.proposesCurrentTime
+      || refreshedAction.expectedProposedTime !== action.expectedProposedTime) {
+      this.renderProposal(refreshed);
+      throw new Error('Milestone changed. Review the updated proposal before submitting.');
+    }
+    return refreshed;
+  }
+
   async handleLifecycleActionSubmit(action) {
     if (this.isSubmitting || !action || action.canSubmit === false) return;
 
@@ -7478,7 +7521,7 @@ class ProposalInfoModal {
       return;
     }
 
-    const proposal = this.getCurrentProposal();
+    let proposal = this.getCurrentProposal();
     if (!proposal) {
       showToast('Proposal data is unavailable', 2500, 'warning');
       return;
@@ -7538,6 +7581,15 @@ class ProposalInfoModal {
     const loadingToastId = showToast(action.loadingLabel, 0, 'loading');
 
     try {
+      if (action.kind === 'project_milestone_start'
+        || action.kind === 'project_milestone_end'
+        || action.kind === 'project_change_address') {
+        proposal = await this.refreshProjectActionProposal(action, proposal);
+        if (this.isDaoActionPending(actionType)) {
+          showToast(getDaoTransactionMessage(actionType, 'pending'), 2500, 'info');
+          return;
+        }
+      }
       const request = {
         from: getDaoCurrentAccountAddress(),
         proposal,
@@ -7546,9 +7598,13 @@ class ProposalInfoModal {
         submitTransaction: (transaction) => this.submitDaoTransaction(transaction),
       };
       if (action.proposesCurrentTime) request.proposedTime = request.timestamp;
+      if (action.proposesCurrentTime === false) request.expectedProposedTime = action.expectedProposedTime;
       if (action.milestoneNumber) request.milestoneNumber = action.milestoneNumber;
       if (action.reasonRequired) request.reason = reason;
       if (action.addressRequired) request.proposedAddress = proposedAddress;
+      if (action.kind === 'project_change_address' && !action.addressRequired) {
+        request.expectedProposedAddress = action.pendingContractorAddress;
+      }
       let result;
       switch (action.kind) {
         case 'vote_result':

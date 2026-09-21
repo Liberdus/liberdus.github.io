@@ -849,7 +849,9 @@ function buildDaoProjectMilestoneTimeTransaction({
   type,
   from,
   proposal,
+  milestoneNumber,
   proposedTime,
+  expectedProposedTime,
   timestamp,
   networkId,
   actionLabel,
@@ -863,21 +865,30 @@ function buildDaoProjectMilestoneTimeTransaction({
     timestampLabel: `${actionLabel} timestamp`,
     fromLabel: `${actionLabel} sender`,
   });
-  if (proposedTime === undefined) return transaction;
-
-  const safeProposedTime = requireDaoNonNegativeNumber(proposedTime, `${actionLabel} proposed time`);
-  if (safeProposedTime <= 0) throw new Error(`${actionLabel} proposed time is required`);
-  if (safeProposedTime > transaction.timestamp) {
-    throw new Error(`${actionLabel} proposed time cannot be later than the transaction timestamp`);
+  transaction.milestoneNumber = normalizeDaoProjectMilestoneNumber(proposal, milestoneNumber);
+  if (proposedTime !== undefined && expectedProposedTime !== undefined) {
+    throw new Error('Cannot propose and endorse a milestone time in the same transaction');
   }
-  transaction.proposedTime = safeProposedTime;
+  const timeField = proposedTime === undefined ? 'expectedProposedTime' : 'proposedTime';
+  const timeLabel = proposedTime === undefined ? 'expected proposed time' : 'proposed time';
+  const time = requireDaoNonNegativeNumber(
+    proposedTime === undefined ? expectedProposedTime : proposedTime,
+    `${actionLabel} ${timeLabel}`,
+  );
+  if (time <= 0) throw new Error(`${actionLabel} ${timeLabel} is required`);
+  if (time > transaction.timestamp) {
+    throw new Error(`${actionLabel} ${timeLabel} cannot be later than the transaction timestamp`);
+  }
+  transaction[timeField] = time;
   return transaction;
 }
 
 export function buildDaoProjectMilestoneStartTransaction({
   from,
   proposal,
+  milestoneNumber,
   proposedTime,
+  expectedProposedTime,
   timestamp,
   networkId,
 } = {}) {
@@ -885,7 +896,9 @@ export function buildDaoProjectMilestoneStartTransaction({
     type: DAO_ACTION_TYPES.PROJECT_MILESTONE_START,
     from,
     proposal,
+    milestoneNumber,
     proposedTime,
+    expectedProposedTime,
     timestamp,
     networkId,
     actionLabel: 'Milestone start',
@@ -895,7 +908,9 @@ export function buildDaoProjectMilestoneStartTransaction({
 export function buildDaoProjectMilestoneEndTransaction({
   from,
   proposal,
+  milestoneNumber,
   proposedTime,
+  expectedProposedTime,
   timestamp,
   networkId,
 } = {}) {
@@ -903,7 +918,9 @@ export function buildDaoProjectMilestoneEndTransaction({
     type: DAO_ACTION_TYPES.PROJECT_MILESTONE_END,
     from,
     proposal,
+    milestoneNumber,
     proposedTime,
+    expectedProposedTime,
     timestamp,
     networkId,
     actionLabel: 'Milestone completion',
@@ -977,6 +994,7 @@ export function buildDaoProjectChangeAddressTransaction({
   from,
   proposal,
   proposedAddress,
+  expectedProposedAddress,
   timestamp,
   networkId,
 } = {}) {
@@ -989,7 +1007,14 @@ export function buildDaoProjectChangeAddressTransaction({
     timestampLabel: 'Contractor address change timestamp',
     fromLabel: 'Contractor address change sender',
   });
-  if (proposedAddress === undefined) return transaction;
+  if (proposedAddress !== undefined && expectedProposedAddress !== undefined) {
+    throw new Error('Cannot propose and endorse a contractor address in the same transaction');
+  }
+  if (proposedAddress === undefined) {
+    const expectedAddress = normalizeDaoAddress(expectedProposedAddress);
+    if (!expectedAddress) throw new Error('Expected proposed contractor address is invalid');
+    return { ...transaction, expectedProposedAddress: `${expectedAddress}${'0'.repeat(24)}` };
+  }
 
   const address = normalizeDaoAddress(proposedAddress);
   if (!address) throw new Error('Proposed contractor address is invalid');
@@ -2444,7 +2469,9 @@ export const daoRepo = {
   async startProjectMilestone({
     from,
     proposal,
+    milestoneNumber,
     proposedTime,
+    expectedProposedTime,
     timestamp,
     networkId,
     submitTransaction,
@@ -2457,14 +2484,16 @@ export const daoRepo = {
       networkId,
       submitTransaction,
       errorMessage: 'Milestone start failed',
-      transactionFields: { proposedTime },
+      transactionFields: { milestoneNumber, proposedTime, expectedProposedTime },
     });
   },
 
   async endProjectMilestone({
     from,
     proposal,
+    milestoneNumber,
     proposedTime,
+    expectedProposedTime,
     timestamp,
     networkId,
     submitTransaction,
@@ -2477,7 +2506,7 @@ export const daoRepo = {
       networkId,
       submitTransaction,
       errorMessage: 'Milestone completion failed',
-      transactionFields: { proposedTime },
+      transactionFields: { milestoneNumber, proposedTime, expectedProposedTime },
     });
   },
 
@@ -2526,6 +2555,7 @@ export const daoRepo = {
     from,
     proposal,
     proposedAddress,
+    expectedProposedAddress,
     timestamp,
     networkId,
     submitTransaction,
@@ -2538,7 +2568,7 @@ export const daoRepo = {
       networkId,
       submitTransaction,
       errorMessage: 'Contractor address change failed',
-      transactionFields: { proposedAddress },
+      transactionFields: { proposedAddress, expectedProposedAddress },
     });
   },
 
