@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MMDD.HHmm like 2025.0125.1005
-const version = 'r'
+const version = 's'
 const BOOT_SPLASH_HANDOFF_MS = 1000;
 let myVersion = '0';
 
@@ -2746,6 +2746,9 @@ class DaoModal {
   }
 
   async _open(initialFilterKey) {
+    // Do not close the menu or start a refresh while another modal is still opening.
+    if (!this.isActive() && !openModal(this.modal)) return;
+
     const refreshId = ++this.refreshSequence;
     this.openRefreshId = refreshId;
     this.proposalOpenSequence += 1;
@@ -2755,7 +2758,6 @@ class DaoModal {
     if (menuModal?.isActive?.()) menuModal.close();
     footer?.closeNewChatButton?.();
 
-    openModal(this.modal);
     enterFullscreen();
 
     this.selectedFilterKey = initialFilterKey || this.selectedFilterKey || 'voting';
