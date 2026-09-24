@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MMDD.HHmm like 2025.0125.1005
-const version = 's'
+const version = 't'
 const BOOT_SPLASH_HANDOFF_MS = 1000;
 let myVersion = '0';
 
@@ -33612,6 +33612,7 @@ evmAssets.configure({
   openSend: (options) => sendAssetFormModal.open(options),
   openReceive: (options) => receiveModal.open(options),
   showToast,
+  hideToast,
   syncSelect: (select) => PopupSelect.sync(select),
 });
 
