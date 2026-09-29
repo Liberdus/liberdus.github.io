@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MMDD.HHmm like 2025.0125.1005
-const version = 'u'
+const version = 'v'
 const BOOT_SPLASH_HANDOFF_MS = 1000;
 const BOOT_SPLASH_FRAME_TIMEOUT_MS = 100;
 const BOOT_SPLASH_IMAGE_TIMEOUT_MS = 2000;
@@ -208,7 +208,13 @@ import {
   CHAT_REACTION_SHEET_RECENT_CATEGORY_KEY,
 } from './data/emoji-picker-data.js';
 
-import { evmAssets } from './evm-assets.js';
+import {
+  evmAssets,
+  EVM_CHAT_MESSAGE_TYPE,
+  parseEvmTransferMessage,
+  evmPaymentId,
+  evmPaymentAmount,
+} from './evm-assets.js';
 import {
   formatDisplayAmount,
   multichain,
@@ -488,6 +494,7 @@ function newDataRecord(myAccount) {
       ],
       history: [],
     },
+    evmPayments: [], // External transfers and their chat receipt recovery records
     pending: [], // Array to track pending transactions
     state: {
       unread: 0,
@@ -510,6 +517,7 @@ function newDataRecord(myAccount) {
 function clearMyData() {
   myData = null;
   myAccount = null;
+  stopEvmPaymentChecks();
   evmAssets.reset();
   multichain.reset();
   daoRepo.reset();
@@ -1108,12 +1116,19 @@ async function encryptAllAccounts(oldPassword, newPassword) {
 
 function saveState() {
   if (myData && myAccount && myAccount.username && myAccount.netid) {
-    let data = stringify(myData)
-    if (localStorage.lock && lockModal.encKey){  // Consider what happens if localStorage.lock was manually deleted
-      data = encryptData(data, lockModal.encKey, true)
-    }
-    localStorage.setItem(`${myAccount.username}_${myAccount.netid}`, data);
+    // Merge this tab's unsaved payment changes with the latest account snapshot.
+    myData.evmPayments = loadEvmPayments(myAccount);
+    saveAccountData(myData, myAccount);
   }
+}
+
+function saveAccountData(accountData, account) {
+  let data = stringify(accountData);
+  if (localStorage.lock && lockModal.encKey) {
+    data = encryptData(data, lockModal.encKey, true);
+  }
+  localStorage.setItem(`${account.username}_${account.netid}`, data);
+  evmPaymentChanges.delete(account);
 }
 
 function loadState(account, noparse=false){
@@ -1922,6 +1937,9 @@ class ChatsScreen {
         previewHTML = `<span><i>Voice message</i></span>`;
       } else if (latestActivity.type === 'location') {
         previewHTML = `<span><i>Shared location</i></span>`;
+      } else if (latestActivity.type === EVM_CHAT_MESSAGE_TYPE) {
+        const payment = latestActivity.payment;
+        previewHTML = payment ? `<span class="payment-preview">${latestActivity.my ? '-' : '+'} ${escapeHtml(evmPaymentAmount(payment))} ${escapeHtml(payment.symbol)}</span>` : '<span>Payment</span>';
       } else if (latestActivity.type === INTENTS_CHAT_MESSAGE_TYPE) {
         // The same shape as a LIB payment's preview: signed amount, then note.
         const payment = latestActivity.payment;
@@ -11884,6 +11902,10 @@ function getReactionTargetPreviewText(message) {
     return 'location';
   }
 
+  if (message.type === EVM_CHAT_MESSAGE_TYPE) {
+    return message.payment ? `${evmPaymentAmount(message.payment)} ${message.payment.symbol}` : 'payment';
+  }
+
   if (message.type === INTENTS_CHAT_MESSAGE_TYPE) {
     return message.payment ? `${message.payment.amount} ${message.payment.symbol}` : 'payment';
   }
@@ -12299,6 +12321,160 @@ function restorePendingMessageEdit(pendingTxid, contactAddress, editPending) {
  */
 const intentsPaymentVerifications = new Map();
 
+const EVM_CHECK_LIMIT = 20;
+const EVM_RECHECK_MS = 5 * 60_000;
+let evmPaymentCheckSession = null;
+
+function stopEvmPaymentChecks() {
+  evmPaymentCheckSession = null;
+  evmAssets.transactions.paymentEvidence.clear();
+}
+
+function evmPaymentMessages(record, account) {
+  const own = `0x${normalizeAddress(account.keys.address)}`;
+  const address = normalizeAddress(record.payment.from === own ? record.payment.to : record.payment.from);
+  return (myData.contacts[address]?.messages || []).filter((message) => !message.deleted
+    && message.type === EVM_CHAT_MESSAGE_TYPE && stringify(message.payment) === stringify(record.payment)
+    && message.my === (record.payment.from === own));
+}
+
+// Receipt lookup is read-only: even a reverted asset may already have an announcement.
+async function lookupEvmAnnouncement(txid, account) {
+  let outcome = await queryNetwork(`/transaction/${txid}`);
+  if (typeof outcome?.transaction?.success !== 'boolean') {
+    outcome = await queryNetwork(`/collector/api/transaction?appReceiptId=${txid}`);
+  }
+  if (myAccount !== account) throw new Error('Account changed during message recovery.');
+  return outcome?.transaction?.success;
+}
+
+async function recheckEvmPayment(payment, account) {
+  if (myAccount !== account) return;
+  evmAssets.transactions.paymentEvidence.clear();
+  const record = loadEvmPayments(account).find((item) => stringify(item.payment) === stringify(payment))
+    || { kind: 'verification', payment, assetState: 'unknown', createdAt: Date.now() };
+  record.checkAttempts = 0;
+  record.nextCheckAt = 0;
+  saveEvmPayment(record, account);
+  await checkEvmPayments();
+}
+
+// The existing five-second app heartbeat schedules this queue independently of
+// Liberdus pending. No chat modal owns a timer or a verification request.
+async function checkEvmPayments() {
+  if (!myAccount || !isOnline || document.visibilityState === 'hidden' || evmAssets.sending) return;
+  if (evmPaymentCheckSession?.account !== myAccount) {
+    stopEvmPaymentChecks();
+    evmPaymentCheckSession = { account: myAccount, running: false };
+  }
+  const session = evmPaymentCheckSession;
+  if (session.running) return;
+  session.running = true;
+  const current = () => evmPaymentCheckSession === session && myAccount === session.account
+    && isOnline && document.visibilityState !== 'hidden' && !evmAssets.sending;
+  try {
+    const due = loadEvmPayments(session.account).filter((record) => (record.checkAttempts || 0) < EVM_CHECK_LIMIT
+      && (record.nextCheckAt || 0) <= Date.now()).sort((a, b) => (a.nextCheckAt || 0) - (b.nextCheckAt || 0)).slice(0, 4);
+    // Unsaved local changes must not mask another tab's retry after the lookups.
+    if (due.length && evmPaymentChanges.has(session.account)) saveState();
+    await Promise.all(due.map(async (record) => {
+      if (!current()) return;
+      const recordId = evmPaymentRecordId(record);
+      if (record.kind === 'verification' && !evmPaymentMessages(record, session.account).length) {
+        removeEvmPayment(record, session.account);
+        return;
+      }
+      const state = record.kind === 'outgoing'
+        ? await evmAssets.transactions.verifyOutgoingPayment(record)
+        : await evmAssets.transactions.verifyPayment(record.payment, record.payment.from, record.payment.to);
+      if (!current()) return;
+      const attemptId = record.attempt?.txid;
+      const delivered = record.kind === 'outgoing' && attemptId && !['delivered', 'abandoned'].includes(record.messageState)
+        ? await lookupEvmAnnouncement(attemptId, session.account).catch(() => undefined) : undefined;
+      if (!current()) return;
+      // Do not apply a stale result to an operation changed while RPC was in flight.
+      const latest = loadEvmPayments(session.account).find((item) => evmPaymentRecordId(item) === recordId);
+      if (!latest || latest.attempt?.txid !== attemptId) return;
+      record = latest;
+      record.checkedAt = Date.now();
+      record.checkAttempts = (record.checkAttempts || 0) + 1;
+      record.nextCheckAt = Date.now() + Math.min(30_000, 5000 * 2 ** Math.min(record.checkAttempts - 1, 3));
+      record.verification = state;
+      record.assetState = state === 'settled' ? 'confirmed' : state === 'reverted' ? 'reverted'
+        : state === 'pending' ? 'pending' : 'unknown';
+      const messages = evmPaymentMessages(record, session.account);
+      for (const message of messages) {
+        message.paymentVerified = state === 'reverted' ? 'failed' : state;
+        message.paymentReverted = state === 'reverted';
+        message.paymentCheckedAt = record.checkedAt;
+      }
+      if (messages.some((message) => message.my && message.paymentMessageConfirmed)
+        && record.kind === 'outgoing') record.messageState = 'delivered';
+      if (record.kind === 'outgoing' && record.attempt && !['delivered', 'abandoned'].includes(record.messageState)) {
+        if (delivered === true) {
+          record.messageState = 'delivered';
+          for (const message of messages) {
+            message.paymentMessageConfirmed = true;
+            message.status = 'sent';
+          }
+        } else if (delivered === false) {
+          record.messageState = 'rejected';
+          record.attempt.everUncertain = false;
+          for (const message of messages) message.status = 'failed';
+        }
+      }
+      const terminal = ['settled', 'reverted', 'failed'].includes(state);
+      if (terminal && record.kind === 'verification') {
+        removeEvmPayment(record, session.account);
+        return;
+      }
+      // Remember the outcome already surfaced by send() or an earlier check.
+      // Balance refresh can retry without delaying or repeating this alert.
+      if (!record.username && ['settled', 'reverted'].includes(state)
+        && record.notifiedAssetState !== record.assetState) {
+        showToast(`EVM transfer ${record.assetState}: ${record.payment.transactionHash}`, 5000, state === 'reverted' ? 'error' : 'info');
+        record.notifiedAssetState = record.assetState;
+      }
+      saveEvmPayment(record, session.account);
+      if (['settled', 'reverted'].includes(state) && !record.balanceRefreshed) {
+        // Flush our changes before waiting so the reload can see other tabs' retries.
+        saveState();
+        let balanceRefreshed = false;
+        try {
+          await evmAssets.refresh({ force: true });
+          // Discovery resolves with cached balances when its request fails.
+          balanceRefreshed = evmAssets.getStatus() === 'connected';
+        } catch { /* Retry a balance refresh with the same bounded schedule. */ }
+        if (!current()) return;
+        record = loadEvmPayments(session.account).find((item) => evmPaymentRecordId(item) === recordId);
+        if (!record) return;
+        record.balanceRefreshed ||= balanceRefreshed;
+      }
+      if (!current()) return;
+      if (['confirmed', 'reverted'].includes(record.assetState) && record.balanceRefreshed
+        && ['none', 'delivered', 'abandoned'].includes(record.messageState)) {
+        removeEvmPayment(record, session.account);
+      } else {
+        saveEvmPayment(record, session.account);
+      }
+    }));
+    if (!current() || !due.length) return;
+    saveState();
+    if (chatModal.isActive()) chatModal.appendChatModal();
+    chatsScreen.updateChatList();
+    if (evmAssets.assetsModal?.modal?.classList.contains('active')) evmAssets.assetsModal.renderRecovery();
+  } catch (error) {
+    console.warn('EVM payment verification interrupted:', error.message);
+  } finally {
+    session.running = false;
+  }
+}
+
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'hidden') stopEvmPaymentChecks();
+  else void checkEvmPayments();
+});
+
 async function verifyVisibleChatPayments() {
   const bubbles = document.querySelectorAll(
     '.intents-payment-message[data-verified="unchecked"], .intents-payment-message[data-verified="pending"]'
@@ -12508,6 +12684,7 @@ async function processChats(chats, keys) {
   const messageQueryTimestamp = Math.max(0, timestamp+1);
   let hasAnyTransfer = false;
   let needsUpcomingCallsUiRefresh = false;
+  let syncedEvmPayment = false;
   const currentUserAddress = normalizeAddress(keys.address);
 
   for (let sender in chats) {
@@ -12535,6 +12712,7 @@ async function processChats(chats, keys) {
       let didChangeReactionPreview = false;
       let didApplyStatusChange = false;
       let needsStatusChatRefresh = false;
+      let syncedOwnEvmPayment = false;
       let myStatusUpdate = null;
       let contactStatusUpdate = null;
       const touchedReactionTargetTxids = new Set();
@@ -12863,6 +13041,13 @@ async function processChats(chats, keys) {
                   payload.latitude = latitude;
                   payload.longitude = longitude;
                   payload.accuracy = Number.isFinite(accuracy) && accuracy >= 0 ? accuracy : null;
+                } else if (parsedMessage.type === EVM_CHAT_MESSAGE_TYPE) {
+                  const claim = parseEvmTransferMessage(parsedMessage);
+                  if (!claim || claim.from !== `0x${normalizeAddress(tx.from)}`
+                    || claim.to !== `0x${normalizeAddress(tx.to)}`) continue;
+                  payload.message = '';
+                  payload.type = EVM_CHAT_MESSAGE_TYPE;
+                  payload.payment = claim;
                 } else if (parsedMessage.type === INTENTS_CHAT_MESSAGE_TYPE) {
                   // Every field of this arrives from the sender, and a payment
                   // bubble is worth forging, so anything malformed is dropped
@@ -13004,6 +13189,22 @@ async function processChats(chats, keys) {
               continue
             }
           }
+          if (payload.type === EVM_CHAT_MESSAGE_TYPE) {
+            // A queried message proves Liberdus delivery, not EVM settlement.
+            payload.paymentMessageConfirmed = true;
+            payload.status = 'sent';
+            syncedEvmPayment = true;
+            syncedOwnEvmPayment ||= mine;
+            const existing = contact.messages.find((message) => message.type === EVM_CHAT_MESSAGE_TYPE
+              && message.my === mine && stringify(message.payment) === stringify(payload.payment));
+            if (existing) {
+              existing.paymentMessageConfirmed = true;
+              existing.status = 'sent';
+              existing.txid = txidHex;
+              queueEvmPaymentMessage(existing, myAccount);
+              continue;
+            }
+          }
           //  skip if this tx was processed before and is already in contact.messages;
           //    messages are the same if the messages[x].sent_timestamp is the same as the tx.timestamp,
           //    and messages[x].my is false and messages[x].message == payload.message
@@ -13054,6 +13255,7 @@ async function processChats(chats, keys) {
           }
           
           insertSorted(contact.messages, payload, 'timestamp');
+          if (payload.type === EVM_CHAT_MESSAGE_TYPE) queueEvmPaymentMessage(payload, myAccount);
           if (payload.type === 'call' && shouldRefreshUpcomingCallsUiForCallTime(payload.callTime)) {
             needsUpcomingCallsUiRefresh = true;
           }
@@ -13310,7 +13512,11 @@ async function processChats(chats, keys) {
         chatsScreen.updateChatList();
       }
 
-      if (didApplyStatusChange && chatsScreen.isActive()) {
+      if (syncedOwnEvmPayment) {
+        syncChatLatestActivityTimestamp(from, contact);
+        if (inActiveChatWithSender) chatModal.appendChatModal();
+      }
+      if ((didApplyStatusChange || syncedOwnEvmPayment) && chatsScreen.isActive()) {
         chatsScreen.updateChatList();
       }
 
@@ -13364,6 +13570,8 @@ async function processChats(chats, keys) {
     // Update the timestamp
     myAccount.chatTimestamp = newTimestamp;
   }
+  // Save queried messages and their verification work together.
+  if (syncedEvmPayment) saveState();
 }
 
 /**
@@ -13690,7 +13898,8 @@ async function refreshNetworkParamsOnTxFeeMismatch(reason) {
  * @param {string} txid - The transaction ID
  * @returns {Promise<Object>} The response from the injectTx call
  */
-async function injectTx(tx, txid) {
+async function injectTx(tx, txid, expectedAccount = null) {
+  if (expectedAccount && myAccount !== expectedAccount) throw new Error('Account changed before submission.');
   if (!isOnline) {
     return null;
   }
@@ -13758,6 +13967,8 @@ async function injectTx(tx, txid) {
     if (!data.result.reason && normalizedReason) {
       data.result.reason = normalizedReason;
     }
+
+    if (expectedAccount && myAccount !== expectedAccount) return data;
 
     if (normalizedSuccess === true) {
       const pendingTxData = {
@@ -13829,6 +14040,7 @@ async function injectTx(tx, txid) {
     const errorReason = typeof error === 'string' ? error : (error?.message || String(error) || 'inject_failed');
     return {
       result: { success: false, reason: errorReason },
+      transportFailure: true,
       txid,
       toastAlreadyShown: true,
     };
@@ -21164,6 +21376,10 @@ class ChatModal {
 
     // Set active chat address early so async refreshes target the correct chat.
     this.address = address;
+    for (const message of myData.contacts[address]?.messages || []) {
+      if (message.type === EVM_CHAT_MESSAGE_TYPE) queueEvmPaymentMessage(message, myAccount);
+    }
+    void checkEvmPayments();
 
     // clear message input
     this.messageInput.value = '';
@@ -22429,6 +22645,141 @@ class ChatModal {
     }
   }
 
+  /** Check the actual recipient and live LIB funds before an external payment. */
+  async prepareEvmPaymentRecipient(resolution, account) {
+    const requireAccount = () => {
+      if (myAccount !== account) throw new Error('Account changed. Review the transfer again.');
+    };
+    requireAccount();
+    const address = normalizeAddress(resolution.address);
+    const sorted = [longAddress(account.keys.address), longAddress(address)].sort();
+    const chatId = hashBytes(sorted.join(''));
+    const [recipientInfo, tollInfo, balanceInfo, paramsOk] = await Promise.all([
+      queryNetwork(`/account/${longAddress(address)}`),
+      queryNetwork(`/messages/${chatId}/toll`),
+      queryNetwork(`/account/${longAddress(account.keys.address)}/balance`),
+      getNetworkParams(true),
+    ]);
+    requireAccount();
+    const recipient = recipientInfo?.account;
+    const fee = paramsOk ? getTransactionFeeWei({ allowNull: true }) : null;
+    if (!recipient?.data || balanceInfo?.balance == null || fee === null) {
+      throw new Error('Cannot check LIB balance, message fee, or recipient toll. Try again.');
+    }
+    const required = tollInfo?.error === 'No account with the given chatId'
+      ? 1 : tollInfo?.toll?.required?.[sorted.indexOf(longAddress(address))];
+    if (![0, 1, 2].includes(required)) throw new Error('Cannot check recipient toll. Try again.');
+    if (required === 2) throw new Error('This recipient has blocked messages.');
+    if (typeof recipient.data.toll !== 'bigint' || !['LIB', 'USD'].includes(recipient.data.tollUnit || 'LIB')) {
+      throw new Error('Cannot determine recipient toll.');
+    }
+    const toll = required === 0 ? 0n : getEffectiveTollLibWei(normalizeTollToLibWei(recipient.data.toll, recipient.data.tollUnit));
+    const totalRequired = fee + toll;
+    const available = BigInt(balanceInfo.balance);
+    if (toll < 0n || fee < 0n || available < 0n) throw new Error('Invalid LIB balance or message cost.');
+    if (available < totalRequired) {
+      throw new Error(`Not enough LIB for the chat message. Required: ${big2str(totalRequired, 18)} LIB; available: ${big2str(available, 18)} LIB; add ${big2str(totalRequired - available, 18)} LIB.`);
+    }
+    createNewContact(address, resolution.username);
+    const contact = myData.contacts[address];
+    contact.toll = recipient.data.toll;
+    contact.tollUnit = recipient.data.tollUnit || 'LIB';
+    contact.tollRequiredToSend = required;
+    await this.prepareEncryptedChatContext(address, account.keys);
+    requireAccount();
+    saveState();
+    return { address, username: resolution.username, toll: toll.toString(), totalRequired: totalRequired.toString() };
+  }
+
+  async prepareEvmPaymentMessage(record, account) {
+    if (myAccount !== account || record.kind !== 'outgoing') throw new Error('Sign in to the payment account.');
+    const payment = parseEvmTransferMessage(record.payment);
+    if (!payment || payment.from !== `0x${normalizeAddress(account.keys.address)}`) throw new Error('Invalid payment sender.');
+    const prepared = await this.prepareEvmPaymentRecipient({ address: payment.to, username: record.username }, account);
+    const { payload, chatMessageObj, txid } = await this.buildEncryptedStructuredChatTx(
+      prepared.address, payment, BigInt(prepared.toll), account.keys,
+    );
+    if (myAccount !== account) throw new Error('Account changed before chat submission.');
+    // The last lookup or message builder can see a newer fee/toll than confirmation.
+    if (chatMessageObj.amount + chatMessageObj.fee > BigInt(record.messageCostLimit)) {
+      throw new Error('Chat message cost exceeds the approved amount. Review the message cost before sending.');
+    }
+    record.attempt = { tx: chatMessageObj, txid, timestamp: payload.sent_timestamp };
+    record.messageState = 'ready';
+    saveEvmPayment(record, account);
+    this.upsertEvmPaymentCard(record);
+  }
+
+  async sendEvmPaymentMessage(record, account) {
+    if (myAccount !== account || record.kind !== 'outgoing') throw new Error('Sign in to the payment account.');
+    if (['delivered', 'abandoned'].includes(record.messageState)) return;
+    if (record.attempt && record.messageState !== 'ready') {
+      const outcome = await lookupEvmAnnouncement(record.attempt.txid, account);
+      if (outcome === true) {
+        record.messageState = 'delivered';
+        saveEvmPayment(record, account);
+        this.upsertEvmPaymentCard(record);
+        saveState();
+        return;
+      }
+      const canRebuild = outcome === false || (record.messageState === 'rejected' && !record.attempt.everUncertain);
+      if (canRebuild) {
+        if (!['pending', 'confirmed'].includes(record.assetState)) {
+          throw new Error('The announcement failed. Check the asset status before creating another message.');
+        }
+        record.previousAttempts = [...(record.previousAttempts || []), { txid: record.attempt.txid, timestamp: record.attempt.timestamp }];
+        delete record.attempt;
+      } else {
+        if (!myData.contacts[normalizeAddress(record.payment.to)]) throw new Error('The payment contact was deleted. Check status or stop retrying from EVM Assets.');
+        // A missing receipt cannot justify a new txid or a second message fee.
+        await this.prepareEvmPaymentRecipient({ address: record.payment.to, username: record.username }, account);
+      }
+    }
+    if (!record.attempt) {
+      if (!myData.contacts[normalizeAddress(record.payment.to)]) throw new Error('The payment contact was deleted. Check status or stop retrying from EVM Assets.');
+      if (!['pending', 'confirmed'].includes(record.assetState)) throw new Error('Check the asset before preparing another message.');
+      await this.prepareEvmPaymentMessage(record, account);
+    }
+    if (myAccount !== account) throw new Error('Account changed before chat submission.');
+    const { tx, txid } = record.attempt;
+    const previouslyUncertain = record.attempt.everUncertain;
+    record.attempt.everUncertain = true;
+    record.messageState = 'submitting';
+    saveEvmPayment(record, account);
+    const response = await injectTx(tx, txid, account);
+    const current = loadEvmPayments(account).find((item) => evmPaymentRecordId(item) === evmPaymentRecordId(record));
+    record.messageState = current?.messageState === 'delivered' ? 'delivered'
+      : response?.result?.success === true ? 'submitted'
+      : response?.result?.success === false && !response.transportFailure ? 'rejected' : 'uncertain';
+    if (record.messageState === 'rejected' && !previouslyUncertain) record.attempt.everUncertain = false;
+    saveEvmPayment(record, account);
+    if (myAccount === account) this.upsertEvmPaymentCard(record);
+    if (!['submitted', 'delivered'].includes(record.messageState)) throw new Error(response?.result?.reason || 'Message submission could not be confirmed.');
+  }
+
+  upsertEvmPaymentCard(record) {
+    const address = normalizeAddress(record.payment.to);
+    const contact = myData.contacts[address];
+    if (!contact) return;
+    const existing = contact.messages.find((message) => message.my && message.type === EVM_CHAT_MESSAGE_TYPE
+      && stringify(message.payment) === stringify(record.payment));
+    // Message sync can finish while injectTx is still waiting for a response.
+    if (existing?.paymentMessageConfirmed || existing?.deleted || (!existing && record.cardCreated)) return;
+    const message = existing || { message: '', type: EVM_CHAT_MESSAGE_TYPE, payment: record.payment, my: true, paymentVerified: 'unchecked' };
+    message.paymentMessageConfirmed = record.messageState === 'delivered';
+    message.txid = record.attempt.txid;
+    message.timestamp = record.attempt.timestamp;
+    message.sent_timestamp = message.timestamp;
+    message.status = ['rejected', 'uncertain'].includes(record.messageState) ? 'failed' : 'sent';
+    if (!existing) insertSorted(contact.messages, message, 'timestamp');
+    record.cardCreated = true;
+    const chatIndex = myData.chats.findIndex((chat) => chat.address === address);
+    if (chatIndex >= 0) myData.chats.splice(chatIndex, 1);
+    insertSorted(myData.chats, { address, timestamp: message.timestamp, txid: message.txid }, 'timestamp');
+    if (this.isActive() && this.address === address) this.appendChatModal();
+    chatsScreen.updateChatList();
+  }
+
   /**
    * Send the chat receipt for a payment that has already settled on NEAR.
    *
@@ -22908,6 +23259,20 @@ class ChatModal {
                   </div>
                 </div>
               </div>`;
+        break;
+      }
+      case EVM_CHAT_MESSAGE_TYPE: {
+        const payment = parseEvmTransferMessage(item.payment);
+        if (!payment) break;
+        const verified = item.paymentVerified || 'unchecked';
+        messageTextHTML = `
+          <div class="intents-payment-message evm-payment-message" data-verified="${escapeHtml(verified)}" data-evm-payment="${escapeHtml(evmPaymentId(payment))}">
+            <div class="intents-payment-amount">${item.my ? '−' : '+'}${escapeHtml(evmPaymentAmount(payment))} ${escapeHtml(payment.symbol)}</div>
+            <div class="intents-payment-chain">${escapeHtml(evmAssets.transactions.paymentNetwork(payment.chainId)?.name || `EVM chain ${payment.chainId}`)}</div>
+            ${payment.contractAddress ? `<div class="intents-payment-chain" style="overflow-wrap:anywhere">Token: ${escapeHtml(payment.contractAddress)}</div>` : ''}
+            ${payment.note ? `<div class="intents-payment-note">${escapeHtml(payment.note)}</div>` : ''}
+            <div class="intents-payment-verified">${escapeHtml(paymentStatusLabel(verified))}</div>
+          </div>`;
         break;
       }
       case INTENTS_CHAT_MESSAGE_TYPE: {
@@ -24413,6 +24778,10 @@ class ChatModal {
     const messageRecord = this.getMessageRecordFromElement(messageEl);
     const isDeletedLocalOnly =
       messageEl.classList.contains('deleted-message') && isDeletedForMeOnly(messageRecord);
+    const evmMessage = messageRecord?.type === EVM_CHAT_MESSAGE_TYPE && !messageRecord.deleted;
+    this.contextMenu.querySelector('[data-action="evm-check"]').style.display = evmMessage ? 'flex' : 'none';
+    this.contextMenu.querySelector('[data-action="evm-review"]').style.display = evmMessage && messageRecord.my
+      && messageRecord.paymentReverted ? 'flex' : 'none';
     
     const deleteOption = this.contextMenu.querySelector('[data-action="delete"]');
     if (deleteOption) deleteOption.style.display = 'flex';
@@ -24517,7 +24886,7 @@ class ChatModal {
         const isPayment = messageEl.classList.contains('payment-info');
         const hasMemo = !!messageEl.querySelector('.payment-memo');
         const isVoice = !!messageEl.querySelector('.voice-message');
-        const allowedType = !isPayment || (isPayment && hasMemo);
+        const allowedType = messageRecord?.type !== EVM_CHAT_MESSAGE_TYPE && (!isPayment || hasMemo);
         const show = isMine && !isDeleted && allowedType && !isVoice && !isFailedPayment && ageOk;
         editOption.style.display = show ? 'flex' : 'none';
       }
@@ -25821,6 +26190,12 @@ class ChatModal {
     if (!messageEl) return;
     
     switch (action) {
+      case 'evm-check':
+        void recheckEvmPayment(this.getMessageRecordFromElement(messageEl).payment, myAccount);
+        break;
+      case 'evm-review':
+        void evmAssets.reviewPayment(this.getMessageRecordFromElement(messageEl).payment, myData.contacts[this.address]?.username || `0x${this.address}`);
+        break;
       case 'save':
         void this.saveVoiceMessage(messageEl);
         break;
@@ -30761,6 +31136,11 @@ class FailedMessageMenu {
       ? contact.messages.find(msg => msg.txid === txid)
       : null;
 
+    if (message?.type === EVM_CHAT_MESSAGE_TYPE) {
+      void evmAssets.recoverPayment(evmPaymentId(message.payment));
+      return;
+    }
+
     // Voice message retry: resend the same voice message (no re-upload)
     if (voiceEl) {
       const voiceUrl = voiceEl.dataset.url || '';
@@ -32384,6 +32764,8 @@ class SendAssetFormModal {
     this.networkGroup.hidden = mode !== 'evm' || hasFixedNetwork;
     this.assetSelectDropdown.closest('.form-group').hidden = hasFixedAsset;
     this.memoGroup.hidden = mode === 'evm';
+    document.getElementById('sendMemoLabel').textContent = mode === 'evm' ? 'Add a note (optional)' : 'Memo (Optional)';
+    this.memoInput.setCustomValidity('');
     this.memoValidation = {};
     this.memoByteCounter.textContent = '';
     this.memoByteCounter.style.display = 'none';
@@ -33950,8 +34332,87 @@ intentsActivity.configure({
     }))),
 });
 
+// Payment changes join the normal account save; there is no separate storage key.
+// Keep a small mutation journal so stale tabs neither drop new work nor restore
+// records they previously removed. Clear it only after a successful save.
+const evmPaymentChanges = new WeakMap();
+
+function evmPaymentRecordId(record) {
+  return `${record.kind}:${stringify(record.payment)}`;
+}
+
+// A synced claim only grants permission to verify, never to send or retry assets.
+function queueEvmPaymentMessage(message, account) {
+  const payment = parseEvmTransferMessage(message.payment);
+  if (!payment || message.deleted) return;
+  const records = loadEvmPayments(account);
+  const claim = stringify(payment);
+  const existing = records.find((record) => stringify(record.payment) === claim);
+  if (!existing && ['settled', 'failed'].includes(message.paymentVerified)
+    && Date.now() - (message.paymentCheckedAt || 0) < EVM_RECHECK_MS) return;
+  const record = existing || { kind: 'verification', payment, assetState: 'unknown', createdAt: Date.now() };
+  if (Date.now() - (record.checkedAt || 0) >= EVM_RECHECK_MS) {
+    record.checkAttempts = 0;
+    record.nextCheckAt = 0;
+  }
+  if (record.kind === 'outgoing' && message.my && message.paymentMessageConfirmed) record.messageState = 'delivered';
+  saveEvmPayment(record, account);
+}
+
+function loadEvmPayments(account) {
+  const saved = loadState(`${account.username}_${account.netid}`);
+  if (saved && normalizeAddress(saved.account.keys.address) !== normalizeAddress(account.keys.address)) {
+    throw new Error('Saved EVM payments belong to a different account.');
+  }
+  const records = saved?.evmPayments ?? (account === myAccount ? myData?.evmPayments : null) ?? [];
+  if (!Array.isArray(records) || records.some((record) => !['outgoing', 'verification'].includes(record?.kind)
+    || !parseEvmTransferMessage(record.payment))) {
+    throw new Error('Saved EVM payment records could not be read.');
+  }
+  const merged = new Map(records.map((record) => [evmPaymentRecordId(record), record]));
+  for (const [id, record] of evmPaymentChanges.get(account) || []) {
+    if (record) merged.set(id, record);
+    else merged.delete(id);
+  }
+  return [...merged.values()];
+}
+
+function saveEvmPayment(record, account) {
+  changeEvmPayment(record, account, false);
+}
+
+function removeEvmPayment(record, account) {
+  changeEvmPayment(record, account, true);
+}
+
+function changeEvmPayment(record, account, remove) {
+  // A response may arrive after switching accounts. Never recreate a deleted account.
+  const accountData = account === myAccount ? myData : loadState(`${account.username}_${account.netid}`);
+  if (!accountData) throw new Error('The payment account is no longer saved on this device.');
+  if (!evmPaymentChanges.has(account)) evmPaymentChanges.set(account, new Map());
+  evmPaymentChanges.get(account).set(evmPaymentRecordId(record), remove ? null : record);
+  accountData.evmPayments = loadEvmPayments(account);
+  // Active-account changes are saved by the normal app lifecycle. A late callback
+  // for another account must save there, without changing the displayed account.
+  if (account !== myAccount) saveAccountData(accountData, account);
+}
+
 evmAssets.configure({
   getAccount: () => myAccount,
+  prepareChatPayment: (resolution, account) => chatModal.prepareEvmPaymentRecipient(resolution, account),
+  preparePaymentMessage: (record, account) => chatModal.prepareEvmPaymentMessage(record, account),
+  sendChatPayment: (record, account) => chatModal.sendEvmPaymentMessage(record, account),
+  getPayments: (account) => loadEvmPayments(account),
+  savePayment: (record, account) => saveEvmPayment(record, account),
+  checkPayment: (payment, account) => recheckEvmPayment(payment, account),
+  abandonPayment: (record, account) => {
+    record.messageState = 'abandoned';
+    record.checkAttempts = 0;
+    record.nextCheckAt = 0;
+    saveEvmPayment(record, account);
+    saveState();
+    void checkEvmPayments();
+  },
   getLiberdusAsset: () => myData?.wallet?.assets?.find((asset) => isLibAsset(asset))
     || myData?.wallet?.assets?.[0]
     || null,
@@ -36025,6 +36486,7 @@ let checkPendingTransactionsPromise = null;
  * @returns {Promise<void>}
  */
 async function checkPendingTransactions() {
+  void checkEvmPayments();
   if (!checkPendingTransactionsPromise) {
     checkPendingTransactionsPromise = checkPendingTransactionsOnce()
       .finally(() => {
