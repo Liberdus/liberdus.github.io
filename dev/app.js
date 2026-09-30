@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MMDD.HHmm like 2025.0125.1005
-const version = 'x'
+const version = 'y'
 const BOOT_SPLASH_HANDOFF_MS = 1000;
 const BOOT_SPLASH_FRAME_TIMEOUT_MS = 100;
 const BOOT_SPLASH_IMAGE_TIMEOUT_MS = 2000;
@@ -22671,6 +22671,9 @@ class ChatModal {
     };
     requireAccount();
     const address = normalizeAddress(resolution.address);
+    if (!myData.contacts[address]) {
+      throw new Error('Add this username to Contacts before sending an EVM payment.');
+    }
     const sorted = [longAddress(account.keys.address), longAddress(address)].sort();
     const chatId = hashBytes(sorted.join(''));
     const [recipientInfo, tollInfo, balanceInfo, paramsOk] = await Promise.all([
@@ -22699,7 +22702,7 @@ class ChatModal {
     if (available < totalRequired) {
       throw new Error(`Not enough LIB for the chat message. Required: ${big2str(totalRequired, 18)} LIB; available: ${big2str(available, 18)} LIB; add ${big2str(totalRequired - available, 18)} LIB.`);
     }
-    // Validate encryption before confirmation without creating a saved contact.
+    // Validate current encryption keys without mutating the saved contact.
     const publicKey = recipient.publicKey;
     const pqPublicKey = recipient.pqPublicKey;
     if (!publicKey || !pqPublicKey || bin2hex(generateAddress(hex2bin(publicKey))) !== address) {
@@ -22708,7 +22711,7 @@ class ChatModal {
     dhkeyCombined(account.keys.secret, publicKey, pqPublicKey);
     return {
       address, username: resolution.username, toll: toll.toString(), totalRequired: totalRequired.toString(),
-      contact: {
+      contactUpdates: {
         public: publicKey, pqPublic: pqPublicKey, toll: recipient.data.toll,
         tollUnit: recipient.data.tollUnit || 'LIB', tollRequiredToSend: required,
       },
@@ -22721,9 +22724,10 @@ class ChatModal {
     if (!payment || payment.from !== `0x${normalizeAddress(account.keys.address)}`) throw new Error('Invalid payment sender.');
     const prepared = await this.prepareEvmPaymentRecipient({ address: payment.to, username: record.username }, account);
     if (myAccount !== account) throw new Error('Account changed before chat preparation.');
-    // The user approved this payment; only now add its recipient to contacts.
-    createNewContact(prepared.address, prepared.username);
-    Object.assign(myData.contacts[prepared.address], prepared.contact);
+    const contact = myData.contacts[prepared.address];
+    if (!contact) throw new Error('Add this username to Contacts before sending an EVM payment.');
+    if (!contact.username && prepared.username) contact.username = prepared.username;
+    Object.assign(contact, prepared.contactUpdates);
     const { payload, chatMessageObj, txid } = await this.buildEncryptedStructuredChatTx(
       prepared.address, payment, BigInt(prepared.toll), account.keys,
     );
