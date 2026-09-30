@@ -1191,10 +1191,13 @@ export class EvmTransactionService {
         await new Promise((resolve) => setTimeout(resolve, Math.max(0, Math.min(1000, deadline - Date.now()))));
       }
     }
-    record.broadcastState = 'unknown';
-    record.assetState = 'unknown';
+    // Failed chain checks before any send cannot leave an uncertain transfer.
+    const status = record.broadcastUncertain ? 'unknown' : 'rejected';
+    record.broadcastState = status;
+    record.assetState = status;
+    if (status === 'rejected') delete record.rawTransaction;
     this.savePayment(record, account);
-    return 'unknown';
+    return status;
   }
 
   async withSubmissionProgress(account, operation) {
@@ -1644,7 +1647,7 @@ class AssetsModal {
           <div>Asset: ${escapeHtml(assetLabels[record.assetState] || record.assetState)}${record.username ? ` · Chat message: ${escapeHtml(messageLabels[record.messageState] || record.messageState)}` : ''}</div>
           ${record.broadcastError ? `<div>${escapeHtml(record.broadcastError.message)}</div>` : ''}
           <button type="button" class="secondary-button" data-recover-payment="${escapeHtml(evmPaymentId(record.payment))}" data-recovery-action="check">Check status</button>
-          ${record.assetState === 'unknown' && record.broadcastState !== 'acknowledged' && record.rawTransaction ? `
+          ${record.assetState === 'unknown' && record.rawTransaction ? `
             <button type="button" class="secondary-button" data-recover-payment="${escapeHtml(evmPaymentId(record.payment))}" data-recovery-action="submit">Retry submission</button>` : ''}
           ${record.username && !['delivered', 'abandoned'].includes(record.messageState)
             && (record.messageState !== 'ready' || ['pending', 'confirmed'].includes(record.assetState)) ? `
@@ -2457,7 +2460,7 @@ class EvmAssetsController {
   }
 
   async retrySubmission(record, account) {
-    if (record.assetState !== 'unknown' || record.broadcastState === 'acknowledged') {
+    if (record.assetState !== 'unknown') {
       throw new Error('Submission is already resolved. Use Check status.');
     }
     if (!record.rawTransaction || record.payment.from !== walletProbeAddress(account.keys.address)
@@ -2469,7 +2472,7 @@ class EvmAssetsController {
       id: record.networkId, name: record.networkId, source: 'evm', chainId: record.payment.chainId,
       nativeSymbol: record.payment.symbol, rpcUrls: DEFAULT_EVM_RPC_URLS[record.networkId] || [],
     };
-    // Recheck before an explicit retry. Background checks never broadcast.
+    // Acceptance can outlive a dropped transaction. Recheck before retrying its exact bytes.
     this.transactions.paymentEvidence.clear();
     const state = await this.transactions.verifyOutgoingPayment(record);
     if (this.getAccount() !== account) return;
@@ -2516,6 +2519,8 @@ class EvmAssetsController {
       form.usernameInput.value = recipient;
       form.amountInput.value = evmPaymentAmount(payment);
       form.usernameInput.dispatchEvent(new Event('input', { bubbles: true }));
+      // Recipient input clears the memo; restore it before the lookup finishes.
+      form.memoInput.value = payment.note || '';
       this.showToast('Review the recipient and amount. Nothing has been sent.', 5000, 'info');
     } catch (error) {
       this.showToast(error.message, 0, 'warning');

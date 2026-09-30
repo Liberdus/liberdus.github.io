@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MMDD.HHmm like 2025.0125.1005
-const version = 'w'
+const version = 'x'
 const BOOT_SPLASH_HANDOFF_MS = 1000;
 const BOOT_SPLASH_FRAME_TIMEOUT_MS = 100;
 const BOOT_SPLASH_IMAGE_TIMEOUT_MS = 2000;
@@ -12388,6 +12388,7 @@ async function checkEvmPayments() {
         removeEvmPayment(record, session.account);
         return;
       }
+      const checkedRecord = stringify(record);
       const state = record.kind === 'outgoing'
         ? await evmAssets.transactions.verifyOutgoingPayment(record)
         : await evmAssets.transactions.verifyPayment(record.payment, record.payment.from, record.payment.to);
@@ -12398,7 +12399,7 @@ async function checkEvmPayments() {
       if (!current()) return;
       // Do not apply a stale result to an operation changed while RPC was in flight.
       const latest = loadEvmPayments(session.account).find((item) => evmPaymentRecordId(item) === recordId);
-      if (!latest || latest.attempt?.txid !== attemptId) return;
+      if (!latest || stringify(latest) !== checkedRecord) return;
       record = latest;
       record.checkedAt = Date.now();
       record.checkAttempts = (record.checkAttempts || 0) + 1;
@@ -13061,6 +13062,11 @@ async function processChats(chats, keys) {
                   payload.message = '';
                   payload.type = EVM_CHAT_MESSAGE_TYPE;
                   payload.payment = claim;
+                  // Verification is local evidence, never a sender-provided assertion.
+                  payload.paymentVerified = 'unchecked';
+                  delete payload.paymentCheckedAt;
+                  delete payload.paymentReverted;
+                  delete payload.paymentMessageConfirmed;
                 } else if (parsedMessage.type === INTENTS_CHAT_MESSAGE_TYPE) {
                   // Every field of this arrives from the sender, and a payment
                   // bubble is worth forging, so anything malformed is dropped
@@ -22693,15 +22699,20 @@ class ChatModal {
     if (available < totalRequired) {
       throw new Error(`Not enough LIB for the chat message. Required: ${big2str(totalRequired, 18)} LIB; available: ${big2str(available, 18)} LIB; add ${big2str(totalRequired - available, 18)} LIB.`);
     }
-    createNewContact(address, resolution.username);
-    const contact = myData.contacts[address];
-    contact.toll = recipient.data.toll;
-    contact.tollUnit = recipient.data.tollUnit || 'LIB';
-    contact.tollRequiredToSend = required;
-    await this.prepareEncryptedChatContext(address, account.keys);
-    requireAccount();
-    saveState();
-    return { address, username: resolution.username, toll: toll.toString(), totalRequired: totalRequired.toString() };
+    // Validate encryption before confirmation without creating a saved contact.
+    const publicKey = recipient.publicKey;
+    const pqPublicKey = recipient.pqPublicKey;
+    if (!publicKey || !pqPublicKey || bin2hex(generateAddress(hex2bin(publicKey))) !== address) {
+      throw new Error('Cannot verify recipient encryption keys. Try again.');
+    }
+    dhkeyCombined(account.keys.secret, publicKey, pqPublicKey);
+    return {
+      address, username: resolution.username, toll: toll.toString(), totalRequired: totalRequired.toString(),
+      contact: {
+        public: publicKey, pqPublic: pqPublicKey, toll: recipient.data.toll,
+        tollUnit: recipient.data.tollUnit || 'LIB', tollRequiredToSend: required,
+      },
+    };
   }
 
   async prepareEvmPaymentMessage(record, account) {
@@ -22709,6 +22720,10 @@ class ChatModal {
     const payment = parseEvmTransferMessage(record.payment);
     if (!payment || payment.from !== `0x${normalizeAddress(account.keys.address)}`) throw new Error('Invalid payment sender.');
     const prepared = await this.prepareEvmPaymentRecipient({ address: payment.to, username: record.username }, account);
+    if (myAccount !== account) throw new Error('Account changed before chat preparation.');
+    // The user approved this payment; only now add its recipient to contacts.
+    createNewContact(prepared.address, prepared.username);
+    Object.assign(myData.contacts[prepared.address], prepared.contact);
     const { payload, chatMessageObj, txid } = await this.buildEncryptedStructuredChatTx(
       prepared.address, payment, BigInt(prepared.toll), account.keys,
     );
