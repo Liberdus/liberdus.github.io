@@ -6,7 +6,7 @@ import {
   utf82bin,
   withButtonCooldown,
 } from './lib.js';
-import { getPublicKey, hashBytes, signMessage } from './crypto.js';
+import { getPublicKey, signMessage } from './crypto.js';
 import keccak256 from './external/keccak256.js';
 
 const DEFAULT_WALLET_PROBE_BASE_URL = 'https://163.245.216.178';
@@ -18,8 +18,6 @@ const EVM_BROADCAST_TIMEOUT_MS = 60_000;
 const EVM_BROADCAST_ATTEMPTS = 3;
 const EVM_RECEIPT_TIMEOUT_MS = 60_000;
 const EVM_RECEIPT_POLL_MS = 2_000;
-const LIBERDUS_USERNAME_LOOKUP_DELAY_MS = 1_000;
-const LIBERDUS_USERNAME_LOOKUP_TIMEOUT_MS = 15_000;
 const DEFAULT_EVM_RPC_URLS = Object.freeze({
   ethereum: Object.freeze([
     'https://ethereum-rpc.publicnode.com',
@@ -591,37 +589,13 @@ function liberdusLookupAddress(address) {
   return walletProbeAddress(normalized);
 }
 
-function getDefaultLiberdusGatewayUrl() {
-  const override = globalThis.window?.LIBERDUS_USERNAME_GATEWAY_URL;
-  if (typeof override === 'string' && override.trim()) {
-    return override.trim().replace(/\/$/, '');
-  }
-
-  // network.js is loaded as a classic script before this module. Its global lexical
-  // binding is available here even though it is intentionally not attached to window.
-  if (typeof network !== 'undefined' && Array.isArray(network?.gateways)) {
-    const gateway = network.gateways.find((entry) => typeof entry?.web === 'string');
-    if (gateway?.web) return gateway.web.replace(/\/$/, '');
-  }
-  return null;
-}
-
 export class LiberdusEvmRecipientResolver {
   constructor({
     getAccount = () => null,
-    getGatewayUrl = getDefaultLiberdusGatewayUrl,
-    fetchFn = (...args) => fetch(...args),
-    requestTimeoutMs = LIBERDUS_USERNAME_LOOKUP_TIMEOUT_MS,
+    findContact = () => null,
   } = {}) {
     this.getAccount = getAccount;
-    this.getGatewayUrl = getGatewayUrl;
-    this.fetchFn = fetchFn;
-    this.requestTimeoutMs = requestTimeoutMs;
-    this.associations = new Map();
-  }
-
-  reset() {
-    this.associations.clear();
+    this.findContact = findContact;
   }
 
   normalizeRecipientInput(value) {
@@ -633,13 +607,12 @@ export class LiberdusEvmRecipientResolver {
     return Object.freeze({ kind: 'username', input: username, display: username, username });
   }
 
-  async resolve(value, { force = false } = {}) {
+  resolve(value) {
     const recipient = this.normalizeRecipientInput(value);
     if (recipient.kind === 'address') {
       return Object.freeze({
         ...recipient,
         address: normalizeEvmAddress(recipient.input, 'recipient'),
-        verifiedAt: Date.now(),
       });
     }
 
@@ -647,75 +620,30 @@ export class LiberdusEvmRecipientResolver {
       throw new EvmTransferError('Username is too short', 'USERNAME_TOO_SHORT');
     }
 
-    if (!force) {
-      const cached = this.associations.get(recipient.username);
-      if (cached) return cached;
-    }
-
-    const gatewayUrl = this.getGatewayUrl();
-    if (!gatewayUrl) {
+    const contact = this.findContact(recipient.username);
+    if (!contact) {
       throw new EvmTransferError(
-        'Liberdus username lookup is unavailable',
-        'USERNAME_LOOKUP_UNAVAILABLE',
+        'Add this username to Contacts before sending an EVM payment',
+        'USERNAME_NOT_IN_CONTACTS',
       );
     }
 
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), this.requestTimeoutMs);
+    let address;
     try {
-      const usernameHash = hashBytes(utf82bin(recipient.username));
-      const response = await this.fetchFn(`${gatewayUrl}/address/${usernameHash}`, {
-        signal: controller.signal,
-      });
-      if (!response.ok) {
-        throw new EvmTransferError(
-          `Liberdus username lookup returned HTTP ${response.status}`,
-          'USERNAME_LOOKUP_UNAVAILABLE',
-        );
-      }
-      const data = await response.json();
-      if (!data?.address) {
-        throw new EvmTransferError('Username not found', 'USERNAME_NOT_FOUND');
-      }
-
-      let address;
-      try {
-        address = liberdusLookupAddress(data.address);
-      } catch (error) {
-        throw new EvmTransferError(
-          'The username does not have a valid EVM wallet address',
-          'USERNAME_ADDRESS_INVALID',
-          { cause: error },
-        );
-      }
-
-      const ownAddress = walletProbeAddress(this.getAccount()?.keys?.address);
-      if (address === ownAddress) {
-        throw new EvmTransferError(
-          'Enter another user’s username',
-          'USERNAME_IS_SELF',
-        );
-      }
-
-      const association = Object.freeze({
-        ...recipient,
-        address,
-        verifiedAt: Date.now(),
-      });
-      this.associations.set(recipient.username, association);
-      return association;
+      address = liberdusLookupAddress(contact.address);
     } catch (error) {
-      if (error instanceof EvmTransferError) throw error;
       throw new EvmTransferError(
-        controller.signal.aborted
-          ? 'Liberdus username lookup timed out'
-          : 'Liberdus username lookup failed',
-        controller.signal.aborted ? 'USERNAME_LOOKUP_TIMEOUT' : 'USERNAME_LOOKUP_UNAVAILABLE',
+        'This contact does not have a valid EVM wallet address',
+        'USERNAME_ADDRESS_INVALID',
         { cause: error },
       );
-    } finally {
-      clearTimeout(timeout);
     }
+
+    if (address === walletProbeAddress(this.getAccount()?.keys?.address)) {
+      throw new EvmTransferError('Enter another user’s username', 'USERNAME_IS_SELF');
+    }
+
+    return Object.freeze({ ...recipient, address });
   }
 }
 
@@ -1474,9 +1402,9 @@ export class EvmTransactionService {
     if (['confirmed', 'reverted'].includes(status)) delete record.rawTransaction;
     if (this.getAccount() === account) {
       const message = status === 'rejected' ? `EVM submission rejected: ${record.broadcastError.message}. Review the form and try again.`
-        : status === 'unknown' ? `Submission could not be confirmed: ${record.broadcastError?.message || 'Connection interrupted'}. Check status or retry the original submission in EVM assets.`
         : `EVM transfer ${status}: ${transactionHash}`;
-      this.showToast(message, 5000, ['reverted', 'rejected'].includes(status) ? 'error' : 'info');
+      const failed = ['reverted', 'rejected'].includes(status);
+      if (status !== 'unknown') this.showToast(message, failed ? 0 : 5000, failed ? 'error' : 'info');
       if (!chat && ['confirmed', 'reverted'].includes(status)) record.notifiedAssetState = status;
     }
     try {
@@ -1484,10 +1412,10 @@ export class EvmTransactionService {
     } catch {
       if (this.getAccount() === account) this.showToast('Transfer may be sent. Check its hash before sending again.', 0, 'warning');
     }
-    if (status === 'confirmed' && this.getAccount() === account) {
+    if (['confirmed', 'reverted'].includes(status) && this.getAccount() === account) {
       try { await this.refreshAssets({ force: true }); }
       catch {
-        if (this.getAccount() === account) this.showToast('Asset sent; balance refresh is temporarily unavailable.', 5000, 'warning');
+        if (this.getAccount() === account) this.showToast('Transfer processed; balance refresh is temporarily unavailable.', 5000, 'warning');
       }
     }
     return { status, transactionHash, receipt, record };
@@ -1560,13 +1488,6 @@ class AssetsModal {
     this.assetsList = document.getElementById('connectedAssetsList');
     this.recovery = document.getElementById('evmPaymentRecovery');
     this.recoveryList = document.getElementById('evmPaymentRecoveryList');
-    this.recoveryList.addEventListener('click', async (event) => {
-      const button = event.target.closest('[data-recover-payment]');
-      if (!button) return;
-      button.disabled = true;
-      try { await this.controller.recoverPayment(button.dataset.recoverPayment, button.dataset.recoveryAction); }
-      finally { this.renderRecovery(); }
-    });
 
     document.getElementById('closeAssetsModal').addEventListener('click', () => this.close());
     this.networkSelect.addEventListener('change', () => this.render());
@@ -1596,6 +1517,7 @@ class AssetsModal {
     // A recently closed toast may still be fading out when the modal reopens.
     const toastId = this.controller.showToast('Loading EVM assets...', 0, 'loading', false, { dedupe: false });
     this.loadingToastId = toastId;
+    this.controller.syncPaymentNotices(true);
     try {
       await this.update();
     } finally {
@@ -1623,7 +1545,9 @@ class AssetsModal {
     this.connectionSummary.textContent = 'Connecting wallet networks…';
     this.connectionSummary.dataset.status = 'loading';
     await this.controller.refresh({ force });
+  }
 
+  renderBalances() {
     const totalUsd = this.controller.getTotalUsd({ evmOnly: true });
     this.totalBalance.textContent = totalUsd === null ? 'N/A' : totalUsd.toFixed(2);
     this.controller.populateNetworkSelect(this.networkSelect, { includeAll: true, evmOnly: true });
@@ -1636,24 +1560,30 @@ class AssetsModal {
     const account = this.controller.getAccount();
     if (!account) { this.recovery.hidden = true; return; }
     try {
-      const records = this.controller.getPayments(account).filter((record) => record.kind === 'outgoing');
+      const records = this.controller.getPayments(account).filter((record) => record.kind === 'outgoing'
+        && record.broadcastState !== 'rejected'
+        && !(['confirmed', 'reverted'].includes(record.assetState)
+          && ['none', 'delivered', 'abandoned'].includes(record.messageState)));
       this.recovery.hidden = records.length === 0;
-      const assetLabels = { unknown: 'Unable to confirm yet', rejected: 'Submission rejected', pending: 'Confirming', confirmed: 'Confirmed', reverted: 'Reverted' };
-      const messageLabels = { ready: 'Not sent', submitting: 'Checking submission', submitted: 'Submitted', rejected: 'Needs retry', uncertain: 'Checking submission' };
-      this.recoveryList.innerHTML = records.map((record) => `
-        <div class="evm-payment-recovery-item">
-          <div>${escapeHtml(evmPaymentAmount(record.payment))} ${escapeHtml(record.payment.symbol)} → ${escapeHtml(record.username || record.payment.to)}</div>
-          <div class="evm-payment-reference">${escapeHtml(record.payment.transactionHash)}</div>
-          <div>Asset: ${escapeHtml(assetLabels[record.assetState] || record.assetState)}${record.username ? ` · Chat message: ${escapeHtml(messageLabels[record.messageState] || record.messageState)}` : ''}</div>
-          ${record.broadcastError ? `<div>${escapeHtml(record.broadcastError.message)}</div>` : ''}
-          <button type="button" class="secondary-button" data-recover-payment="${escapeHtml(evmPaymentId(record.payment))}" data-recovery-action="check">Check status</button>
-          ${record.assetState === 'unknown' && record.rawTransaction ? `
-            <button type="button" class="secondary-button" data-recover-payment="${escapeHtml(evmPaymentId(record.payment))}" data-recovery-action="submit">Retry submission</button>` : ''}
-          ${record.username && !['delivered', 'abandoned'].includes(record.messageState)
-            && (record.messageState !== 'ready' || ['pending', 'confirmed'].includes(record.assetState)) ? `
-            <button type="button" class="secondary-button" data-recover-payment="${escapeHtml(evmPaymentId(record.payment))}" data-recovery-action="retry">${record.messageState === 'ready' ? 'Send message' : 'Retry message'}</button>
-            <button type="button" class="secondary-button" data-recover-payment="${escapeHtml(evmPaymentId(record.payment))}" data-recovery-action="abandon">Stop retrying message</button>` : ''}
-        </div>`).join('');
+      this.recoveryList.innerHTML = records.map((record) => {
+        const network = this.controller.getNetwork(record.networkId);
+        const asset = network?.assets?.find((item) => (item.contractAddress?.toLowerCase() || null) === record.payment.contractAddress);
+        const recipient = record.username || `${record.payment.to.slice(0, 8)}…${record.payment.to.slice(-6)}`;
+        let status = 'Confirming transfer';
+        if (record.broadcastState === 'not_started' || record.broadcastState === 'attempting') status = 'Submitting transfer';
+        else if (record.assetState === 'unknown') status = 'Status unavailable';
+        else if (['ready', 'rejected', 'uncertain'].includes(record.messageState)) status = 'Message needs attention';
+        else if (record.username && ['confirmed', 'reverted'].includes(record.assetState)) status = 'Confirming message';
+        return `
+          <div class="asset-item connected-asset-item evm-payment-pending-row">
+            <div class="asset-logo connected-asset-logo">${connectedAssetLogoMarkup(asset || {}, network || { shortName: record.payment.symbol })}</div>
+            <div class="asset-info">
+              <div class="asset-name">${escapeHtml(evmPaymentAmount(record.payment))} ${escapeHtml(record.payment.symbol)}</div>
+              <div class="asset-symbol">To ${escapeHtml(recipient)} · ${escapeHtml(network?.name || record.networkId)}</div>
+              <div class="evm-payment-status">${escapeHtml(status)}</div>
+            </div>
+          </div>`;
+      }).join('');
     } catch (error) {
       this.recovery.hidden = false;
       this.recoveryList.textContent = error.message;
@@ -2045,8 +1975,6 @@ class EvmSendFormAdapter {
     this.controller = controller;
     this.loaded = false;
     this.refreshTimer = null;
-    this.lookupTimer = null;
-    this.lookupVersion = 0;
     this.recipientResolution = null;
   }
 
@@ -2105,9 +2033,6 @@ class EvmSendFormAdapter {
   }
 
   clearRecipientLookup({ hideStatus = true } = {}) {
-    clearTimeout(this.lookupTimer);
-    this.lookupTimer = null;
-    this.lookupVersion += 1;
     this.recipientResolution = null;
     this.memoInput.value = '';
     this.memoGroup.hidden = true;
@@ -2124,7 +2049,7 @@ class EvmSendFormAdapter {
     return this.recipientResolution;
   }
 
-  async handleRecipientInput(event) {
+  handleRecipientInput(event) {
     if (!this.isEvmSelected()) return;
 
     // The shared Liberdus form has its own username/address listener. EVM Assets
@@ -2142,46 +2067,28 @@ class EvmSendFormAdapter {
       return;
     }
 
-    const version = this.lookupVersion;
-    if (recipient.kind === 'address') {
-      try {
-        this.recipientResolution = await this.controller.recipients.resolve(recipient.input);
-        if (version !== this.lookupVersion) return;
-        this.setRecipientStatus('Valid address — wallet transfer only, no chat message', 'success');
-      } catch (error) {
-        if (version !== this.lookupVersion) return;
-        this.setRecipientStatus(error?.message || 'enter a valid 0x address');
-      }
-      this.scheduleRefresh();
-      return;
-    }
-
-    if (recipient.username.length < 3) {
+    if (recipient.kind === 'username' && recipient.username.length < 3) {
       this.setRecipientStatus('too short');
       this.scheduleRefresh();
       return;
     }
 
-    this.setRecipientStatus('checking…');
-    this.lookupTimer = setTimeout(async () => {
-      try {
-        const resolution = await this.controller.recipients.resolve(recipient.username);
-        if (version !== this.lookupVersion) return;
-        this.recipientResolution = resolution;
-        this.memoGroup.hidden = false;
-        this.setRecipientStatus('Found — includes a chat payment message', 'success');
-      } catch (error) {
-        if (version !== this.lookupVersion) return;
-        const messages = {
-          USERNAME_NOT_FOUND: 'not found',
-          USERNAME_IS_SELF: 'enter another username',
-          USERNAME_ADDRESS_INVALID: 'wallet address unavailable',
-        };
-        this.setRecipientStatus(messages[error?.code] || 'network error');
-      } finally {
-        if (version === this.lookupVersion) this.scheduleRefresh();
-      }
-    }, LIBERDUS_USERNAME_LOOKUP_DELAY_MS);
+    try {
+      this.recipientResolution = this.controller.recipients.resolve(recipient.input);
+      this.memoGroup.hidden = recipient.kind !== 'username';
+      const status = recipient.kind === 'address'
+        ? 'Valid address — wallet transfer only'
+        : 'Contact found — includes a chat payment message';
+      this.setRecipientStatus(status, 'success');
+    } catch (error) {
+      const messages = {
+        USERNAME_NOT_IN_CONTACTS: 'Not in Contacts — add contact first',
+        USERNAME_IS_SELF: 'enter another username',
+        USERNAME_ADDRESS_INVALID: 'wallet address unavailable',
+      };
+      this.setRecipientStatus(messages[error?.code] || error?.message || 'enter a valid recipient');
+    }
+    this.scheduleRefresh();
   }
 
   isEvmSelected() {
@@ -2246,6 +2153,8 @@ class EvmAssetsController {
     this.showToast = () => {};
     this.hideToast = () => {};
     this.syncSelect = () => {};
+    this.findContact = () => null;
+    this.paymentToasts = new Map();
     this.confirmationModal = new EvmSendConfirmationModal();
     this.confirmTransfer = (...args) => this.confirmationModal.confirm(...args);
     this.loaded = false;
@@ -2261,6 +2170,7 @@ class EvmAssetsController {
     });
     this.recipients = new LiberdusEvmRecipientResolver({
       getAccount: () => this.getAccount(),
+      findContact: (username) => this.findContact(username),
     });
     this.transactions = new EvmTransactionService({
       getAccount: () => this.getAccount(),
@@ -2281,6 +2191,7 @@ class EvmAssetsController {
   configure({
     getAccount,
     getLiberdusAsset,
+    findContact,
     prepareChatPayment,
     preparePaymentMessage,
     sendChatPayment,
@@ -2297,6 +2208,7 @@ class EvmAssetsController {
   } = {}) {
     if (typeof getAccount === 'function') this.getAccount = getAccount;
     if (typeof getLiberdusAsset === 'function') this.getLiberdusAsset = getLiberdusAsset;
+    if (typeof findContact === 'function') this.findContact = findContact;
     if (typeof getPayments === 'function') this.getPayments = getPayments;
     if (typeof savePayment === 'function') this.savePayment = savePayment;
     if (typeof checkPayment === 'function') this.checkPayment = checkPayment;
@@ -2318,13 +2230,23 @@ class EvmAssetsController {
     this.assetDetailsModal.load();
     this.confirmationModal.load();
     this.sendFormAdapter.load();
+    // Recovery actions live in persistent warnings; the pending list is read-only.
+    document.getElementById('toastContainer').addEventListener('click', async (event) => {
+      const button = event.target.closest('[data-evm-recovery-action]');
+      if (!button) return;
+      event.stopPropagation();
+      button.disabled = true;
+      try { await this.recoverPayment(button.dataset.evmPayment, button.dataset.evmRecoveryAction); }
+      finally { button.disabled = false; }
+    }, true);
     document.getElementById('openAssets').addEventListener('click', () => this.assetsModal.open());
     this.loaded = true;
   }
 
   reset() {
+    for (const { toastId } of this.paymentToasts.values()) this.hideToast(toastId);
+    this.paymentToasts.clear();
     this.discovery.reset();
-    this.recipients.reset();
     this.transactions.paymentEvidence.clear();
     this.confirmationModal.reset();
   }
@@ -2341,7 +2263,14 @@ class EvmAssetsController {
     return false;
   }
 
-  refresh(options) { return this.discovery.refresh(options); }
+  async refresh(options) {
+    const account = this.getAccount();
+    const catalog = await this.discovery.refresh(options);
+    if (this.getAccount() === account && this.assetsModal.modal?.classList.contains('active')) {
+      this.assetsModal.renderBalances();
+    }
+    return catalog;
+  }
   rebuildCatalog() { return this.discovery.rebuildCatalog(); }
   getCatalog() { return this.discovery.getCatalog(); }
   getEvmCatalog() { return this.discovery.getEvmCatalog(); }
@@ -2424,6 +2353,44 @@ class EvmAssetsController {
     });
   }
 
+  syncPaymentNotices(resurface = false) {
+    const account = this.getAccount();
+    if (!account || this.sending) return;
+    const active = new Set();
+    for (const record of this.getPayments(account).filter((item) => item.kind === 'outgoing')) {
+      if (record.broadcastState === 'rejected') continue;
+      const unknown = record.assetState === 'unknown' && record.broadcastState !== 'not_started';
+      const messageNeedsHelp = record.username && ['ready', 'rejected', 'uncertain'].includes(record.messageState)
+        && (record.messageState !== 'ready' || ['pending', 'confirmed'].includes(record.assetState));
+      const paused = record.assetState === 'pending' && record.checkAttempts >= 20;
+      if (!unknown && !messageNeedsHelp && !paused) continue;
+      const id = evmPaymentId(record.payment);
+      active.add(id);
+      const state = `${record.assetState}:${record.messageState}:${Boolean(record.rawTransaction)}`;
+      const previous = this.paymentToasts.get(id);
+      if (previous?.state === state && (!resurface || document.getElementById(previous.toastId))) continue;
+      if (previous) this.hideToast(previous.toastId);
+      const action = (name, label) => `<button type="button" class="toast-update-button" data-evm-payment="${escapeHtml(id)}" data-evm-recovery-action="${name}">${label}</button>`;
+      const title = unknown ? 'Transfer status unavailable. Check before sending again.'
+        : paused ? 'Transfer still awaiting confirmation.' : 'Asset submitted. Chat message needs attention.';
+      const html = `<div class="toast-update-title">${title}</div>
+        <div>${escapeHtml(evmPaymentAmount(record.payment))} ${escapeHtml(record.payment.symbol)} → ${escapeHtml(record.username || record.payment.to)}</div>
+        <div class="evm-payment-reference">${escapeHtml(record.payment.transactionHash)}</div>
+        ${record.broadcastError ? `<div>${escapeHtml(record.broadcastError.message)}</div>` : ''}
+        <div class="evm-payment-actions">${action('check', 'Check status')}
+          ${unknown && record.rawTransaction ? action('submit', 'Retry same submission') : ''}
+          ${messageNeedsHelp ? action('retry', record.messageState === 'ready' ? 'Send message' : 'Retry message') + action('abandon', 'Stop retrying message') : ''}
+        </div>`;
+      const toastId = this.showToast(html, 0, 'warning', true, { dedupe: false });
+      this.paymentToasts.set(id, { state, toastId });
+    }
+    for (const [id, { toastId }] of this.paymentToasts) {
+      if (active.has(id)) continue;
+      this.hideToast(toastId);
+      this.paymentToasts.delete(id);
+    }
+  }
+
   async recoverPayment(id, action = 'retry') {
     const account = this.getAccount();
     try {
@@ -2432,7 +2399,16 @@ class EvmAssetsController {
         const record = this.getPayments(account).find((item) => item.kind === 'outgoing' && evmPaymentId(item.payment) === id);
         if (!record) throw new Error('This device has no outgoing operation to retry. Use Check status on the message.');
         if (action === 'check') {
-          await this.checkPayment(record.payment, account);
+          const toastId = this.showToast('Checking transfer status…', 0, 'loading');
+          try {
+            await this.checkPayment(record.payment, account);
+            if (this.getAccount() !== account) return;
+            const latest = this.getPayments(account).find((item) => evmPaymentId(item.payment) === id);
+            const message = !latest ? 'Payment completed.' : latest.checkAttempts === 0 ? 'Status check queued.'
+              : latest.assetState === 'unknown' ? 'Status is still unavailable. Do not start another transfer.'
+              : `Transfer ${latest.assetState}.${latest.username ? ` Chat message: ${latest.messageState}.` : ''}`;
+            this.showToast(message, latest?.assetState === 'unknown' ? 0 : 5000, latest?.assetState === 'unknown' ? 'warning' : 'info');
+          } finally { this.hideToast(toastId); }
           return;
         }
         if (action === 'abandon') {
@@ -2456,6 +2432,11 @@ class EvmAssetsController {
       });
     } catch (error) {
       if (this.getAccount() === account) this.showToast(error.message, 0, 'warning');
+    } finally {
+      if (this.getAccount() === account) {
+        this.syncPaymentNotices();
+        if (this.assetsModal.isActive()) this.assetsModal.renderRecovery();
+      }
     }
   }
 
@@ -2500,6 +2481,9 @@ class EvmAssetsController {
     const severity = ['rejected', 'reverted'].includes(record.assetState) ? 'error'
       : record.assetState === 'unknown' ? 'warning' : 'info';
     this.showToast(message, 0, severity);
+    if (['confirmed', 'reverted'].includes(record.assetState)) {
+      void this.refresh({ force: true }).catch(() => {});
+    }
   }
 
   async reviewPayment(payment, recipient) {
@@ -2511,7 +2495,7 @@ class EvmAssetsController {
       if (this.getAccount() !== account) return;
       if (state !== 'reverted') throw new Error('A new payment requires a verified revert. Check the original transfer again.');
       const network = this.getEvmCatalog().find((item) => item.chainId === payment.chainId);
-      const asset = network?.assets.find((item) => (item.contractAddress?.toLowerCase() || null) === payment.contractAddress);
+      const asset = network?.assets?.find((item) => (item.contractAddress?.toLowerCase() || null) === payment.contractAddress);
       if (!asset) throw new Error('Refresh EVM Assets to load this asset before reviewing it.');
       await this.openSend({ mode: 'evm', networkId: network.id, assetKey: asset.key });
       if (this.getAccount() !== account) return;
@@ -2519,7 +2503,7 @@ class EvmAssetsController {
       form.usernameInput.value = recipient;
       form.amountInput.value = evmPaymentAmount(payment);
       form.usernameInput.dispatchEvent(new Event('input', { bubbles: true }));
-      // Recipient input clears the memo; restore it before the lookup finishes.
+      // Restore the note after recipient input clears the memo.
       form.memoInput.value = payment.note || '';
       this.showToast('Review the recipient and amount. Nothing has been sent.', 5000, 'info');
     } catch (error) {
@@ -2546,7 +2530,9 @@ class EvmAssetsController {
     form.submitButton.disabled = true;
     try {
       if (this.getPayments(account).some((record) => record.kind === 'outgoing' && record.assetState === 'unknown')) {
-        throw new Error('Check the unresolved payment in EVM assets before starting another transfer.');
+        this.sending = false;
+        this.syncPaymentNotices(true);
+        return { status: 'unknown' };
       }
       const previousResolution = form.getResolvedRecipient();
       if (!previousResolution) {
@@ -2556,9 +2542,7 @@ class EvmAssetsController {
         );
       }
 
-      const resolution = await this.recipients.resolve(input, {
-        force: previousResolution.kind === 'username',
-      });
+      const resolution = this.recipients.resolve(input);
       if (
         previousResolution.kind === 'username'
         && resolution.address !== previousResolution.address
@@ -2575,8 +2559,8 @@ class EvmAssetsController {
       const beforeBroadcast = async () => {
         if (this.getAccount() !== account) throw new Error('Account changed. Review the transfer again.');
         if (resolution.kind === 'username') {
-          const current = await this.recipients.resolve(resolution.username, { force: true });
-          if (current.address !== resolution.address) throw new EvmTransferError('Recipient changed. Review the username.', 'USERNAME_ASSOCIATION_CHANGED');
+          const current = this.recipients.resolve(resolution.username);
+          if (current.address !== resolution.address) throw new EvmTransferError('Contact changed. Review the username.', 'USERNAME_ASSOCIATION_CHANGED');
         }
         if (chat) {
           const current = await this.prepareChatPayment(resolution, account);
@@ -2600,10 +2584,11 @@ class EvmAssetsController {
         form.clearRecipientLookup({ hideStatus: false });
         form.setRecipientStatus('recipient changed—review username');
       }
-      this.showToast(error?.message || 'EVM transfer failed', 5000, 'error');
+      this.showToast(error?.message || 'EVM transfer failed', 0, 'error');
       return { status: 'failed', error };
     } finally {
       this.sending = false;
+      if (this.getAccount() === account) this.syncPaymentNotices();
       await form.refreshSendButtonDisabledState();
     }
   }

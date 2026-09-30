@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MMDD.HHmm like 2025.0125.1005
-const version = 'y'
+const version = 'a'
 const BOOT_SPLASH_HANDOFF_MS = 1000;
 const BOOT_SPLASH_FRAME_TIMEOUT_MS = 100;
 const BOOT_SPLASH_IMAGE_TIMEOUT_MS = 2000;
@@ -12372,6 +12372,7 @@ async function checkEvmPayments() {
   session.running = true;
   const current = () => evmPaymentCheckSession === session && myAccount === session.account
     && isOnline && document.visibilityState !== 'hidden' && !evmAssets.sending;
+  let refreshBalances = false;
   try {
     const due = loadEvmPayments(session.account).filter((record) => (record.checkAttempts || 0) < EVM_CHECK_LIMIT
       && (record.nextCheckAt || 0) <= Date.now()).sort((a, b) => (a.nextCheckAt || 0) - (b.nextCheckAt || 0)).slice(0, 4);
@@ -12405,8 +12406,12 @@ async function checkEvmPayments() {
       record.checkAttempts = (record.checkAttempts || 0) + 1;
       record.nextCheckAt = Date.now() + Math.min(30_000, 5000 * 2 ** Math.min(record.checkAttempts - 1, 3));
       record.verification = state;
-      record.assetState = state === 'settled' ? 'confirmed' : state === 'reverted' ? 'reverted'
+      const assetState = state === 'settled' ? 'confirmed' : state === 'reverted' ? 'reverted'
         : state === 'pending' ? 'pending' : 'unknown';
+      if (record.kind === 'outgoing' && record.assetState !== assetState && ['confirmed', 'reverted'].includes(assetState)) {
+        refreshBalances = true;
+      }
+      record.assetState = assetState;
       if (record.kind === 'outgoing' && ['pending', 'settled', 'reverted'].includes(state)) {
         record.broadcastState = 'acknowledged';
         delete record.broadcastError;
@@ -12442,40 +12447,30 @@ async function checkEvmPayments() {
         removeEvmPayment(record, session.account);
         return;
       }
-      // Remember the outcome already surfaced by send() or an earlier check.
-      // Balance refresh can retry without delaying or repeating this alert.
-      if (!record.username && ['settled', 'reverted'].includes(state)
-        && record.notifiedAssetState !== record.assetState) {
-        showToast(`EVM transfer ${record.assetState}: ${record.payment.transactionHash}`, 5000, state === 'reverted' ? 'error' : 'info');
-        record.notifiedAssetState = record.assetState;
-      }
-      saveEvmPayment(record, session.account);
-      if (['settled', 'reverted'].includes(state) && !record.balanceRefreshed) {
-        // Flush our changes before waiting so the reload can see other tabs' retries.
-        saveState();
-        let balanceRefreshed = false;
-        try {
-          await evmAssets.refresh({ force: true });
-          // Discovery resolves with cached balances when its request fails.
-          balanceRefreshed = evmAssets.getStatus() === 'connected';
-        } catch { /* Retry a balance refresh with the same bounded schedule. */ }
-        if (!current()) return;
-        record = loadEvmPayments(session.account).find((item) => evmPaymentRecordId(item) === recordId);
-        if (!record) return;
-        record.balanceRefreshed ||= balanceRefreshed;
-      }
-      if (!current()) return;
-      if (['confirmed', 'reverted'].includes(record.assetState) && record.balanceRefreshed
-        && ['none', 'delivered', 'abandoned'].includes(record.messageState)) {
-        removeEvmPayment(record, session.account);
-      } else {
+      const operationFinished = ['settled', 'reverted'].includes(state)
+        && ['none', 'delivered', 'abandoned'].includes(record.messageState);
+      if (!operationFinished) {
         saveEvmPayment(record, session.account);
+        return;
       }
+
+      if (!record.username && record.notifiedAssetState !== record.assetState) {
+        showToast(
+          `EVM transfer ${record.assetState}: ${record.payment.transactionHash}`,
+          state === 'reverted' ? 0 : 5000,
+          state === 'reverted' ? 'error' : 'info',
+        );
+      }
+      removeEvmPayment(record, session.account);
     }));
-    if (!current() || !due.length) return;
+    if (!current()) return;
+    evmAssets.syncPaymentNotices();
+    if (!due.length) return;
     saveState();
     if (chatModal.isActive()) chatModal.appendChatModal();
     chatsScreen.updateChatList();
+    // Completion is independent of portfolio availability or refresh speed.
+    if (refreshBalances) void evmAssets.refresh({ force: true }).catch(() => {});
     if (evmAssets.assetsModal?.modal?.classList.contains('active')) evmAssets.assetsModal.renderRecovery();
   } catch (error) {
     console.warn('EVM payment verification interrupted:', error.message);
@@ -34315,6 +34310,12 @@ multichain.configure({
   getAccount: () => myAccount,
 });
 
+function getMessagePaymentContacts() {
+  return Object.values(myData?.contacts || {})
+    .filter((contact) => contact.address && !isFaucetAddress(contact.address))
+    .filter((contact) => contact.friend !== 0 && contact.public);
+}
+
 chatPaymentPanel.configure({
   getAccount: () => myAccount,
   onSent: (recipientAddress, messageObj) =>
@@ -34325,9 +34326,7 @@ chatPaymentPanel.configure({
   // never get the receipt. Recent conversations first.
   listContacts: () => {
     const recency = new Map((myData?.chats || []).map((chat, index) => [chat.address, index]));
-    return Object.values(myData?.contacts || {})
-      .filter((contact) => contact.address && !isFaucetAddress(contact.address))
-      .filter((contact) => contact.friend !== 0 && contact.public)
+    return getMessagePaymentContacts()
       .sort((a, b) => (recency.get(a.address) ?? Infinity) - (recency.get(b.address) ?? Infinity)
         || getContactDisplayName(a).localeCompare(getContactDisplayName(b)))
       .map((contact) => ({
@@ -34434,6 +34433,8 @@ function changeEvmPayment(record, account, remove) {
 
 evmAssets.configure({
   getAccount: () => myAccount,
+  findContact: (username) => getMessagePaymentContacts()
+    .find((contact) => normalizeUsername(contact.username || '') === username) || null,
   prepareChatPayment: (resolution, account) => chatModal.prepareEvmPaymentRecipient(resolution, account),
   preparePaymentMessage: (record, account) => chatModal.prepareEvmPaymentMessage(record, account),
   sendChatPayment: (record, account) => chatModal.sendEvmPaymentMessage(record, account),
