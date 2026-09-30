@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MMDD.HHmm like 2025.0125.1005
-const version = 'v'
+const version = 'w'
 const BOOT_SPLASH_HANDOFF_MS = 1000;
 const BOOT_SPLASH_FRAME_TIMEOUT_MS = 100;
 const BOOT_SPLASH_IMAGE_TIMEOUT_MS = 2000;
@@ -12379,6 +12379,10 @@ async function checkEvmPayments() {
     if (due.length && evmPaymentChanges.has(session.account)) saveState();
     await Promise.all(due.map(async (record) => {
       if (!current()) return;
+      if (record.kind === 'outgoing' && record.broadcastState === 'rejected') {
+        removeEvmPayment(record, session.account);
+        return;
+      }
       const recordId = evmPaymentRecordId(record);
       if (record.kind === 'verification' && !evmPaymentMessages(record, session.account).length) {
         removeEvmPayment(record, session.account);
@@ -12389,7 +12393,7 @@ async function checkEvmPayments() {
         : await evmAssets.transactions.verifyPayment(record.payment, record.payment.from, record.payment.to);
       if (!current()) return;
       const attemptId = record.attempt?.txid;
-      const delivered = record.kind === 'outgoing' && attemptId && !['delivered', 'abandoned'].includes(record.messageState)
+      const delivered = record.kind === 'outgoing' && attemptId && !['ready', 'delivered', 'abandoned'].includes(record.messageState)
         ? await lookupEvmAnnouncement(attemptId, session.account).catch(() => undefined) : undefined;
       if (!current()) return;
       // Do not apply a stale result to an operation changed while RPC was in flight.
@@ -12402,6 +12406,15 @@ async function checkEvmPayments() {
       record.verification = state;
       record.assetState = state === 'settled' ? 'confirmed' : state === 'reverted' ? 'reverted'
         : state === 'pending' ? 'pending' : 'unknown';
+      if (record.kind === 'outgoing' && ['pending', 'settled', 'reverted'].includes(state)) {
+        record.broadcastState = 'acknowledged';
+        delete record.broadcastError;
+        if (state !== 'pending') delete record.rawTransaction;
+        // An announcement prepared before a failed broadcast was never injected.
+        if (state === 'reverted' && record.messageState === 'ready' && !record.attempt?.everUncertain) {
+          record.messageState = 'abandoned';
+        }
+      }
       const messages = evmPaymentMessages(record, session.account);
       for (const message of messages) {
         message.paymentVerified = state === 'reverted' ? 'failed' : state;
@@ -22707,7 +22720,6 @@ class ChatModal {
     record.attempt = { tx: chatMessageObj, txid, timestamp: payload.sent_timestamp };
     record.messageState = 'ready';
     saveEvmPayment(record, account);
-    this.upsertEvmPaymentCard(record);
   }
 
   async sendEvmPaymentMessage(record, account) {
@@ -22735,9 +22747,12 @@ class ChatModal {
         await this.prepareEvmPaymentRecipient({ address: record.payment.to, username: record.username }, account);
       }
     }
-    if (!record.attempt) {
+    if (!record.attempt || (record.messageState === 'ready' && !record.attempt.everUncertain)) {
       if (!myData.contacts[normalizeAddress(record.payment.to)]) throw new Error('The payment contact was deleted. Check status or stop retrying from EVM Assets.');
-      if (!['pending', 'confirmed'].includes(record.assetState)) throw new Error('Check the asset before preparing another message.');
+      if (record.broadcastState !== 'acknowledged' || !['pending', 'confirmed'].includes(record.assetState)) {
+        throw new Error('Confirm EVM submission before sending its chat message.');
+      }
+      // Refresh an unsent message's timestamp and cost after a slow broadcast.
       await this.prepareEvmPaymentMessage(record, account);
     }
     if (myAccount !== account) throw new Error('Account changed before chat submission.');
@@ -22745,6 +22760,7 @@ class ChatModal {
     const previouslyUncertain = record.attempt.everUncertain;
     record.attempt.everUncertain = true;
     record.messageState = 'submitting';
+    this.upsertEvmPaymentCard(record);
     saveEvmPayment(record, account);
     const response = await injectTx(tx, txid, account);
     const current = loadEvmPayments(account).find((item) => evmPaymentRecordId(item) === evmPaymentRecordId(record));
