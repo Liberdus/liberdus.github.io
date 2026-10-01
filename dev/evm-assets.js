@@ -1084,7 +1084,6 @@ export class EvmTransactionService {
     record.broadcastState = 'attempting';
     this.saveSubmission(record, account);
     for (let attempt = 0; attempt < EVM_BROADCAST_ATTEMPTS && Date.now() < deadline; attempt++) {
-      if (this.getAccount() !== account) break;
       const endpoint = endpoints[attempt % endpoints.length];
       const previouslyUncertain = Boolean(record.broadcastUncertain);
       let submitted = false;
@@ -1094,7 +1093,6 @@ export class EvmTransactionService {
           if (chainId !== BigInt(network.chainId)) throw new EvmTransferError('RPC returned the wrong chain', 'CHAIN_ID_MISMATCH');
           this.verifiedRpcEndpoints.set(endpoint, network.chainId);
         }
-        if (this.getAccount() !== account) break;
         submitted = true;
         record.broadcastUncertain = true;
         this.saveSubmission(record, account);
@@ -1126,7 +1124,7 @@ export class EvmTransactionService {
       // A null lookup does not prove absence. Try the original bytes again;
       // never prepare another nonce while this payment remains unresolved.
       for (const lookupEndpoint of endpoints) {
-        if (Date.now() >= deadline || this.getAccount() !== account) break;
+        if (Date.now() >= deadline) break;
         try {
           if (this.verifiedRpcEndpoints.get(lookupEndpoint) !== network.chainId) continue;
           const tx = await request(lookupEndpoint, 'eth_getTransactionByHash', [record.payment.transactionHash]);
@@ -1138,7 +1136,7 @@ export class EvmTransactionService {
           return record.assetState;
         } catch { /* Keep the original broadcast error for the user. */ }
       }
-      if (attempt + 1 < EVM_BROADCAST_ATTEMPTS && this.getAccount() === account) {
+      if (attempt + 1 < EVM_BROADCAST_ATTEMPTS) {
         await new Promise((resolve) => setTimeout(resolve, Math.max(0, Math.min(1000, deadline - Date.now()))));
       }
     }
@@ -1151,10 +1149,9 @@ export class EvmTransactionService {
     return record.assetState;
   }
 
-  async withSubmissionProgress(account, operation) {
+  async withSubmissionProgress(operation) {
     const toastId = this.showToast('Submitting EVM transfer…', 0, 'loading', false, { dedupe: false });
     const slow = setTimeout(() => {
-      if (this.getAccount() !== account) { this.hideToast(toastId); return; }
       const toast = document.getElementById(toastId);
       if (toast) toast.textContent = 'Connection is slow. Checking submission…';
     }, 8000);
@@ -1375,14 +1372,10 @@ export class EvmTransactionService {
     if (!confirmed) return { status: 'cancelled', transactionHash: null };
 
     await beforeBroadcast();
-    if (this.getAccount() !== prepared.validation.account) {
-      throw new EvmTransferError('Account changed. Review the transfer again.', 'ACCOUNT_CHANGED');
-    }
     const rawTransaction = await signEvmTransaction(
       prepared.transaction,
       prepared.validation.privateKey,
     );
-    if (this.getAccount() !== prepared.validation.account) throw new Error('Account changed before broadcast.');
     const transactionHash = bytesToHex(keccak256(hexToBytes(rawTransaction)));
     const payment = parseEvmTransferMessage({
       type: EVM_CHAT_MESSAGE_TYPE, version: 1, chainId: network.chainId, networkId: network.id, transactionHash,
@@ -1402,15 +1395,14 @@ export class EvmTransactionService {
     const account = prepared.validation.account;
     // Check and sign the announcement before spending EVM assets; send only after acceptance.
     if (chat) await this.preparePaymentMessage(record, account);
-    if (this.getAccount() !== account) throw new Error('Account changed before broadcast.');
     this.savePayment(record, account);
     // Normal account saves retain the original bytes for an exact submission retry.
-    let status = await this.withSubmissionProgress(account, () => this.broadcast(network, record, account));
+    let status = await this.withSubmissionProgress(() => this.broadcast(network, record, account));
     let receipt = null;
-    if (chat && status === 'pending' && this.getAccount() === account) {
+    if (chat && status === 'pending') {
       try { await this.sendPaymentMessage(record, account); }
       catch (error) {
-        if (this.getAccount() === account && !error.toastAlreadyShown) this.showToast(error.message, 0, 'error');
+        if (!error.toastAlreadyShown) this.showToast(error.message, 0, 'error');
       }
     }
     if (!chat && status === 'pending') {
@@ -1421,24 +1413,22 @@ export class EvmTransactionService {
     }
     record.assetState = status;
     if (['confirmed', 'reverted'].includes(status)) delete record.rawTransaction;
-    if (this.getAccount() === account) {
-      const message = status === 'rejected' ? `EVM submission rejected: ${record.broadcastError.message}. Review the form and try again.`
-        : status === 'unknown' ? 'Submission could not be confirmed. The transfer may still go through. Use Retry submission in EVM Assets to check or resend the original transaction.'
-        : `EVM transfer ${status}: ${transactionHash}`;
-      const failed = ['reverted', 'rejected'].includes(status);
-      this.showToast(message, failed || status === 'unknown' ? 0 : 5000, failed ? 'error' : status === 'unknown' ? 'warning' : 'info');
-      if (!chat && ['confirmed', 'reverted'].includes(status)) record.notifiedAssetState = status;
-    }
+    const message = status === 'rejected' ? `EVM submission rejected: ${record.broadcastError.message}. Review the form and try again.`
+      : status === 'unknown' ? 'Submission could not be confirmed. The transfer may still go through. Use Retry submission in EVM Assets to check or resend the original transaction.'
+      : `EVM transfer ${status}: ${transactionHash}`;
+    const failed = ['reverted', 'rejected'].includes(status);
+    this.showToast(message, failed || status === 'unknown' ? 0 : 5000, failed ? 'error' : status === 'unknown' ? 'warning' : 'info');
+    if (!chat && ['confirmed', 'reverted'].includes(status)) record.notifiedAssetState = status;
     try {
       this.saveSubmission(record, account);
       status = record.assetState;
     } catch {
-      if (this.getAccount() === account) this.showToast('Transfer may be sent. Check its hash before sending again.', 0, 'warning');
+      this.showToast('Transfer may be sent. Check its hash before sending again.', 0, 'warning');
     }
-    if (['confirmed', 'reverted'].includes(status) && this.getAccount() === account) {
+    if (['confirmed', 'reverted'].includes(status)) {
       try { await this.refreshAssets({ force: true }); }
       catch {
-        if (this.getAccount() === account) this.showToast('Transfer processed; balance refresh is temporarily unavailable.', 5000, 'warning');
+        this.showToast('Transfer processed; balance refresh is temporarily unavailable.', 5000, 'warning');
       }
     }
     return { status, transactionHash, receipt, record };
@@ -2309,9 +2299,8 @@ class EvmAssetsController {
   }
 
   async refresh(options) {
-    const account = this.getAccount();
     const catalog = await this.discovery.refresh(options);
-    if (this.getAccount() === account && this.assetsModal.modal?.classList.contains('active')) {
+    if (this.assetsModal.modal?.classList.contains('active')) {
       this.assetsModal.renderBalances();
     }
     return catalog;
@@ -2384,17 +2373,6 @@ class EvmAssetsController {
     form.balanceWarning.style.display = noteError || validation.message ? 'inline' : 'none';
     form.submitButton.disabled = this.sending || !validation.valid || Boolean(noteError);
   }
-  async withPaymentLock(account, operation) {
-    if (!account?.keys) throw new Error('Sign in before sending a payment.');
-    if (!globalThis.navigator?.locks) throw new Error('Safe payment recovery requires a browser with Web Locks support.');
-    const key = `evm-payment:${account.netid}:${walletProbeAddress(account.keys.address)}`;
-    return navigator.locks.request(key, { ifAvailable: true }, async (lock) => {
-      if (!lock) throw new Error('An EVM payment is already being processed in another tab.');
-      if (this.getAccount() !== account) throw new Error('Account changed. Reopen EVM Assets.');
-      return operation();
-    });
-  }
-
   getPaymentActions(payment, message = null) {
     const account = this.getAccount();
     if (!account) return {};
@@ -2417,51 +2395,48 @@ class EvmAssetsController {
     const account = this.getAccount();
     try {
       if (this.sending) throw new Error('Wait for the current payment operation to finish.');
-      await this.withPaymentLock(account, async () => {
-        const record = this.getPayments(account).find((item) => item.kind === 'outgoing' && evmPaymentId(item.payment) === id);
-        if (!record) throw new Error('This device has no outgoing operation to retry.');
-        const actions = this.getPaymentActions(record.payment);
-        if (action === 'resubmit' && actions.retrySubmission) {
-          await this.retrySubmission(record, account);
-          return;
-        }
-        if (action === 'check') {
-          const toastId = this.showToast('Checking transfer status…', 0, 'loading');
-          try {
-            await this.checkPayment(record.payment, account);
-            if (this.getAccount() !== account) return;
-            const latest = this.getPayments(account).find((item) => evmPaymentId(item.payment) === id);
-            const message = !latest ? 'Payment completed.' : latest.checkAttempts === 0 ? 'Status check queued.'
-              : latest.broadcastState === 'nonce_used' ? 'The nonce is already used. This payment outcome is still unverified; do not repeat the payment.'
-              : latest.assetState === 'unknown' ? 'Status is still unavailable. Retry the original submission in EVM Assets.'
-              : `Transfer ${latest.assetState}.${latest.username ? ` Chat message: ${latest.messageState}.` : ''}`;
-            this.showToast(message, latest?.assetState === 'unknown' ? 0 : 5000, latest?.assetState === 'unknown' ? 'warning' : 'info');
-          } finally { this.hideToast(toastId); }
-          return;
-        }
-        if (action === 'review' && actions.retryTransfer) {
-          await this.reviewPayment(record.payment, record.username || record.payment.to);
-          return;
-        }
-        if (action === 'dismiss' && actions.dismiss) {
-          this.dismissPayment(record, account);
-          return;
-        }
-        if (action !== 'retry' || !actions.retryMessage) {
-          throw new Error('Retry message is available only after the EVM transfer is confirmed.');
-        }
-        this.sending = true;
+      const record = this.getPayments(account).find((item) => item.kind === 'outgoing' && evmPaymentId(item.payment) === id);
+      if (!record) throw new Error('This device has no outgoing operation to retry.');
+      const actions = this.getPaymentActions(record.payment);
+      if (action === 'resubmit' && actions.retrySubmission) {
+        await this.retrySubmission(record, account);
+        return;
+      }
+      if (action === 'check') {
+        const toastId = this.showToast('Checking transfer status…', 0, 'loading');
         try {
-          const sent = await this.sendChatPayment(record, account);
-          if (sent && this.getAccount() === account) this.showToast('Payment message submitted.', 5000, 'info');
-        } finally {
-          this.sending = false;
-        }
-      });
+          await this.checkPayment(record.payment, account);
+          const latest = this.getPayments(account).find((item) => evmPaymentId(item.payment) === id);
+          const message = !latest ? 'Payment completed.' : latest.checkAttempts === 0 ? 'Status check queued.'
+            : latest.broadcastState === 'nonce_used' ? 'The nonce is already used. This payment outcome is still unverified; do not repeat the payment.'
+            : latest.assetState === 'unknown' ? 'Status is still unavailable. Retry the original submission in EVM Assets.'
+            : `Transfer ${latest.assetState}.${latest.username ? ` Chat message: ${latest.messageState}.` : ''}`;
+          this.showToast(message, latest?.assetState === 'unknown' ? 0 : 5000, latest?.assetState === 'unknown' ? 'warning' : 'info');
+        } finally { this.hideToast(toastId); }
+        return;
+      }
+      if (action === 'review' && actions.retryTransfer) {
+        await this.reviewPayment(record.payment, record.username || record.payment.to);
+        return;
+      }
+      if (action === 'dismiss' && actions.dismiss) {
+        this.dismissPayment(record, account);
+        return;
+      }
+      if (action !== 'retry' || !actions.retryMessage) {
+        throw new Error('Retry message is available only after the EVM transfer is confirmed.');
+      }
+      this.sending = true;
+      try {
+        const sent = await this.sendChatPayment(record, account);
+        if (sent) this.showToast('Payment message submitted.', 5000, 'info');
+      } finally {
+        this.sending = false;
+      }
     } catch (error) {
-      if (this.getAccount() === account && !error.toastAlreadyShown) this.showToast(error.message, 0, 'error');
+      if (!error.toastAlreadyShown) this.showToast(error.message, 0, 'error');
     } finally {
-      if (this.getAccount() === account && this.assetsModal.isActive()) this.assetsModal.renderRecovery();
+      if (this.assetsModal.isActive()) this.assetsModal.renderRecovery();
     }
   }
 
@@ -2470,9 +2445,8 @@ class EvmAssetsController {
     try {
       // Check the original hash first. Retrying must never sign a new payment.
       this.transactions.paymentEvidence.clear();
-      await this.transactions.withSubmissionProgress(account, async () => {
+      await this.transactions.withSubmissionProgress(async () => {
         const state = await this.transactions.verifyOutgoingPayment(record);
-        if (this.getAccount() !== account) return;
         // Message delivery can finish while the EVM request is in flight.
         record = this.getPayments(account).find((item) => item.kind === 'outgoing'
           && evmPaymentId(item.payment) === evmPaymentId(record.payment));
@@ -2488,7 +2462,6 @@ class EvmAssetsController {
           const rawHash = bytesToHex(keccak256(hexToBytes(record.rawTransaction)));
           if (rawHash !== record.payment.transactionHash) throw new Error('Saved transaction does not match the payment hash.');
           if (record.username && record.messageState === 'ready') await this.preparePaymentMessage(record, account);
-          if (this.getAccount() !== account) return;
           const network = { id: record.payment.networkId, chainId: record.payment.chainId };
           await this.transactions.broadcast(network, record, account);
         } else {
@@ -2499,7 +2472,6 @@ class EvmAssetsController {
         record.checkAttempts = 0;
         record.nextCheckAt = 0;
         this.savePayment(record, account);
-        if (this.getAccount() !== account) return;
         if (['confirmed', 'reverted'].includes(record.assetState)) {
           void this.refresh({ force: true }).catch(() => {});
         }
@@ -2507,7 +2479,6 @@ class EvmAssetsController {
           && ['pending', 'confirmed'].includes(record.assetState)) {
           await this.sendChatPayment(record, account);
         }
-        if (this.getAccount() !== account) return;
         if (record.assetState === 'unknown') {
           this.showToast('Submission is still unconfirmed. You can retry this same submission later; do not create a new payment.', 0, 'warning');
         } else if (record.assetState === 'rejected') {
@@ -2519,7 +2490,7 @@ class EvmAssetsController {
     } finally {
       this.sending = false;
     }
-    if (record && this.getAccount() === account) await this.checkPayment(record.payment, account);
+    if (record) await this.checkPayment(record.payment, account);
   }
 
   async reviewPayment(payment, recipient) {
@@ -2533,14 +2504,12 @@ class EvmAssetsController {
       } else {
         this.transactions.paymentEvidence.clear();
         const state = await this.transactions.verifyPayment(payment, payment.from, payment.to);
-        if (this.getAccount() !== account) return;
         if (state !== 'reverted') throw new Error('A new transfer requires a verified failure. Check the original transfer again.');
       }
       const network = this.getEvmCatalog().find((item) => item.chainId === payment.chainId);
       const asset = network?.assets?.find((item) => (item.contractAddress?.toLowerCase() || null) === payment.contractAddress);
       if (!asset) throw new Error('Refresh EVM Assets to load this asset before retrying it.');
       await this.openSend({ mode: 'evm', networkId: network.id, assetKey: asset.key });
-      if (this.getAccount() !== account) return;
       const form = this.sendFormAdapter;
       form.usernameInput.value = recipient;
       form.amountInput.value = evmPaymentAmount(payment);
@@ -2554,15 +2523,6 @@ class EvmAssetsController {
   }
 
   async handleSendFormSubmit(form) {
-    try {
-      return await this.withPaymentLock(this.getAccount(), () => this.submitSendForm(form));
-    } catch (error) {
-      this.showToast(error.message, 0, 'warning');
-      return { status: 'failed', error };
-    }
-  }
-
-  async submitSendForm(form) {
     if (this.sending) return;
     this.sending = true;
     const account = this.getAccount();
@@ -2577,7 +2537,6 @@ class EvmAssetsController {
         && record.broadcastState !== 'nonce_used');
       for (let record of unresolved) {
         const consumed = await this.transactions.isNonceConsumed(network, record);
-        if (this.getAccount() !== account) throw new Error('Account changed. Review the transfer again.');
         // Preserve message delivery or execution updates received during the lookup.
         record = this.getPayments(account).find((item) => item.kind === 'outgoing'
           && evmPaymentId(item.payment) === evmPaymentId(record.payment));
@@ -2609,7 +2568,6 @@ class EvmAssetsController {
       const chat = resolution.kind === 'username'
         ? { ...await this.prepareChatPayment(resolution, account), note } : null;
       const beforeBroadcast = async () => {
-        if (this.getAccount() !== account) throw new Error('Account changed. Review the transfer again.');
         if (resolution.kind === 'username') {
           const current = this.recipients.resolve(resolution.username);
           if (current.address !== resolution.address) throw new EvmTransferError('Contact changed. Review the username.', 'USERNAME_ASSOCIATION_CHANGED');
@@ -2626,7 +2584,7 @@ class EvmAssetsController {
         recipient: resolution.address,
         recipientLabel: resolution.username || resolution.display,
       });
-      if (['pending', 'confirmed', 'reverted'].includes(result.status) && this.getAccount() === account) {
+      if (['pending', 'confirmed', 'reverted'].includes(result.status)) {
         await form.close();
       }
       return result;
