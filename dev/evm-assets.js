@@ -45,14 +45,6 @@ const DEFAULT_EVM_RPC_URLS = Object.freeze({
   ]),
 });
 
-const EVM_PAYMENT_NETWORKS = Object.freeze({
-  1: { id: 'ethereum', name: 'Ethereum', nativeSymbol: 'ETH' },
-  137: { id: 'polygon', name: 'Polygon', nativeSymbol: 'POL' },
-  42161: { id: 'arbitrum', name: 'Arbitrum', nativeSymbol: 'ETH' },
-  10: { id: 'optimism', name: 'Optimism', nativeSymbol: 'ETH' },
-  8453: { id: 'base', name: 'Base', nativeSymbol: 'ETH' },
-  56: { id: 'bsc', name: 'BNB Smart Chain', nativeSymbol: 'BNB' },
-});
 const ERC20_TRANSFER_TOPIC = bytesToHex(keccak256(utf82bin('Transfer(address,address,uint256)')));
 
 export const EVM_CHAT_MESSAGE_TYPE = 'evm_transfer';
@@ -62,6 +54,7 @@ const EVM_NOTE_MAX_BYTES = 1000;
 export function parseEvmTransferMessage(value) {
   if (!value || value.type !== EVM_CHAT_MESSAGE_TYPE || value.version !== 1) return null;
   if (!Number.isSafeInteger(value.chainId) || value.chainId <= 0) return null;
+  if (typeof value.networkId !== 'string' || !/^[a-z0-9-]{1,64}$/.test(value.networkId)) return null;
   if (typeof value.transactionHash !== 'string' || typeof value.from !== 'string' || typeof value.to !== 'string') return null;
   if (!EVM_HASH_PATTERN.test(value.transactionHash) || !EVM_ADDRESS_PATTERN.test(value.from)
     || !EVM_ADDRESS_PATTERN.test(value.to)) return null;
@@ -77,6 +70,7 @@ export function parseEvmTransferMessage(value) {
     type: EVM_CHAT_MESSAGE_TYPE,
     version: 1,
     chainId: value.chainId,
+    networkId: value.networkId,
     transactionHash: value.transactionHash.toLowerCase(),
     from: value.from.toLowerCase(),
     to: value.to.toLowerCase(),
@@ -709,6 +703,24 @@ class WalletDiscoveryService {
     return getWalletNetwork(this.getCatalog(), networkId);
   }
 
+  async getNativeCurrency({ id, chainId }) {
+    const configured = REQUIRED_NETWORKS.find((network) => network.source === 'evm'
+      && network.id === id && network.chainId === chainId);
+    if (configured) return { symbol: configured.nativeSymbol, decimals: 18 };
+
+    // Portfolio native rows include zero balances, unlike the visible wallet catalog.
+    const findNativeToken = () => this.portfolio?.tokens.find((token) => token.networkId === id
+      && token.chainId === chainId && token.tokenType === 'native' && !token.contractAddress);
+    let token = findNativeToken();
+    if (!token) {
+      await this.refresh();
+      token = findNativeToken();
+    }
+    if (!token || typeof token.tokenSymbol !== 'string' || !token.tokenSymbol.trim()
+      || !Number.isInteger(token.tokenDecimals) || token.tokenDecimals < 0 || token.tokenDecimals > 255) return null;
+    return { symbol: token.tokenSymbol.trim(), decimals: token.tokenDecimals };
+  }
+
   getSelectedAsset(networkId, select) {
     const walletNetwork = this.getNetwork(networkId);
     if (!walletNetwork) return null;
@@ -889,6 +901,7 @@ export class EvmTransactionService {
     hideToast = () => {},
     confirmTransfer,
     getManagedRpcUrl = () => null,
+    getNativeCurrency,
     savePayment,
     saveSubmission,
     preparePaymentMessage,
@@ -901,6 +914,7 @@ export class EvmTransactionService {
     this.hideToast = hideToast;
     this.confirmTransfer = confirmTransfer;
     this.getManagedRpcUrl = getManagedRpcUrl;
+    this.getNativeCurrency = getNativeCurrency;
     this.savePayment = savePayment;
     this.saveSubmission = saveSubmission;
     this.preparePaymentMessage = preparePaymentMessage;
@@ -964,10 +978,10 @@ export class EvmTransactionService {
     const managedRpcUrl = this.getManagedRpcUrl(network);
     const urls = Array.isArray(runtimeUrls) && runtimeUrls.length > 0
       ? runtimeUrls
-      : [managedRpcUrl, ...(network.rpcUrls || [])].filter(Boolean);
+      : [managedRpcUrl, ...(network.rpcUrls || DEFAULT_EVM_RPC_URLS[network.id] || [])].filter(Boolean);
     if (!Array.isArray(urls) || urls.length === 0) {
       throw new EvmTransferError(
-        `Sending is not configured for ${network.name}`,
+        `Sending is not configured for ${network.name || network.id}`,
         'RPC_NOT_CONFIGURED',
       );
     }
@@ -1244,14 +1258,9 @@ export class EvmTransactionService {
     ].join('\n');
   }
 
-  paymentNetwork(chainId) {
-    const configured = EVM_PAYMENT_NETWORKS[chainId];
-    return configured ? { ...configured, chainId, source: 'evm', rpcUrls: DEFAULT_EVM_RPC_URLS[configured.id] } : null;
-  }
-
   /** Cache network evidence, not verdicts: every claim must match independently. */
   async getPaymentEvidence(network, hash) {
-    const key = `${network.chainId}:${hash}`;
+    const key = `${network.id}:${network.chainId}:${hash}`;
     const cached = this.paymentEvidence.get(key);
     if (cached && cached.until > Date.now()) return cached.promise;
     const promise = (async () => {
@@ -1272,16 +1281,14 @@ export class EvmTransactionService {
   async verifyPayment(value, expectedFrom, expectedTo) {
     const payment = parseEvmTransferMessage(value);
     if (!payment || payment.from !== expectedFrom || payment.to !== expectedTo) return 'failed';
-    const network = this.paymentNetwork(payment.chainId);
-    if (!network) return 'unverifiable';
+    const network = { id: payment.networkId, chainId: payment.chainId };
     return this.verifyPaymentOnNetwork(payment, network);
   }
 
   async verifyOutgoingPayment(record) {
     const payment = parseEvmTransferMessage(record.payment);
     if (record.kind !== 'outgoing' || !payment || payment.from !== walletProbeAddress(this.getAccount()?.keys?.address)) return 'failed';
-    if (typeof record.networkId !== 'string' || !/^[a-z0-9-]+$/.test(record.networkId)) return 'unverifiable';
-    const network = this.outgoingNetwork(record);
+    const network = { id: payment.networkId, chainId: payment.chainId };
     const state = await this.verifyPaymentOnNetwork(payment, network);
     if (state !== 'unverifiable') return state;
     if (record.broadcastState === 'nonce_used') return 'nonce_used';
@@ -1289,16 +1296,6 @@ export class EvmTransactionService {
       if (await this.isNonceConsumed(network, record)) return 'nonce_used';
     } catch { /* An unavailable finalized nonce leaves the outcome unresolved. */ }
     return state;
-  }
-
-  outgoingNetwork(record) {
-    // Local sends retain their network even if the asset leaves the catalog.
-    // Incoming claims still use only the trusted payment-network list.
-    const { payment } = record;
-    return this.paymentNetwork(payment.chainId) || {
-      id: record.networkId, name: record.networkId, source: 'evm', chainId: payment.chainId,
-      nativeSymbol: payment.symbol, rpcUrls: DEFAULT_EVM_RPC_URLS[record.networkId] || [],
-    };
   }
 
   async verifyPaymentOnNetwork(payment, network) {
@@ -1317,8 +1314,11 @@ export class EvmTransactionService {
         return matches ? 'reverted' : 'failed';
       }
       if (payment.assetKind === 'native') {
-        return tx.to?.toLowerCase() === payment.to && parseHexQuantity(tx.value, 'value') === BigInt(payment.rawAmount)
-          && payment.decimals === 18 && payment.symbol === network.nativeSymbol ? 'settled' : 'failed';
+        if (tx.to?.toLowerCase() !== payment.to || parseHexQuantity(tx.value, 'value') !== BigInt(payment.rawAmount)) return 'failed';
+        // RPC proves the transfer; wallet metadata independently verifies its display units.
+        const currency = await this.getNativeCurrency(network);
+        if (!currency) return 'unverifiable';
+        return payment.decimals === currency.decimals && payment.symbol === currency.symbol ? 'settled' : 'failed';
       }
       if (tx.to?.toLowerCase() !== payment.contractAddress) return 'failed';
       const matchingTransfer = receipt.logs?.some((log) => !log.removed
@@ -1385,7 +1385,7 @@ export class EvmTransactionService {
     if (this.getAccount() !== prepared.validation.account) throw new Error('Account changed before broadcast.');
     const transactionHash = bytesToHex(keccak256(hexToBytes(rawTransaction)));
     const payment = parseEvmTransferMessage({
-      type: EVM_CHAT_MESSAGE_TYPE, version: 1, chainId: network.chainId, transactionHash,
+      type: EVM_CHAT_MESSAGE_TYPE, version: 1, chainId: network.chainId, networkId: network.id, transactionHash,
       from: prepared.validation.from, to: prepared.validation.recipient,
       assetKind: asset.contractAddress ? 'erc20' : 'native', contractAddress: asset.contractAddress || null,
       rawAmount: prepared.validation.amountRaw.toString(), decimals: asset.tokenDecimals, symbol: asset.tokenSymbol,
@@ -2231,6 +2231,7 @@ class EvmAssetsController {
         return this.confirmTransfer(prepared.duplicatePaymentWarning ? `${prepared.duplicatePaymentWarning}\n\n${text}` : text, prepared);
       },
       getManagedRpcUrl: (network) => this.discovery.getRpcUrl(network.id),
+      getNativeCurrency: (network) => this.discovery.getNativeCurrency(network),
       savePayment: (record, account) => this.savePayment(record, account),
       saveSubmission: (record, account) => this.saveSubmission(record, account),
       preparePaymentMessage: (record, account) => this.preparePaymentMessage(record, account),
@@ -2347,9 +2348,6 @@ class EvmAssetsController {
   }
   async sendTransfer({ networkId, assetKey, recipient, recipientLabel = null, amount, chat, beforeBroadcast }) {
     const { walletNetwork, asset } = this.findAsset(networkId, assetKey, { evmOnly: true });
-    if (chat && !this.transactions.paymentNetwork(walletNetwork.chainId)) {
-      throw new Error('Chat payments are not supported on this network yet.');
-    }
     return this.transactions.send({
       network: walletNetwork,
       asset,
@@ -2491,7 +2489,8 @@ class EvmAssetsController {
           if (rawHash !== record.payment.transactionHash) throw new Error('Saved transaction does not match the payment hash.');
           if (record.username && record.messageState === 'ready') await this.preparePaymentMessage(record, account);
           if (this.getAccount() !== account) return;
-          await this.transactions.broadcast(this.transactions.outgoingNetwork(record), record, account);
+          const network = { id: record.payment.networkId, chainId: record.payment.chainId };
+          await this.transactions.broadcast(network, record, account);
         } else {
           record.assetState = state === 'settled' ? 'confirmed' : state;
           record.broadcastState = 'acknowledged';

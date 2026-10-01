@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MMDD.HHmm like 2025.0125.1005
-const version = 'e'
+const version = 'g'
 const BOOT_SPLASH_HANDOFF_MS = 1000;
 const BOOT_SPLASH_FRAME_TIMEOUT_MS = 100;
 const BOOT_SPLASH_IMAGE_TIMEOUT_MS = 2000;
@@ -21413,10 +21413,6 @@ class ChatModal {
 
     // Set active chat address early so async refreshes target the correct chat.
     this.address = address;
-    for (const message of myData.contacts[address]?.messages || []) {
-      if (message.type === EVM_CHAT_MESSAGE_TYPE) queueEvmPaymentMessage(message, myAccount);
-    }
-    void checkEvmPayments();
 
     // clear message input
     this.messageInput.value = '';
@@ -23327,10 +23323,13 @@ class ChatModal {
         const payment = parseEvmTransferMessage(item.payment);
         if (!payment) break;
         const verified = item.paymentVerified || 'unchecked';
+        const walletNetwork = evmAssets.getNetwork(payment.networkId);
+        const networkName = walletNetwork?.id === payment.networkId && walletNetwork.chainId === payment.chainId
+          ? walletNetwork.name : `EVM chain ${payment.chainId}`;
         messageTextHTML = `
           <div class="intents-payment-message evm-payment-message" data-verified="${escapeHtml(verified)}" data-evm-payment="${escapeHtml(evmPaymentId(payment))}">
             <div class="intents-payment-amount">${item.my ? '−' : '+'}${escapeHtml(evmPaymentAmount(payment))} ${escapeHtml(payment.symbol)}</div>
-            <div class="intents-payment-chain">${escapeHtml(evmAssets.transactions.paymentNetwork(payment.chainId)?.name || `EVM chain ${payment.chainId}`)}</div>
+            <div class="intents-payment-chain">${escapeHtml(networkName)}</div>
             ${payment.contractAddress ? `<div class="intents-payment-chain" style="overflow-wrap:anywhere">Token: ${escapeHtml(payment.contractAddress)}</div>` : ''}
             ${payment.note ? `<div class="intents-payment-note">${escapeHtml(payment.note)}</div>` : ''}
             <div class="intents-payment-verified">${escapeHtml(paymentStatusLabel(verified))}</div>
