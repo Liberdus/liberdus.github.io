@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MMDD.HHmm like 2025.0125.1005
-const version = 'h'
+const version = 'i'
 const BOOT_SPLASH_HANDOFF_MS = 1000;
 const BOOT_SPLASH_FRAME_TIMEOUT_MS = 100;
 const BOOT_SPLASH_IMAGE_TIMEOUT_MS = 2000;
@@ -22710,7 +22710,6 @@ class ChatModal {
     const toll = required === 0 ? 0n : getEffectiveTollLibWei(normalizeTollToLibWei(recipient.data.toll, recipient.data.tollUnit));
     const totalRequired = fee + toll;
     const available = BigInt(balanceInfo.balance);
-    if (toll < 0n || fee < 0n || available < 0n) throw new Error('Invalid LIB balance or message cost.');
     if (available < totalRequired) {
       throw new Error(`Not enough LIB for the chat message. Required: ${big2str(totalRequired, 18)} LIB; available: ${big2str(available, 18)} LIB; add ${big2str(totalRequired - available, 18)} LIB.`);
     }
