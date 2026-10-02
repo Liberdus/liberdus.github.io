@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MMDD.HHmm like 2025.0125.1005
-const version = 'i'
+const version = 'j'
 const BOOT_SPLASH_HANDOFF_MS = 1000;
 const BOOT_SPLASH_FRAME_TIMEOUT_MS = 100;
 const BOOT_SPLASH_IMAGE_TIMEOUT_MS = 2000;
@@ -208,17 +208,12 @@ import {
   CHAT_REACTION_SHEET_RECENT_CATEGORY_KEY,
 } from './data/emoji-picker-data.js';
 
-import {
-  evmAssets,
-  EVM_CHAT_MESSAGE_TYPE,
-  parseEvmTransferMessage,
-  evmPaymentId,
-  evmPaymentAmount,
-} from './evm-assets.js';
+import { evmAssets, EVM_CHAT_MESSAGE_TYPE, parseEvmTransferMessage, evmPaymentId, evmPaymentAmount } from './evm-assets.js';
 import {
   formatDisplayAmount,
   multichain,
   INTENTS_CHAT_MESSAGE_TYPE,
+  buildTransferMessage,
   paymentStatusLabel,
   parseTransferMessage,
   verifyTransferClaim,
@@ -494,7 +489,6 @@ function newDataRecord(myAccount) {
       ],
       history: [],
     },
-    evmPayments: [], // External transfers and their chat receipt recovery records
     pending: [], // Array to track pending transactions
     state: {
       unread: 0,
@@ -517,7 +511,6 @@ function newDataRecord(myAccount) {
 function clearMyData() {
   myData = null;
   myAccount = null;
-  stopEvmPaymentChecks();
   evmAssets.reset();
   multichain.reset();
   daoRepo.reset();
@@ -12314,195 +12307,71 @@ function restorePendingMessageEdit(pendingTxid, contactAddress, editPending) {
  */
 const intentsPaymentVerifications = new Map();
 
-const EVM_CHECK_LIMIT = 20;
-const EVM_RECHECK_MS = 5 * 60_000;
-let evmPaymentCheckSession = null;
+// Intents whose receipt is being sent right now, so a double-tapped Retry
+// cannot sign and pay for two messages.
+const intentsReceiptsInFlight = new Set();
 
-function stopEvmPaymentChecks() {
-  evmPaymentCheckSession = null;
-  evmAssets.transactions.paymentEvidence.clear();
-}
+// Bubbles whose answer can still change: not yet asked, still settling, or
+// not answerable last time.
+const UNRESOLVED_PAYMENT_BUBBLES = ['unchecked', 'pending', 'unverifiable']
+  .map((state) => `.intents-payment-message[data-verified="${state}"]`).join(', ');
 
-function evmPaymentMessages(record, account) {
-  const own = `0x${normalizeAddress(account.keys.address)}`;
-  const address = normalizeAddress(record.payment.from === own ? record.payment.to : record.payment.from);
-  return (myData.contacts[address]?.messages || []).filter((message) => !message.deleted
-    && message.type === EVM_CHAT_MESSAGE_TYPE && stringify(message.payment) === stringify(record.payment)
-    && message.my === (record.payment.from === own));
-}
+// While a payment in the open chat is unresolved, look again. An intent
+// settles or misses its two-minute deadline by itself, and the card should
+// say so while the person is watching, not after they leave and come back.
+// Backs off 4s, 8s ... to a minute: a pending intent is answered within
+// about two minutes, and an outage is not hammered.
+const PAYMENT_POLL_FIRST_MS = 4_000;
+const PAYMENT_POLL_MAX_MS = 60_000;
+const paymentPoll = { timer: null, delay: PAYMENT_POLL_FIRST_MS, running: null, again: false };
 
-// Background status updates must not interrupt reading another chat or older messages.
-function refreshEvmPaymentChat(messages) {
-  if (!chatModal.isActive()) return;
-  const contact = myData.contacts[chatModal.address];
-  if (!messages.some((message) => contact?.messages.includes(message))) return;
-  const scrollTop = chatModal.messagesContainer.scrollTop;
-  chatModal.appendChatModal(false, true);
-  chatModal.messagesContainer.scrollTop = scrollTop;
-}
-
-// The normal Liberdus pending checker owns announcement outcomes. Match the
-// current attempt so a late result cannot change a newly retried message.
-function settleEvmPaymentMessage(txid, delivered) {
-  const record = loadEvmPayments().find((item) => item.kind === 'outgoing' && item.attempt?.txid === txid);
-  if (!record || record.messageState === 'delivered') return;
-  const messages = evmPaymentMessages(record, myAccount);
-  if (!delivered && messages.some((message) => message.paymentMessageConfirmed)) return;
-  record.messageState = delivered ? 'delivered' : 'rejected';
-  record.checkAttempts = 0;
-  record.nextCheckAt = 0;
-  for (const message of messages) {
-    message.status = delivered ? 'sent' : 'failed';
-    if (delivered) message.paymentMessageConfirmed = true;
+/**
+ * Check the payment bubbles on screen, then keep checking the unresolved ones.
+ * A render starts the backoff over; overlapping calls share one pass.
+ */
+function verifyVisibleChatPayments({ poll = false } = {}) {
+  clearTimeout(paymentPoll.timer);
+  paymentPoll.timer = null;
+  if (!poll) paymentPoll.delay = PAYMENT_POLL_FIRST_MS;
+  if (paymentPoll.running) {
+    paymentPoll.again = true;
+    return paymentPoll.running;
   }
-  saveEvmPayment(record);
-  refreshEvmPaymentChat(messages);
-  chatsScreen.updateChatList();
-  if (evmAssets.assetsModal.isActive()) evmAssets.assetsModal.renderRecovery();
+  paymentPoll.running = (async () => {
+    try {
+      do {
+        paymentPoll.again = false;
+        await verifyPaymentBubbles();
+      } while (paymentPoll.again);
+    } finally {
+      paymentPoll.running = null;
+      schedulePaymentPoll();
+    }
+  })();
+  return paymentPoll.running;
 }
 
-async function recheckEvmPayment(payment) {
-  evmAssets.transactions.paymentEvidence.clear();
-  const record = loadEvmPayments().find((item) => stringify(item.payment) === stringify(payment))
-    || { kind: 'verification', payment, assetState: 'unknown', createdAt: Date.now() };
-  record.checkAttempts = 0;
-  record.nextCheckAt = 0;
-  saveEvmPayment(record);
-  await checkEvmPayments();
+function paymentPollWanted() {
+  return chatModal.isActive() && document.visibilityState !== 'hidden'
+    && document.querySelector(UNRESOLVED_PAYMENT_BUBBLES) !== null;
 }
 
-// The existing five-second app heartbeat schedules this queue independently of
-// Liberdus pending. No chat modal owns a timer or a verification request.
-async function checkEvmPayments() {
-  if (!myAccount || !isOnline || document.visibilityState === 'hidden' || evmAssets.sending) return;
-  if (evmPaymentCheckSession?.account !== myAccount) {
-    stopEvmPaymentChecks();
-    evmPaymentCheckSession = { account: myAccount, running: false };
-  }
-  const session = evmPaymentCheckSession;
-  if (session.running) return;
-  session.running = true;
-  const current = () => evmPaymentCheckSession === session && myAccount === session.account
-    && isOnline && document.visibilityState !== 'hidden' && !evmAssets.sending;
-  let refreshBalances = false;
-  const changedMessages = [];
-  try {
-    const due = loadEvmPayments().filter((record) => record.broadcastState !== 'rejected'
-      && record.verification !== 'reverted'
-      && (record.checkAttempts || 0) < EVM_CHECK_LIMIT
-      && (record.nextCheckAt || 0) <= Date.now()).sort((a, b) => (a.nextCheckAt || 0) - (b.nextCheckAt || 0)).slice(0, 4);
-    await Promise.all(due.map(async (record) => {
-      if (!current()) return;
-      const recordId = evmPaymentRecordId(record);
-      if (record.kind === 'verification' && !evmPaymentMessages(record, session.account).length) {
-        removeEvmPayment(record);
-        return;
-      }
-      const checkedRecord = stringify(record);
-      // A completed asset does not need more EVM RPC calls while its chat is unresolved.
-      let state;
-      if (record.kind === 'verification') {
-        state = await evmAssets.transactions.verifyPayment(record.payment, record.payment.from, record.payment.to);
-      } else if (record.assetState === 'confirmed') {
-        state = 'settled';
-      } else if (record.assetState === 'reverted') {
-        state = 'reverted';
-      } else {
-        state = await evmAssets.transactions.verifyOutgoingPayment(record);
-      }
-      if (!current()) return;
-      // Do not apply a stale result to an operation changed while RPC was in flight.
-      const latest = loadEvmPayments().find((item) => evmPaymentRecordId(item) === recordId);
-      if (!latest || stringify(latest) !== checkedRecord) return;
-      record = latest;
-      record.checkedAt = Date.now();
-      record.checkAttempts = (record.checkAttempts || 0) + 1;
-      record.nextCheckAt = Date.now() + Math.min(30_000, 5000 * 2 ** Math.min(record.checkAttempts - 1, 3));
-      // A consumed nonce releases submission blocking, but proves no outcome
-      // for this hash. Keep the record and show the card as unverified.
-      if (state === 'nonce_used') record.broadcastState = 'nonce_used';
-      record.verification = state === 'nonce_used' ? 'unverifiable' : state;
-      const assetState = state === 'settled' ? 'confirmed' : state === 'reverted' ? 'reverted'
-        : state === 'pending' ? 'pending' : 'unknown';
-      if (record.kind === 'outgoing' && record.assetState !== assetState && ['confirmed', 'reverted'].includes(assetState)) {
-        refreshBalances = true;
-      }
-      record.assetState = assetState;
-      if (record.kind === 'outgoing' && ['pending', 'settled', 'reverted'].includes(state)) {
-        record.broadcastState = 'acknowledged';
-        delete record.broadcastError;
-        if (state !== 'pending') delete record.rawTransaction;
-        // An announcement prepared before a failed broadcast was never injected.
-        if (state === 'reverted' && record.messageState === 'ready') {
-          record.messageState = 'abandoned';
-        }
-      }
-      const messages = evmPaymentMessages(record, session.account);
-      const verified = state === 'reverted' ? 'failed' : record.verification;
-      for (const message of messages) {
-        if (message.paymentVerified !== verified || (message.paymentReverted === true) !== (state === 'reverted')) {
-          changedMessages.push(message);
-        }
-        message.paymentVerified = verified;
-        message.paymentReverted = state === 'reverted';
-        message.paymentCheckedAt = record.checkedAt;
-      }
-      if (messages.some((message) => message.my && message.paymentMessageConfirmed)
-        && record.kind === 'outgoing') record.messageState = 'delivered';
-      const terminal = ['settled', 'reverted', 'failed'].includes(state);
-      if (terminal && record.kind === 'verification') {
-        removeEvmPayment(record);
-        return;
-      }
-      // Keep failed transfers for form restoration until the user dismisses them.
-      if (state === 'reverted') {
-        if (record.notifiedAssetState !== 'reverted') {
-          showToast(`EVM transfer reverted: ${record.payment.transactionHash}`, 0, 'error');
-          record.notifiedAssetState = 'reverted';
-        }
-        saveEvmPayment(record);
-        return;
-      }
-      const operationFinished = state === 'settled'
-        && ['none', 'delivered', 'abandoned'].includes(record.messageState);
-      if (!operationFinished) {
-        saveEvmPayment(record);
-        return;
-      }
-
-      if (!record.username && record.notifiedAssetState !== record.assetState) {
-        showToast(
-          `EVM transfer ${record.assetState}: ${record.payment.transactionHash}`,
-          state === 'reverted' ? 0 : 5000,
-          state === 'reverted' ? 'error' : 'info',
-        );
-      }
-      removeEvmPayment(record);
-    }));
-    if (!current()) return;
-    if (!due.length) return;
-    saveState();
-    refreshEvmPaymentChat(changedMessages);
-    chatsScreen.updateChatList();
-    // Completion is independent of portfolio availability or refresh speed.
-    if (refreshBalances) void evmAssets.refresh({ force: true }).catch(() => {});
-    if (evmAssets.assetsModal?.modal?.classList.contains('active')) evmAssets.assetsModal.renderRecovery();
-  } catch (error) {
-    console.warn('EVM payment verification interrupted:', error.message);
-  } finally {
-    session.running = false;
-  }
+function schedulePaymentPoll() {
+  if (!paymentPollWanted()) return;
+  paymentPoll.timer = setTimeout(() => {
+    paymentPoll.timer = null;
+    if (paymentPollWanted()) void verifyVisibleChatPayments({ poll: true });
+  }, paymentPoll.delay);
+  paymentPoll.delay = Math.min(paymentPoll.delay * 2, PAYMENT_POLL_MAX_MS);
 }
 
+// A hidden tab stops polling at its next turn; coming back looks at once.
 document.addEventListener('visibilitychange', () => {
-  if (document.visibilityState === 'hidden') stopEvmPaymentChecks();
-  else void checkEvmPayments();
+  if (document.visibilityState === 'visible' && chatModal.isActive()) void verifyVisibleChatPayments();
 });
 
-async function verifyVisibleChatPayments() {
-  const bubbles = document.querySelectorAll(
-    '.intents-payment-message[data-verified="unchecked"], .intents-payment-message[data-verified="pending"]'
-  );
+async function verifyPaymentBubbles() {
+  const bubbles = document.querySelectorAll(UNRESOLVED_PAYMENT_BUBBLES);
 
   for (const bubble of bubbles) {
     const intentHash = bubble.dataset.intentHash;
@@ -12511,14 +12380,18 @@ async function verifyVisibleChatPayments() {
     // The whole claim, from the stored message: the check compares what was
     // claimed -- token, amount, the two sides -- with what the verifier logged.
     const found = findPaymentMessage(intentHash);
-    if (!found || found.message.my) continue;
+    if (!found) continue;
 
+    // Our own payments too: publishing an intent is not proof it settled, and
+    // one still in flight when its receipt went can miss its deadline.
+    const me = intentsAccountIdForAddress(myAccount?.keys?.address);
+    const them = intentsAccountIdForAddress(found.contact.address);
     let result = intentsPaymentVerifications.get(intentHash);
     if (!result || result.state === 'pending' || result.state === 'unverifiable') {
       result = await verifyTransferClaim(found.message.payment, {
         sentAt,
-        expectedFrom: intentsAccountIdForAddress(found.contact.address),
-        expectedTo: intentsAccountIdForAddress(myAccount?.keys?.address),
+        expectedFrom: found.message.my ? me : them,
+        expectedTo: found.message.my ? them : me,
       });
       if (RESTING_PAYMENT_STATES.has(result.state)) {
         intentsPaymentVerifications.set(intentHash, result);
@@ -12708,7 +12581,6 @@ async function processChats(chats, keys) {
   const messageQueryTimestamp = Math.max(0, timestamp+1);
   let hasAnyTransfer = false;
   let needsUpcomingCallsUiRefresh = false;
-  let syncedEvmPayment = false;
   const currentUserAddress = normalizeAddress(keys.address);
 
   for (let sender in chats) {
@@ -12736,7 +12608,6 @@ async function processChats(chats, keys) {
       let didChangeReactionPreview = false;
       let didApplyStatusChange = false;
       let needsStatusChatRefresh = false;
-      let syncedOwnEvmPayment = false;
       let myStatusUpdate = null;
       let contactStatusUpdate = null;
       const touchedReactionTargetTxids = new Set();
@@ -13218,22 +13089,6 @@ async function processChats(chats, keys) {
               continue
             }
           }
-          if (payload.type === EVM_CHAT_MESSAGE_TYPE) {
-            // A queried message proves Liberdus delivery, not EVM settlement.
-            payload.paymentMessageConfirmed = true;
-            payload.status = 'sent';
-            syncedEvmPayment = true;
-            syncedOwnEvmPayment ||= mine;
-            const existing = contact.messages.find((message) => message.type === EVM_CHAT_MESSAGE_TYPE
-              && message.my === mine && stringify(message.payment) === stringify(payload.payment));
-            if (existing) {
-              existing.paymentMessageConfirmed = true;
-              existing.status = 'sent';
-              existing.txid = txidHex;
-              queueEvmPaymentMessage(existing);
-              continue;
-            }
-          }
           //  skip if this tx was processed before and is already in contact.messages;
           //    messages are the same if the messages[x].sent_timestamp is the same as the tx.timestamp,
           //    and messages[x].my is false and messages[x].message == payload.message
@@ -13247,6 +13102,20 @@ async function processChats(chats, keys) {
           if (alreadyExists) {
             //console.log(`Skipping already existing message: ${payload.sent_timestamp}`);
             continue; // Skip to the next message
+          }
+          // One card per payment. A receipt retried after a lost response can
+          // land twice under two txids; the second says nothing new. For our
+          // own card it is proof the receipt arrived after all.
+          if (payload.type === INTENTS_CHAT_MESSAGE_TYPE) {
+            const card = contact.messages.find((message) => message.type === INTENTS_CHAT_MESSAGE_TYPE
+              && message.my === mine && message.payment?.intentHash === payload.payment.intentHash);
+            if (card) {
+              if (mine && card.status === 'failed') {
+                card.status = 'sent';
+                needsStatusChatRefresh = true;
+              }
+              continue;
+            }
           }
 
           //console.log('contact.message', contact.messages)
@@ -13284,7 +13153,6 @@ async function processChats(chats, keys) {
           }
           
           insertSorted(contact.messages, payload, 'timestamp');
-          if (payload.type === EVM_CHAT_MESSAGE_TYPE) queueEvmPaymentMessage(payload);
           if (payload.type === 'call' && shouldRefreshUpcomingCallsUiForCallTime(payload.callTime)) {
             needsUpcomingCallsUiRefresh = true;
           }
@@ -13541,11 +13409,7 @@ async function processChats(chats, keys) {
         chatsScreen.updateChatList();
       }
 
-      if (syncedOwnEvmPayment) {
-        syncChatLatestActivityTimestamp(from, contact);
-        if (inActiveChatWithSender) chatModal.appendChatModal();
-      }
-      if ((didApplyStatusChange || syncedOwnEvmPayment) && chatsScreen.isActive()) {
+      if (didApplyStatusChange && chatsScreen.isActive()) {
         chatsScreen.updateChatList();
       }
 
@@ -13599,8 +13463,6 @@ async function processChats(chats, keys) {
     // Update the timestamp
     myAccount.chatTimestamp = newTimestamp;
   }
-  // Save queried messages and their verification work together.
-  if (syncedEvmPayment) saveState();
 }
 
 /**
@@ -13927,8 +13789,7 @@ async function refreshNetworkParamsOnTxFeeMismatch(reason) {
  * @param {string} txid - The transaction ID
  * @returns {Promise<Object>} The response from the injectTx call
  */
-async function injectTx(tx, txid, expectedAccount = null) {
-  if (expectedAccount && myAccount !== expectedAccount) throw new Error('Account changed before submission.');
+async function injectTx(tx, txid) {
   if (!isOnline) {
     return null;
   }
@@ -13997,8 +13858,6 @@ async function injectTx(tx, txid, expectedAccount = null) {
       data.result.reason = normalizedReason;
     }
 
-    if (expectedAccount && myAccount !== expectedAccount) return data;
-
     if (normalizedSuccess === true) {
       const pendingTxData = {
         txid: txid,
@@ -14056,7 +13915,6 @@ async function injectTx(tx, txid, expectedAccount = null) {
         return data;
       }
       showToast(toastMessage, 0, feeMismatchStatus.detected ? 'warning' : 'error');
-      data.toastAlreadyShown = true;
     }
     return data;
   } catch (error) {
@@ -14070,7 +13928,6 @@ async function injectTx(tx, txid, expectedAccount = null) {
     const errorReason = typeof error === 'string' ? error : (error?.message || String(error) || 'inject_failed');
     return {
       result: { success: false, reason: errorReason },
-      transportFailure: true,
       txid,
       toastAlreadyShown: true,
     };
@@ -20959,14 +20816,9 @@ class ChatModal {
     window.addEventListener('resize', () => {
       const currentHeight = window.innerHeight;
       const heightDifference = this.initialViewportHeight - currentHeight;
-      const keyboardPossible = (isMobile() || isIOS()) && document.activeElement === this.messageInput;
-
-      // Window resizing and docked desktop DevTools are not a mobile keyboard.
-      if (!keyboardPossible) {
-        this.isKeyboardVisible = false;
-        this.initialViewportHeight = currentHeight;
-        this.unlockBackgroundScroll();
-      } else if (heightDifference > 150) { // 150px threshold for keyboard detection
+      
+      // If viewport height decreased significantly, keyboard is likely open
+      if (heightDifference > 150) { // 150px threshold for keyboard detection
         this.isKeyboardVisible = true;
         this.lockBackgroundScroll();
       } else if (heightDifference < 50) { // If height increased or stayed similar, keyboard is likely closed
@@ -21001,7 +20853,6 @@ class ChatModal {
 
     // Unlock when input loses focus (keyboard likely dismissed)
     this.messageInput.addEventListener('blur', () => {
-      this.isKeyboardVisible = false;
       this.unlockBackgroundScroll();
     });
 
@@ -22677,217 +22528,155 @@ class ChatModal {
     }
   }
 
-  /** Check the actual recipient and live LIB funds before an external payment. */
-  async prepareEvmPaymentRecipient(resolution, account) {
-    const address = normalizeAddress(resolution.address);
-    if (!myData.contacts[address]) {
-      throw new Error('Add this username to Contacts before sending an EVM payment.');
-    }
-    const sorted = [longAddress(account.keys.address), longAddress(address)].sort();
-    const chatId = hashBytes(sorted.join(''));
-    const [recipientInfo, tollInfo, balanceInfo, paramsOk] = await Promise.all([
-      queryNetwork(`/account/${longAddress(address)}`),
-      queryNetwork(`/messages/${chatId}/toll`),
-      queryNetwork(`/account/${longAddress(account.keys.address)}/balance`),
-      getNetworkParams(true),
-    ]);
-    const recipient = recipientInfo?.account;
-    const fee = paramsOk ? getTransactionFeeWei({ allowNull: true }) : null;
-    if (!recipient?.data || balanceInfo?.balance == null || fee === null) {
-      throw new Error('Cannot check LIB balance, message fee, or recipient toll. Try again.');
-    }
-    const senderIsPrivate = account.private === true;
-    if ((recipient.private === true) !== senderIsPrivate) {
-      throw new Error(`${senderIsPrivate ? 'Private' : 'Public'} accounts can only send chat payments to other ${senderIsPrivate ? 'private' : 'public'} accounts.`);
-    }
-    const required = tollInfo?.error === 'No account with the given chatId'
-      ? 1 : tollInfo?.toll?.required?.[sorted.indexOf(longAddress(address))];
-    if (![0, 1, 2].includes(required)) throw new Error('Cannot check recipient toll. Try again.');
-    if (required === 2) throw new Error('This recipient has blocked messages.');
-    if (typeof recipient.data.toll !== 'bigint' || !['LIB', 'USD'].includes(recipient.data.tollUnit || 'LIB')) {
-      throw new Error('Cannot determine recipient toll.');
-    }
-    const toll = required === 0 ? 0n : getEffectiveTollLibWei(normalizeTollToLibWei(recipient.data.toll, recipient.data.tollUnit));
-    const totalRequired = fee + toll;
-    const available = BigInt(balanceInfo.balance);
-    if (available < totalRequired) {
-      throw new Error(`Not enough LIB for the chat message. Required: ${big2str(totalRequired, 18)} LIB; available: ${big2str(available, 18)} LIB; add ${big2str(totalRequired - available, 18)} LIB.`);
-    }
-    // Validate current encryption keys without mutating the saved contact.
-    const publicKey = recipient.publicKey;
-    const pqPublicKey = recipient.pqPublicKey;
-    if (!publicKey || !pqPublicKey || bin2hex(generateAddress(hex2bin(publicKey))) !== address) {
-      throw new Error('Cannot verify recipient encryption keys. Try again.');
-    }
-    dhkeyCombined(account.keys.secret, publicKey, pqPublicKey);
-    return {
-      address, username: resolution.username, toll: toll.toString(), totalRequired: totalRequired.toString(),
-      contactUpdates: {
-        public: publicKey, pqPublic: pqPublicKey, toll: recipient.data.toll,
-        tollUnit: recipient.data.tollUnit || 'LIB', tollRequiredToSend: required,
-      },
-    };
-  }
-
-  async prepareEvmPaymentMessage(record, account) {
-    if (record.kind !== 'outgoing') throw new Error('Only outgoing payments can send a chat message.');
-    const payment = parseEvmTransferMessage(record.payment);
-    if (!payment || payment.from !== `0x${normalizeAddress(account.keys.address)}`) throw new Error('Invalid payment sender.');
-    const prepared = await this.prepareEvmPaymentRecipient({ address: payment.to, username: record.username }, account);
-    const contact = myData.contacts[prepared.address];
-    if (!contact) throw new Error('Add this username to Contacts before sending an EVM payment.');
-    if (!contact.username && prepared.username) contact.username = prepared.username;
-    Object.assign(contact, prepared.contactUpdates);
-    const { payload, chatMessageObj, txid } = await this.buildEncryptedStructuredChatTx(
-      prepared.address, payment, BigInt(prepared.toll), account.keys,
-    );
-    // The last lookup or message builder can see a newer fee/toll than confirmation.
-    const messageCost = chatMessageObj.amount + chatMessageObj.fee;
-    if (messageCost > BigInt(record.messageCostLimit)) {
-      if (record.assetState !== 'confirmed') {
-        throw new Error('Chat message cost exceeds the approved amount. Review the message cost before sending.');
-      }
-      const approved = window.confirm(`The chat message fee and toll increased from ${big2str(BigInt(record.messageCostLimit), 18)} LIB to ${big2str(messageCost, 18)} LIB. Send the message at this cost? The EVM asset will not be sent again.`);
-      if (!approved) return false;
-      record.messageCostLimit = messageCost.toString();
-    }
-    record.attempt = { tx: chatMessageObj, txid, timestamp: payload.sent_timestamp };
-    record.messageState = 'ready';
-    saveEvmPayment(record);
-    return true;
-  }
-
-  async sendEvmPaymentMessage(record, account) {
-    if (record.kind !== 'outgoing') throw new Error('Only outgoing payments can send a chat message.');
-    if (['submitted', 'delivered', 'abandoned'].includes(record.messageState)) return;
-    if (record.cardCreated && record.assetState !== 'confirmed') {
-      throw new Error('Wait for the EVM transfer to be confirmed before retrying its message.');
-    }
-    if (record.broadcastState !== 'acknowledged' || !['pending', 'confirmed'].includes(record.assetState)) {
-      throw new Error('Confirm EVM submission before sending its chat message.');
-    }
-    const previousTxid = record.attempt.txid;
-    // Never replay a saved, possibly expired signature. A retry gets a new txid.
-    // Keep the old card available if refreshing keys, LIB balance or cost fails.
-    try {
-      if (!await this.prepareEvmPaymentMessage(record, account)) return false;
-    } catch (error) {
-      record.messageState = 'rejected';
-      this.upsertEvmPaymentCard(record);
-      saveEvmPayment(record);
-      throw error;
-    }
-    const { tx, txid } = record.attempt;
-    // Like normal chat retry, replace the old pending attempt only after preparation succeeds.
-    removePendingTransaction(previousTxid);
-    record.messageState = 'submitting';
-    record.checkAttempts = 0;
-    record.nextCheckAt = 0;
-    this.upsertEvmPaymentCard(record);
-    saveEvmPayment(record);
-    const response = await injectTx(tx, txid, account);
-    const current = loadEvmPayments().find((item) => evmPaymentRecordId(item) === evmPaymentRecordId(record));
-    record.messageState = current?.messageState === 'delivered' ? 'delivered'
-      : response?.result?.success === true ? 'submitted'
-      : response?.result?.success === false && !response.transportFailure ? 'rejected' : 'uncertain';
-    saveEvmPayment(record);
-    this.upsertEvmPaymentCard(record);
-    if (!['submitted', 'delivered'].includes(record.messageState)) {
-      const error = new Error(response?.result?.reason || 'Message submission could not be confirmed.');
-      error.toastAlreadyShown = response?.toastAlreadyShown === true;
-      throw error;
-    }
-    return true;
-  }
-
-  upsertEvmPaymentCard(record) {
-    const address = normalizeAddress(record.payment.to);
-    const contact = myData.contacts[address];
-    if (!contact) return;
-    const existing = contact.messages.find((message) => message.my && message.type === EVM_CHAT_MESSAGE_TYPE
-      && stringify(message.payment) === stringify(record.payment));
-    // Message sync can finish while injectTx is still waiting for a response.
-    if (existing?.paymentMessageConfirmed || existing?.deleted || (!existing && record.cardCreated)) return;
-    const message = existing || { message: '', type: EVM_CHAT_MESSAGE_TYPE, payment: record.payment, my: true, paymentVerified: 'unchecked' };
-    message.paymentMessageConfirmed = record.messageState === 'delivered';
-    message.txid = record.attempt.txid;
-    message.timestamp = record.attempt.timestamp;
-    message.sent_timestamp = message.timestamp;
-    message.status = ['rejected', 'uncertain'].includes(record.messageState) ? 'failed' : 'sent';
-    // A freshly signed retry moves the existing card to its new sent time.
-    if (existing) contact.messages.splice(contact.messages.indexOf(existing), 1);
-    insertSorted(contact.messages, message, 'timestamp');
-    record.cardCreated = true;
-    const chatIndex = myData.chats.findIndex((chat) => chat.address === address);
-    if (chatIndex >= 0) myData.chats.splice(chatIndex, 1);
-    insertSorted(myData.chats, { address, timestamp: message.timestamp, txid: message.txid }, 'timestamp');
-    if (this.isActive() && this.address === address) this.appendChatModal();
-    chatsScreen.updateChatList();
+  /**
+   * The LIB a chat receipt to this contact costs in toll, before the fee.
+   *
+   * The recipient's own toll, from their contact record -- not this.toll,
+   * which belongs to whichever conversation is open. A payment sent from the
+   * wallet may go to someone whose chat was never opened this session.
+   */
+  paymentMessageToll(address) {
+    const recipient = myData.contacts[address];
+    const { libWei: recipientTollLib } = this.formatTollDisplay(recipient.toll, recipient.tollUnit);
+    return recipient.tollRequiredToSend == 0
+      ? 0n
+      : getEffectiveTollLibWei(typeof recipientTollLib === 'bigint' ? recipientTollLib : 0n);
   }
 
   /**
-   * Send the chat receipt for a payment that has already settled on NEAR.
+   * Why a payment receipt could not reach this contact, or null when it can.
+   *
+   * Asked before any money moves. The transfer settles on NEAR and the
+   * receipt on Liberdus, so anything that would stop the receipt -- the
+   * other kind of account (public and private accounts cannot message each
+   * other), a block, missing keys, or too little LIB for the toll and fee --
+   * has to be found here, not after the money has gone. Throws when it
+   * cannot be checked; the caller refuses then too.
+   */
+  async checkPaymentRecipient(recipientAddress) {
+    const address = normalizeAddress(recipientAddress);
+    const contact = myData.contacts[address];
+    if (!contact) return 'Add this person to your contacts first.';
+    const name = getContactDisplayName(contact);
+
+    const accountRes = await queryNetwork(`/account/${longAddress(address)}`);
+    if (!accountRes?.account) throw new Error('Recipient account lookup failed');
+    const myIsPrivate = isPrivateAccount();
+    if ((accountRes.account.private === true) !== myIsPrivate) {
+      return `${myIsPrivate ? 'Private' : 'Public'} accounts can only send to other ${myIsPrivate ? 'private' : 'public'} accounts, so a payment cannot reach ${name} here.`;
+    }
+
+    await this.refreshRecipientTollState(address);
+    if (Number(contact.tollRequiredToSend) === 2) {
+      return `${name} is not accepting messages from you, so a payment cannot reach them here.`;
+    }
+    if (!(await ensureContactKeys(address)) || !contact.public || !contact.pqPublic) {
+      throw new Error('Recipient encryption keys are unavailable');
+    }
+
+    // Fresh where it can be; the saved balance otherwise, as any send uses.
+    await walletScreen.updateWalletBalances().catch((error) => console.warn('LIB balance refresh failed:', error));
+    const toll = this.paymentMessageToll(address);
+    if (!(await validateBalance(toll))) {
+      // validateBalance also refuses when it cannot learn the fee.
+      const fee = getTransactionFeeWei({ allowNull: true });
+      if (fee === null) throw new Error('Message fee unavailable');
+      const needed = formatDisplayAmount(big2str(toll + fee, 18), 6);
+      return `The chat message to ${name} costs ${needed} LIB with its fee, and you do not have enough LIB. Add LIB first.`;
+    }
+    return null;
+  }
+
+  /**
+   * Send, or send again, the chat receipt for a payment already made on NEAR.
    *
    * Called only after the transfer is published, so a failure here means the
    * money moved and the receipt did not. It throws rather than swallowing
    * that, so the caller can say exactly which of the two happened.
+   *
+   * The card in the conversation is the payment's record, one per intent. It
+   * is written before anything is submitted, and a receipt that fails --
+   * now, or found failed after a reload -- leaves it marked failed, where
+   * Retry sends the message again. Called again for the same intent this
+   * reuses that card, so it never adds a second, and never moves money.
    */
   async sendIntentsPaymentMessage(recipientAddress, messageObj) {
     const currentAddress = normalizeAddress(recipientAddress);
     const keys = myAccount.keys;
     assert(keys, 'Keys not found for sender address');
-
-    // The recipient's own toll, from their contact record -- not this.toll,
-    // which belongs to whichever conversation is open. A payment sent from the
-    // wallet may go to someone whose chat was never opened this session.
-    const recipient = myData.contacts[currentAddress];
-    const { libWei: recipientTollLib } = this.formatTollDisplay(recipient.toll, recipient.tollUnit);
-    const tollInLib =
-      recipient.tollRequiredToSend == 0
-        ? 0n
-        : getEffectiveTollLibWei(typeof recipientTollLib === 'bigint' ? recipientTollLib : 0n);
-    const sufficientBalance = await validateBalance(tollInLib);
-    if (!sufficientBalance) {
-      throw new Error('Not enough LIB for the message fee.');
-    }
-
-    const chatCryptoContext = await this.prepareEncryptedChatContext(currentAddress, keys);
-    const { payload, chatMessageObj, txid } = await this.buildEncryptedStructuredChatTx(
-      currentAddress,
-      messageObj,
-      tollInLib,
-      keys,
-      chatCryptoContext
-    );
-
     const contact = myData.contacts[currentAddress];
-    const newMessage = {
-      message: '',
-      type: INTENTS_CHAT_MESSAGE_TYPE,
-      payment: parseTransferMessage(messageObj),
-      // Our own payment is settled by definition: we published it ourselves.
-      paymentVerified: 'settled',
-      timestamp: payload.sent_timestamp,
-      sent_timestamp: payload.sent_timestamp,
-      my: true,
-      txid,
-      status: 'sent'
-    };
-    insertSorted(contact.messages, newMessage, 'timestamp');
+    assert(contact, `Contact not found for ${currentAddress}`);
+    const payment = parseTransferMessage(messageObj);
+    assert(payment, 'Invalid payment message');
 
-    const chatIndex = myData.chats.findIndex((chat) => chat.address === currentAddress);
-    if (chatIndex !== -1) {
-      myData.chats.splice(chatIndex, 1);
+    if (intentsReceiptsInFlight.has(payment.intentHash)) {
+      throw new Error('This payment message is already being sent.');
     }
-    insertSorted(myData.chats, {
-      address: currentAddress,
-      timestamp: newMessage.sent_timestamp,
-      txid
-    }, 'timestamp');
+    intentsReceiptsInFlight.add(payment.intentHash);
+    try {
+      await this.submitIntentsPaymentMessage(currentAddress, contact, payment, keys);
+    } finally {
+      intentsReceiptsInFlight.delete(payment.intentHash);
+    }
+  }
 
-    this.appendChatModal();
-    saveState();
-    chatsScreen.updateChatList();
+  /** The body of sendIntentsPaymentMessage, run once per intent at a time. */
+  async submitIntentsPaymentMessage(currentAddress, contact, payment, keys) {
+    let card = contact.messages.find((message) => message.my && !message.deleted
+      && message.type === INTENTS_CHAT_MESSAGE_TYPE && message.payment?.intentHash === payment.intentHash);
+    // Already sent, or on its way: nothing to retry.
+    if (card && card.status !== 'failed') return;
+
+    const placeCard = (txid, timestamp, status) => {
+      if (card) contact.messages.splice(contact.messages.indexOf(card), 1);
+      card = card || {
+        message: '',
+        type: INTENTS_CHAT_MESSAGE_TYPE,
+        payment,
+        // Checked like any other payment: publishing it is not proof it
+        // settled, and an intent past its deadline never will.
+        paymentVerified: 'unchecked',
+        my: true,
+      };
+      Object.assign(card, { txid, timestamp, sent_timestamp: timestamp, status });
+      insertSorted(contact.messages, card, 'timestamp');
+
+      const chatIndex = myData.chats.findIndex((chat) => chat.address === currentAddress);
+      if (chatIndex !== -1) {
+        myData.chats.splice(chatIndex, 1);
+      }
+      insertSorted(myData.chats, { address: currentAddress, timestamp, txid }, 'timestamp');
+      this.appendChatModal();
+      saveState();
+      chatsScreen.updateChatList();
+    };
+
+    let built;
+    try {
+      const tollInLib = this.paymentMessageToll(currentAddress);
+      const sufficientBalance = await validateBalance(tollInLib);
+      if (!sufficientBalance) {
+        throw new Error('Not enough LIB for the message fee.');
+      }
+      const chatCryptoContext = await this.prepareEncryptedChatContext(currentAddress, keys);
+      built = await this.buildEncryptedStructuredChatTx(
+        currentAddress,
+        // Rebuilt from the parsed claim, so a retry sends what the card shows.
+        buildTransferMessage(payment),
+        tollInLib,
+        keys,
+        chatCryptoContext
+      );
+    } catch (error) {
+      // Nothing was submitted. Keep a failed card -- under a local id when
+      // there was never a transaction -- so the receipt is not lost with
+      // this screen.
+      placeCard(card?.txid || bin2hex(generateRandomBytes(32)), card?.timestamp || getTransactionTimestamp(), 'failed');
+      throw error;
+    }
+
+    const { payload, chatMessageObj, txid } = built;
+    placeCard(txid, payload.sent_timestamp, 'sent');
 
     const response = await injectTx(chatMessageObj, txid);
     if (!response?.result?.success) {
@@ -22895,6 +22684,23 @@ class ChatModal {
       this.appendChatModal();
       saveState();
       throw new Error(response?.result?.reason || 'The chat receipt was rejected.');
+    }
+  }
+
+  /** Retry a payment card's failed receipt. Only the message; never the money. */
+  async retryIntentsPaymentMessage(address, message) {
+    // A second tap while the first is still going: that one will answer.
+    if (intentsReceiptsInFlight.has(message.payment?.intentHash)) return;
+    try {
+      const problem = await this.checkPaymentRecipient(address);
+      if (problem) {
+        showToast(problem, 0, 'error');
+        return;
+      }
+      await this.sendIntentsPaymentMessage(address, message.payment);
+    } catch (error) {
+      console.error('Payment receipt retry failed:', error);
+      showToast(`The payment message did not go through: ${error?.message || 'try again'}`, 0, 'error');
     }
   }
 
@@ -23310,15 +23116,10 @@ class ChatModal {
         const payment = parseEvmTransferMessage(item.payment);
         if (!payment) break;
         const verified = item.paymentVerified || 'unchecked';
-        const walletNetwork = evmAssets.getNetwork(payment.networkId);
-        const networkName = walletNetwork?.id === payment.networkId && walletNetwork.chainId === payment.chainId
-          ? walletNetwork.name : `EVM chain ${payment.chainId}`;
         messageTextHTML = `
           <div class="intents-payment-message evm-payment-message" data-verified="${escapeHtml(verified)}" data-evm-payment="${escapeHtml(evmPaymentId(payment))}">
             <div class="intents-payment-amount">${item.my ? '−' : '+'}${escapeHtml(evmPaymentAmount(payment))} ${escapeHtml(payment.symbol)}</div>
-            <div class="intents-payment-chain">${escapeHtml(networkName)}</div>
-            ${payment.contractAddress ? `<div class="intents-payment-chain" style="overflow-wrap:anywhere">Token: ${escapeHtml(payment.contractAddress)}</div>` : ''}
-            ${payment.note ? `<div class="intents-payment-note">${escapeHtml(payment.note)}</div>` : ''}
+            <div class="intents-payment-chain">EVM chain ${payment.chainId}</div>
             <div class="intents-payment-verified">${escapeHtml(paymentStatusLabel(verified))}</div>
           </div>`;
         break;
@@ -24694,7 +24495,8 @@ class ChatModal {
    * @returns {boolean} True if keyboard is likely open
    */
   isKeyboardOpen() {
-    return (isMobile() || isIOS()) && this.isKeyboardVisible;
+    // Use the tracked state from resize listener for more reliable detection
+    return this.isKeyboardVisible;
   }
 
   /**
@@ -24825,10 +24627,6 @@ class ChatModal {
     const messageRecord = this.getMessageRecordFromElement(messageEl);
     const isDeletedLocalOnly =
       messageEl.classList.contains('deleted-message') && isDeletedForMeOnly(messageRecord);
-    const evmMessage = messageRecord?.type === EVM_CHAT_MESSAGE_TYPE && !messageRecord.deleted;
-    const evmActions = evmMessage ? evmAssets.getPaymentActions(messageRecord.payment, messageRecord) : {};
-    this.contextMenu.querySelector('[data-action="evm-check"]').style.display = evmActions.checkAgain ? 'flex' : 'none';
-    this.contextMenu.querySelector('[data-action="evm-review"]').style.display = evmActions.retryTransfer ? 'flex' : 'none';
     
     const deleteOption = this.contextMenu.querySelector('[data-action="delete"]');
     if (deleteOption) deleteOption.style.display = 'flex';
@@ -24933,7 +24731,7 @@ class ChatModal {
         const isPayment = messageEl.classList.contains('payment-info');
         const hasMemo = !!messageEl.querySelector('.payment-memo');
         const isVoice = !!messageEl.querySelector('.voice-message');
-        const allowedType = messageRecord?.type !== EVM_CHAT_MESSAGE_TYPE && (!isPayment || hasMemo);
+        const allowedType = !isPayment || (isPayment && hasMemo);
         const show = isMine && !isDeleted && allowedType && !isVoice && !isFailedPayment && ageOk;
         editOption.style.display = show ? 'flex' : 'none';
       }
@@ -26228,23 +26026,6 @@ class ChatModal {
     }
   }
 
-  // Recheck eligibility on click; the background checker may have changed it.
-  handleEvmPaymentAction(action, messageEl) {
-    const message = this.getMessageRecordFromElement(messageEl);
-    if (message?.type !== EVM_CHAT_MESSAGE_TYPE || message.deleted) return;
-    const actions = evmAssets.getPaymentActions(message.payment, message);
-    if (action === 'evm-review' && actions.retryTransfer) {
-      void evmAssets.reviewPayment(message.payment, myData.contacts[this.address]?.username || `0x${this.address}`);
-    } else if (action === 'evm-retry' && actions.retryMessage) {
-      void evmAssets.recoverPayment(evmPaymentId(message.payment));
-    } else if (action === 'evm-check' && actions.checkAgain) {
-      void recheckEvmPayment(message.payment);
-      showToast('Status checks restarted.', 5000, 'info');
-    } else {
-      showToast('Payment status changed. Reopen the message menu for available actions.', 0, 'error');
-    }
-  }
-
   /**
    * Handles context menu option selection
    * @param {string} action - The action to perform
@@ -26254,10 +26035,6 @@ class ChatModal {
     if (!messageEl) return;
     
     switch (action) {
-      case 'evm-check':
-      case 'evm-review':
-        this.handleEvmPaymentAction(action, messageEl);
-        break;
       case 'save':
         void this.saveVoiceMessage(messageEl);
         break;
@@ -31136,13 +30913,12 @@ class FailedMessageMenu {
     // Check if this is a video call message and hide retry option
     const isVideoCall = !!messageEl.querySelector('.call-message');
     const retryOption = this.menu.querySelector('[data-action="retry"]');
-    const message = chatModal.getMessageRecordFromElement(messageEl);
-    const evmMessage = message?.type === EVM_CHAT_MESSAGE_TYPE;
-    const actions = evmMessage ? evmAssets.getPaymentActions(message.payment, message) : {};
-    retryOption.style.display = !isVideoCall && (!evmMessage || actions.retryMessage) ? 'flex' : 'none';
-    retryOption.querySelector('.context-menu-text').textContent = evmMessage ? 'Retry message' : 'Retry';
-    this.menu.querySelector('[data-action="evm-review"]').style.display = actions.retryTransfer ? 'flex' : 'none';
-    this.menu.querySelector('[data-action="evm-check"]').style.display = actions.checkAgain ? 'flex' : 'none';
+    
+    if (isVideoCall) {
+      retryOption.style.display = 'none';
+    } else {
+      retryOption.style.display = 'flex';
+    }
 
     // Use shared positioning utility
     chatModal.positionContextMenu(this.menu, messageEl);
@@ -31176,10 +30952,6 @@ class FailedMessageMenu {
     chatModal.clearPendingLocation();
 
     switch (action) {
-      case 'evm-review':
-      case 'evm-check':
-        chatModal.handleEvmPaymentAction(action, messageEl);
-        break;
       case 'retry':
         this.handleFailedMessageRetry(messageEl);
         break;
@@ -31203,8 +30975,10 @@ class FailedMessageMenu {
       ? contact.messages.find(msg => msg.txid === txid)
       : null;
 
-    if (message?.type === EVM_CHAT_MESSAGE_TYPE) {
-      chatModal.handleEvmPaymentAction('evm-retry', messageEl);
+    // A payment's receipt: send the message again from the card's own record.
+    // The money already moved, so this never goes near the transfer.
+    if (message?.type === INTENTS_CHAT_MESSAGE_TYPE && message.my && message.payment) {
+      void chatModal.retryIntentsPaymentMessage(chatModal.address, message);
       return;
     }
 
@@ -32831,8 +32605,6 @@ class SendAssetFormModal {
     this.networkGroup.hidden = mode !== 'evm' || hasFixedNetwork;
     this.assetSelectDropdown.closest('.form-group').hidden = hasFixedAsset;
     this.memoGroup.hidden = mode === 'evm';
-    document.getElementById('sendMemoLabel').textContent = mode === 'evm' ? 'Add a note (optional)' : 'Memo (Optional)';
-    this.memoInput.setCustomValidity('');
     this.memoValidation = {};
     this.memoByteCounter.textContent = '';
     this.memoByteCounter.style.display = 'none';
@@ -34347,12 +34119,6 @@ multichain.configure({
   getAccount: () => myAccount,
 });
 
-function getMessagePaymentContacts() {
-  return Object.values(myData?.contacts || {})
-    .filter((contact) => contact.address && !isFaucetAddress(contact.address))
-    .filter((contact) => contact.friend !== 0 && contact.public);
-}
-
 chatPaymentPanel.configure({
   getAccount: () => myAccount,
   onSent: (recipientAddress, messageObj) =>
@@ -34363,7 +34129,9 @@ chatPaymentPanel.configure({
   // never get the receipt. Recent conversations first.
   listContacts: () => {
     const recency = new Map((myData?.chats || []).map((chat, index) => [chat.address, index]));
-    return getMessagePaymentContacts()
+    return Object.values(myData?.contacts || {})
+      .filter((contact) => contact.address && !isFaucetAddress(contact.address))
+      .filter((contact) => contact.friend !== 0 && contact.public)
       .sort((a, b) => (recency.get(a.address) ?? Infinity) - (recency.get(b.address) ?? Infinity)
         || getContactDisplayName(a).localeCompare(getContactDisplayName(b)))
       .map((contact) => ({
@@ -34373,12 +34141,9 @@ chatPaymentPanel.configure({
       }));
   },
   renderAvatar: (address, size) => getContactAvatarHtml(myData.contacts[address] || address, size),
-  // The toll may be stale when the chat was never opened; refresh it, and
-  // say whether a message can reach them at all.
-  prepareRecipient: async (address) => {
-    await chatModal.refreshRecipientTollState(address);
-    return { blocked: Number(myData.contacts[address]?.tollRequiredToSend) === 2 };
-  },
+  // Whether the receipt can reach them and be paid for, checked fresh: the
+  // toll may be stale when the chat was never opened.
+  prepareRecipient: async (address) => ({ problem: await chatModal.checkPaymentRecipient(address) }),
 });
 
 // The asset screen's activity. Swaps and withdrawals this device placed are
@@ -34403,87 +34168,8 @@ intentsActivity.configure({
     }))),
 });
 
-function evmPaymentRecordId(record) {
-  return `${record.kind}:${stringify(record.payment)}`;
-}
-
-// A synced claim only grants permission to verify, never to send or retry assets.
-function queueEvmPaymentMessage(message) {
-  const payment = parseEvmTransferMessage(message.payment);
-  if (!payment || message.deleted) return;
-  const records = loadEvmPayments();
-  const claim = stringify(payment);
-  const existing = records.find((record) => stringify(record.payment) === claim);
-  if (!existing && ['settled', 'failed'].includes(message.paymentVerified)
-    && Date.now() - (message.paymentCheckedAt || 0) < EVM_RECHECK_MS) return;
-  const record = existing || { kind: 'verification', payment, assetState: 'unknown', createdAt: Date.now() };
-  if (Date.now() - (record.checkedAt || 0) >= EVM_RECHECK_MS) {
-    record.checkAttempts = 0;
-    record.nextCheckAt = 0;
-  }
-  if (record.kind === 'outgoing' && message.my && message.paymentMessageConfirmed) {
-    record.messageState = 'delivered';
-    // Delivery can arrive after the recovery checker paused. Allow final cleanup.
-    record.checkAttempts = 0;
-    record.nextCheckAt = 0;
-  }
-  saveEvmPayment(record);
-}
-
-// EVM recovery lives in myData and follows the normal account save lifecycle.
-function loadEvmPayments() {
-  const records = myData.evmPayments ?? [];
-  if (!Array.isArray(records) || records.some((record) => !['outgoing', 'verification'].includes(record?.kind)
-    || !parseEvmTransferMessage(record.payment))) {
-    throw new Error('Saved EVM payment records could not be read.');
-  }
-  // Async callers work on a snapshot, without changing the current record until saved.
-  return parse(stringify(records));
-}
-
-function saveEvmPayment(record) {
-  const records = myData.evmPayments ??= [];
-  const index = records.findIndex((item) => evmPaymentRecordId(item) === evmPaymentRecordId(record));
-  const saved = parse(stringify(record));
-  if (index < 0) records.push(saved);
-  else records[index] = saved;
-}
-
-// Submission responses own EVM progress, never the latest chat-delivery state.
-function saveEvmSubmission(record) {
-  const latest = loadEvmPayments().find((item) => evmPaymentRecordId(item) === evmPaymentRecordId(record));
-  if (!latest) throw new Error('Payment recovery was removed. Check the transaction hash before sending again.');
-  if (!['confirmed', 'reverted', 'rejected'].includes(latest.assetState)) {
-    latest.broadcastState = record.broadcastState;
-    latest.assetState = record.assetState;
-    latest.broadcastUncertain = record.broadcastUncertain;
-    latest.broadcastError = record.broadcastError;
-  }
-  if (record.notifiedAssetState) latest.notifiedAssetState = record.notifiedAssetState;
-  Object.assign(record, latest);
-  if (['confirmed', 'reverted', 'rejected'].includes(record.assetState)) delete record.rawTransaction;
-  saveEvmPayment(record);
-}
-
-function removeEvmPayment(record) {
-  myData.evmPayments = (myData.evmPayments ?? []).filter((item) => evmPaymentRecordId(item) !== evmPaymentRecordId(record));
-}
-
 evmAssets.configure({
   getAccount: () => myAccount,
-  findContact: (username) => getMessagePaymentContacts()
-    .find((contact) => normalizeUsername(contact.username || '') === username) || null,
-  prepareChatPayment: (resolution, account) => chatModal.prepareEvmPaymentRecipient(resolution, account),
-  preparePaymentMessage: (record, account) => chatModal.prepareEvmPaymentMessage(record, account),
-  sendChatPayment: (record, account) => chatModal.sendEvmPaymentMessage(record, account),
-  getPayments: loadEvmPayments,
-  savePayment: saveEvmPayment,
-  saveSubmission: saveEvmSubmission,
-  checkPayment: recheckEvmPayment,
-  dismissPayment: (record) => {
-    removeEvmPayment(record);
-    saveState();
-  },
   getLiberdusAsset: () => myData?.wallet?.assets?.find((asset) => isLibAsset(asset))
     || myData?.wallet?.assets?.[0]
     || null,
@@ -36557,7 +36243,6 @@ let checkPendingTransactionsPromise = null;
  * @returns {Promise<void>}
  */
 async function checkPendingTransactions() {
-  void checkEvmPayments();
   if (!checkPendingTransactionsPromise) {
     checkPendingTransactionsPromise = checkPendingTransactionsOnce()
       .finally(() => {
@@ -36572,7 +36257,6 @@ async function checkPendingTransactionsOnce() {
   if (!myData || !myAccount) {
     return;
   }
-  const account = myAccount;
 
   // initialize the pending array if it is not already initialized
   myData.pending ??= [];
@@ -36615,7 +36299,6 @@ async function checkPendingTransactionsOnce() {
       }
       //console.log(`DEBUG: txid ${txid} endpointPath: ${endpointPath}`);
       const res = await queryNetwork(endpointPath);
-      if (myAccount !== account) return;
       //console.log(`DEBUG: txid ${txid} res: ${JSON.stringify(res)}`);
       if (submittedts < thirtySecondsAgo && (res.transaction === null || Object.keys(res.transaction).length === 0)) {
         console.error(`DEBUG: txid ${txid} timed out, removing completely`);
@@ -36650,7 +36333,6 @@ async function checkPendingTransactionsOnce() {
           chatModal.refreshCurrentView(txid);
         }
         if (type === 'message') {
-          settleEvmPaymentMessage(txid, false);
           updateTransactionStatus(txid, pendingTxInfo.to, 'failed', type);
           chatModal.refreshCurrentView(txid);
           await chatsScreen.updateChatList();
@@ -36669,8 +36351,6 @@ async function checkPendingTransactionsOnce() {
           if (!removePendingTransaction(txid)) continue;
           didMutatePendingState = true;
         }
-
-        if (type === 'message') settleEvmPaymentMessage(txid, true);
 
         if (type === 'register') {
           pendingPromiseService.resolve(txid, {
@@ -36736,8 +36416,6 @@ async function checkPendingTransactionsOnce() {
           if (!removePendingTransaction(txid)) continue;
           didMutatePendingState = true;
         }
-
-        if (type === 'message') settleEvmPaymentMessage(txid, false);
 
         // Check for failure reason in the transaction receipt
         const failureReason = res?.transaction?.reason || 'Transaction failed';
@@ -36878,8 +36556,6 @@ function updateTransactionStatus(txid, toAddress, status, type) {
   if (contact) {
     const msgIndex = contact.messages.findIndex((msg) => msg.txid === txid);
     if (msgIndex !== -1) {
-      // A synced EVM announcement remains delivered even if a later receipt lookup times out.
-      if (contact.messages[msgIndex].type === EVM_CHAT_MESSAGE_TYPE && contact.messages[msgIndex].paymentMessageConfirmed) return;
       contact.messages[msgIndex].status = status;
     }
   }
