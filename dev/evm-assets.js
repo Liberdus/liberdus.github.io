@@ -1,10 +1,18 @@
 import {
+  base642bin,
+  bin2utf8,
+  bin2base64,
+  normalizeUnsignedFloat,
   BUTTON_COOLDOWN_MS,
   escapeHtml,
+  escapeHtmlAttribute,
+  normalizeHttpsUrl,
+  normalizeResourceUrl,
   normalizeUsername,
   openModal,
   utf82bin,
   withButtonCooldown,
+  QRImageDecoder,
 } from './lib.js';
 import { getPublicKey, signMessage } from './crypto.js';
 import keccak256 from './external/keccak256.js';
@@ -296,14 +304,6 @@ export async function signEvmTransaction(transaction, privateKeyValue) {
 
 const REQUIRED_NETWORKS = Object.freeze([
   Object.freeze({
-    id: 'liberdus',
-    name: 'Liberdus',
-    shortName: 'LIB',
-    chainId: 2220,
-    nativeSymbol: 'LIB',
-    source: 'liberdus',
-  }),
-  Object.freeze({
     id: 'ethereum',
     name: 'Ethereum',
     shortName: 'ETH',
@@ -362,32 +362,6 @@ function formatUnits(value, decimals = 18) {
   return `${whole}${fraction ? `.${fraction}` : ''}`;
 }
 
-function normalizeLiberdusAsset(asset) {
-  const tokenAmount = formatUnits(asset?.balance ?? 0n, 18);
-  const price = Number(asset?.price);
-  const tokenPriceUsd = Number.isFinite(price) && price >= 0 ? String(price) : null;
-  const tokenValueUsd = tokenPriceUsd === null
-    ? null
-    : String(Number(tokenAmount) * price);
-
-  return Object.freeze({
-    key: 'liberdus:native',
-    networkId: 'liberdus',
-    chainId: 2220,
-    contractAddress: asset?.contract || null,
-    tokenType: 'native',
-    tokenName: asset?.name || 'Liberdus',
-    tokenSymbol: asset?.symbol || 'LIB',
-    tokenPriceUsd,
-    tokenAmount,
-    tokenValueUsd,
-    tokenDecimals: 18,
-    logoUrl: asset?.img || './media/liberdus_logo_50.png',
-    source: 'liberdus',
-    walletAsset: asset || null,
-  });
-}
-
 function normalizeEvmToken(token, network) {
   const contractAddress = typeof token?.contractAddress === 'string'
     ? token.contractAddress
@@ -407,7 +381,6 @@ function normalizeEvmToken(token, network) {
     rawAmount: typeof token?.rawAmount === 'string' ? token.rawAmount : null,
     logoUrl: token?.logoUrl || (!contractAddress ? network.logoUrl : null),
     source: 'evm',
-    walletAsset: null,
   });
 }
 
@@ -465,7 +438,7 @@ function extraNetworkDefinitions(portfolio, tokens) {
     .sort((left, right) => left.name.localeCompare(right.name));
 }
 
-function createWalletNetworkCatalog({ liberdusAsset = null, portfolio = null } = {}) {
+function createWalletNetworkCatalog({ portfolio = null } = {}) {
   const portfolioTokens = Array.isArray(portfolio?.tokens) ? portfolio.tokens : [];
   const portfolioChainIds = new Set(
     (portfolio?.chains || []).map((chain) => chain.networkId),
@@ -476,30 +449,11 @@ function createWalletNetworkCatalog({ liberdusAsset = null, portfolio = null } =
   ];
 
   return Object.freeze(definitions.map((definition) => {
-    if (definition.id === 'liberdus') {
-      const asset = normalizeLiberdusAsset(liberdusAsset);
-      return Object.freeze({
-        ...definition,
-        connected: true,
-        totalValueUsd: asset.tokenValueUsd,
-        assets: Object.freeze([asset]),
-      });
-    }
-
     const assets = portfolioTokens
       .filter((token) => token.networkId === definition.id)
       .map((token) => normalizeEvmToken(token, definition));
     return makeNetwork(definition, assets, portfolioChainIds.has(definition.id));
   }));
-}
-
-function getWalletNetwork(catalog, networkId) {
-  return catalog.find((network) => network.id === networkId) || catalog[0] || null;
-}
-
-function getEvmWalletNetworks(catalog) {
-  if (!Array.isArray(catalog)) return Object.freeze([]);
-  return Object.freeze(catalog.filter((network) => network.source === 'evm'));
 }
 
 function calculateCatalogTotalUsd(catalog) {
@@ -644,15 +598,13 @@ export class LiberdusEvmRecipientResolver {
 class WalletDiscoveryService {
   constructor({
     getAccount = () => null,
-    getLiberdusAsset = () => null,
     cacheTtlMs = 5000,
     requestTimeoutMs = 15000,
   } = {}) {
-    if (typeof getAccount !== 'function' || typeof getLiberdusAsset !== 'function') {
-      throw new TypeError('Wallet discovery state providers must be functions');
+    if (typeof getAccount !== 'function') {
+      throw new TypeError('Wallet account provider must be a function');
     }
     this.getAccount = getAccount;
-    this.getLiberdusAsset = getLiberdusAsset;
     this.cacheTtlMs = cacheTtlMs;
     this.requestTimeoutMs = requestTimeoutMs;
     this.requestController = null;
@@ -672,7 +624,6 @@ class WalletDiscoveryService {
 
   rebuildCatalog() {
     this.catalog = createWalletNetworkCatalog({
-      liberdusAsset: this.getLiberdusAsset(),
       portfolio: this.portfolio,
     });
     return this.catalog;
@@ -682,13 +633,8 @@ class WalletDiscoveryService {
     return this.rebuildCatalog();
   }
 
-  getEvmCatalog() {
-    return getEvmWalletNetworks(this.getCatalog());
-  }
-
-  getTotalUsd({ evmOnly = false } = {}) {
-    const catalog = evmOnly ? this.getEvmCatalog() : this.getCatalog();
-    return calculateCatalogTotalUsd(catalog);
+  getTotalUsd() {
+    return calculateCatalogTotalUsd(this.getCatalog());
   }
 
   getStatus() {
@@ -700,7 +646,7 @@ class WalletDiscoveryService {
   }
 
   getNetwork(networkId) {
-    return getWalletNetwork(this.getCatalog(), networkId);
+    return this.getCatalog().find((network) => network.id === networkId) || null;
   }
 
   async getNativeCurrency({ id, chainId }) {
@@ -721,16 +667,8 @@ class WalletDiscoveryService {
     return { symbol: token.tokenSymbol.trim(), decimals: token.tokenDecimals };
   }
 
-  getSelectedAsset(networkId, select) {
-    const walletNetwork = this.getNetwork(networkId);
-    if (!walletNetwork) return null;
-    return walletNetwork.assets.find((asset) => asset.key === select?.value)
-      || walletNetwork.assets[0]
-      || null;
-  }
-
-  findAsset(networkId, assetKey, { evmOnly = false } = {}) {
-    const catalog = evmOnly ? this.getEvmCatalog() : this.getCatalog();
+  findAsset(networkId, assetKey) {
+    const catalog = this.getCatalog();
     const walletNetwork = catalog.find((network) => network.id === networkId) || null;
     const asset = walletNetwork?.assets.find((entry) => entry.key === assetKey) || null;
     return { walletNetwork, asset };
@@ -833,11 +771,11 @@ class WalletDiscoveryService {
     }
   }
 
-  populateNetworkSelect(select, { includeAll = false, selectedId = null, evmOnly = false } = {}) {
+  populateNetworkSelect(select, { includeAll = false, selectedId = null } = {}) {
     if (!select) return;
 
     const previousValue = selectedId || select.value;
-    const catalog = evmOnly ? this.getEvmCatalog() : this.getCatalog();
+    const catalog = this.getCatalog();
     const fragment = document.createDocumentFragment();
     if (includeAll) {
       const allOption = document.createElement('option');
@@ -857,26 +795,11 @@ class WalletDiscoveryService {
     const availableValues = new Set([...select.options].map((option) => option.value));
     select.value = availableValues.has(previousValue)
       ? previousValue
-      : (includeAll ? 'all' : (evmOnly ? (catalog[0]?.id || '') : 'liberdus'));
-  }
-
-  populateAssetSelect(select, networkId) {
-    if (!select) return;
-    const walletNetwork = this.getNetwork(networkId);
-    if (!walletNetwork) return;
-
-    const fragment = document.createDocumentFragment();
-    for (const asset of walletNetwork.assets) {
-      const option = document.createElement('option');
-      option.value = asset.key;
-      option.textContent = `${asset.tokenName} (${asset.tokenSymbol})`;
-      fragment.appendChild(option);
-    }
-    select.replaceChildren(fragment);
+      : (includeAll ? 'all' : (catalog[0]?.id || ''));
   }
 
   getConnectionText() {
-    const connectedNetworks = this.getEvmCatalog().filter((walletNetwork) => walletNetwork.connected);
+    const connectedNetworks = this.getCatalog().filter((walletNetwork) => walletNetwork.connected);
     if (this.status === 'loading') {
       return 'Connecting wallet networks…';
     }
@@ -1360,18 +1283,20 @@ export class EvmTransactionService {
     return null;
   }
 
-  async send({ network, asset, recipient, recipientLabel = null, amount, chat = null, beforeBroadcast = async () => {} }) {
+  async send({ network, asset, recipient, recipientLabel = null, amount, chat = null, beforeBroadcast = async () => {}, isCurrent = () => true }) {
     if (chat?.note && utf82bin(chat.note).length > EVM_NOTE_MAX_BYTES) throw new Error('Payment note exceeds 1000 bytes.');
     const prepared = await this.prepare({ network, asset, recipient, amount });
     prepared.recipientLabel = recipientLabel || prepared.validation.recipient;
     prepared.chat = chat;
+    if (!isCurrent()) return { status: 'cancelled', transactionHash: null };
     const confirmed = await this.confirmTransfer(
       this.confirmationText(prepared, amount, recipientLabel),
       prepared,
     );
-    if (!confirmed) return { status: 'cancelled', transactionHash: null };
+    if (!confirmed || !isCurrent()) return { status: 'cancelled', transactionHash: null };
 
     await beforeBroadcast();
+    if (!isCurrent()) return { status: 'cancelled', transactionHash: null };
     const rawTransaction = await signEvmTransaction(
       prepared.transaction,
       prepared.validation.privateKey,
@@ -1461,10 +1386,20 @@ function formatConnectedUsd(value) {
   });
 }
 
+function normalizeConnectedAssetLogoUrl(value) {
+  if (typeof value !== 'string') return '';
+  const candidate = value.trim();
+  if (candidate.startsWith('./')) {
+    const normalized = normalizeResourceUrl(candidate, window.location.href);
+    return normalized && new URL(normalized).origin === window.location.origin ? normalized : '';
+  }
+  return normalizeHttpsUrl(candidate);
+}
+
 function connectedAssetLogoMarkup(asset, walletNetwork) {
-  const logoUrl = typeof asset.logoUrl === 'string' ? asset.logoUrl : '';
-  if (/^(?:https:\/\/|\.\/)/.test(logoUrl)) {
-    return `<img src="${escapeHtml(logoUrl)}" alt="" class="connected-asset-logo-image">`;
+  const logoUrl = normalizeConnectedAssetLogoUrl(asset.logoUrl);
+  if (logoUrl) {
+    return `<img src="${escapeHtmlAttribute(logoUrl)}" alt="" class="connected-asset-logo-image">`;
   }
   return `<span class="connected-asset-logo-fallback">${escapeHtml(walletNetwork.shortName.slice(0, 3))}</span>`;
 }
@@ -1567,9 +1502,9 @@ class AssetsModal {
   }
 
   renderBalances() {
-    const totalUsd = this.controller.getTotalUsd({ evmOnly: true });
+    const totalUsd = this.controller.getTotalUsd();
     this.totalBalance.textContent = totalUsd === null ? 'N/A' : totalUsd.toFixed(2);
-    this.controller.populateNetworkSelect(this.networkSelect, { includeAll: true, evmOnly: true });
+    this.controller.populateNetworkSelect(this.networkSelect, { includeAll: true });
     this.connectionSummary.textContent = this.controller.getConnectionText();
     this.connectionSummary.dataset.status = this.controller.getStatus();
     this.render();
@@ -1703,14 +1638,12 @@ class AssetDetailsModal {
     document.getElementById('closeAssetDetailsModal').addEventListener('click', () => this.close());
     document.getElementById('assetDetailsSend').addEventListener('click', () => {
       this.controller.openContextualSend({
-        mode: 'evm',
         networkId: this.networkId,
         assetKey: this.assetKey,
       });
     });
     document.getElementById('assetDetailsReceive').addEventListener('click', () => {
       this.controller.openContextualReceive({
-        mode: 'evm',
         networkId: this.networkId,
         assetKey: this.assetKey,
       });
@@ -1719,7 +1652,7 @@ class AssetDetailsModal {
   }
 
   getSelection() {
-    return this.controller.findAsset(this.networkId, this.assetKey, { evmOnly: true });
+    return this.controller.findAsset(this.networkId, this.assetKey);
   }
 
   open(networkId, assetKey) {
@@ -1828,61 +1761,23 @@ export class EvmSendConfirmationModal {
 
   load() {
     if (this.loaded) return;
-    this.modal = document.getElementById('sendAssetConfirmModal');
-    this.details = this.modal?.querySelector('.confirmation-details');
-    this.recipient = document.getElementById('confirmRecipient');
-    this.amount = document.getElementById('confirmAmount');
-    this.amountUsd = document.getElementById('confirmAmountUSD');
-    this.asset = document.getElementById('confirmAsset');
-    this.memoGroup = document.getElementById('confirmMemoGroup');
-    this.confirmButton = document.getElementById('confirmSendButton');
-    this.cancelButton = document.getElementById('cancelSendButton');
-    this.closeButton = document.getElementById('closeSendAssetConfirmModal');
-    if (
-      !this.modal
-      || !this.details
-      || !this.recipient
-      || !this.amount
-      || !this.asset
-      || !this.confirmButton
-      || !this.cancelButton
-    ) {
-      return;
-    }
-
-    this.networkGroup = this.createDetailGroup(
-      'evmConfirmNetworkGroup',
-      'Network',
-      'evmConfirmNetwork',
-    );
-    this.feeGroup = this.createDetailGroup(
-      'evmConfirmFeeGroup',
-      'Maximum network fee',
-      'evmConfirmFee',
-    );
-    this.signingNotice = this.createSigningNotice();
-    this.networkValue = this.networkGroup.querySelector('.confirm-value');
-    this.feeValue = this.feeGroup.querySelector('.confirm-value');
-    this.feeUsd = document.getElementById('evmConfirmFeeUSD') || document.createElement('div');
-    this.feeUsd.id = 'evmConfirmFeeUSD';
-    this.feeUsd.className = 'confirm-value-secondary usd-equivalent';
-    this.feeGroup.appendChild(this.feeUsd);
-
-    this.confirmButton.addEventListener(
-      'click',
-      (event) => this.handleAction(event, true),
-      true,
-    );
-    this.cancelButton.addEventListener(
-      'click',
-      (event) => this.handleAction(event, false),
-      true,
-    );
-    this.closeButton?.addEventListener(
-      'click',
-      (event) => this.handleAction(event, false),
-      true,
-    );
+    this.modal = document.getElementById('evmSendConfirmModal');
+    this.recipient = document.getElementById('evmConfirmRecipient');
+    this.amount = document.getElementById('evmConfirmAmount');
+    this.amountUsd = document.getElementById('evmConfirmAmountUSD');
+    this.asset = document.getElementById('evmConfirmAsset');
+    this.memoGroup = document.getElementById('evmConfirmMemoGroup');
+    this.memo = document.getElementById('evmConfirmMemo');
+    this.confirmButton = document.getElementById('confirmEvmSendButton');
+    this.cancelButton = document.getElementById('cancelEvmSendButton');
+    this.closeButton = document.getElementById('closeEvmSendConfirmModal');
+    this.networkValue = document.getElementById('evmConfirmNetwork');
+    this.feeValue = document.getElementById('evmConfirmFee');
+    this.feeUsd = document.getElementById('evmConfirmFeeUSD');
+    this.signingNotice = document.getElementById('evmConfirmSigningNotice');
+    this.confirmButton.addEventListener('click', (event) => this.handleAction(event, true));
+    this.cancelButton.addEventListener('click', (event) => this.handleAction(event, false));
+    this.closeButton.addEventListener('click', (event) => this.handleAction(event, false));
 
     if (globalThis.MutationObserver) {
       this.modalObserver = new MutationObserver(() => {
@@ -1893,39 +1788,6 @@ export class EvmSendConfirmationModal {
       this.modalObserver.observe(this.modal, { attributes: true, attributeFilter: ['class'] });
     }
     this.loaded = true;
-  }
-
-  createDetailGroup(groupId, labelText, valueId) {
-    let group = document.getElementById(groupId);
-    if (group) return group;
-
-    group = document.createElement('div');
-    group.id = groupId;
-    group.className = 'form-group';
-    group.hidden = true;
-    const label = document.createElement('label');
-    label.textContent = labelText;
-    const value = document.createElement('div');
-    value.id = valueId;
-    value.className = 'confirm-value';
-    group.append(label, value);
-    this.details.appendChild(group);
-    return group;
-  }
-
-  createSigningNotice() {
-    let notice = document.getElementById('evmConfirmSigningNotice');
-    if (notice) return notice;
-
-    notice = document.createElement('div');
-    notice.id = 'evmConfirmSigningNotice';
-    notice.hidden = true;
-    notice.style.color = 'var(--secondary-text-color)';
-    notice.style.fontSize = 'var(--font-size-sm)';
-    notice.style.lineHeight = '1.4';
-    notice.style.padding = '4px 0';
-    this.details.appendChild(notice);
-    return notice;
   }
 
   getUsdEstimate(amountInUnits, rawPrice) {
@@ -1955,7 +1817,8 @@ export class EvmSendConfirmationModal {
     } = prepared;
     this.recipient.textContent = recipientLabel || validation.recipient;
     this.amount.textContent = `${displayAmount} ${asset.tokenSymbol}`;
-    this.asset.textContent = `${asset.tokenName} (${asset.tokenSymbol})`;
+    this.asset.textContent = asset.tokenName === asset.tokenSymbol
+      ? asset.tokenSymbol : `${asset.tokenName} (${asset.tokenSymbol})`;
     this.networkValue.textContent = `${network.name} (Chain ID ${network.chainId})`;
     this.feeValue.textContent = `${formatUnits(maximumFee, 18)} ${network.nativeSymbol}`;
     this.signingNotice.textContent = prepared.chat
@@ -1980,11 +1843,7 @@ export class EvmSendConfirmationModal {
     this.feeUsd.textContent = feeEstimate;
     this.feeUsd.style.display = feeEstimate ? 'block' : 'none';
     this.memoGroup.style.display = prepared.chat?.note ? 'block' : 'none';
-    document.getElementById('confirmMemo').textContent = prepared.chat?.note || '';
-    for (const group of [this.networkGroup, this.feeGroup]) {
-      group.hidden = false;
-    }
-    this.signingNotice.hidden = false;
+    this.memo.textContent = prepared.chat?.note || '';
   }
 
   confirm(message, prepared) {
@@ -1992,22 +1851,21 @@ export class EvmSendConfirmationModal {
     if (!this.modal || !prepared) {
       return Promise.resolve(globalThis.confirm?.(message) ?? false);
     }
-    if (this.pending) this.settle(false);
-
-    if (!openModal(this.modal)) throw new EvmTransferError('Please wait for the current modal to open, then try again.', 'MODAL_BUSY');
-    const amountUsdDisplay = this.amountUsd?.style.display;
+    if (this.pending || this.modal.classList.contains('active')) {
+      throw new EvmTransferError('A transfer is already awaiting confirmation.', 'MODAL_BUSY');
+    }
     this.render(prepared);
+    if (!openModal(this.modal)) throw new EvmTransferError('Please wait for the current modal to open, then try again.', 'MODAL_BUSY');
     this.confirmButton.disabled = false;
     this.cancelButton.disabled = false;
     return new Promise((resolve) => {
-      this.pending = { resolve, amountUsdDisplay };
+      this.pending = { resolve };
     });
   }
 
   handleAction(event, confirmed) {
     if (!this.pending) return;
     event.preventDefault();
-    event.stopImmediatePropagation();
     this.confirmButton.disabled = true;
     this.cancelButton.disabled = true;
     this.settle(confirmed);
@@ -2018,12 +1876,6 @@ export class EvmSendConfirmationModal {
     if (!pending) return;
     this.pending = null;
     if (close) this.modal.classList.remove('active');
-    for (const group of [this.networkGroup, this.feeGroup]) {
-      group.hidden = true;
-    }
-    this.signingNotice.hidden = true;
-    // The LIB confirmation shares this element and controls its own USD text.
-    if (this.amountUsd) this.amountUsd.style.display = pending.amountUsdDisplay;
     pending.resolve(Boolean(confirmed));
   }
 
@@ -2032,59 +1884,94 @@ export class EvmSendConfirmationModal {
   }
 }
 
-class EvmSendFormAdapter {
+class EvmSendModal {
   constructor(controller) {
     this.controller = controller;
     this.loaded = false;
-    this.refreshTimer = null;
+    this.session = null;
     this.recipientResolution = null;
   }
 
   load() {
     if (this.loaded) return;
-    this.modal = document.getElementById('sendAssetFormModal');
-    this.sendForm = document.getElementById('sendForm');
-    this.usernameInput = document.getElementById('sendToAddress');
-    this.amountInput = document.getElementById('sendAmount');
-    this.memoInput = document.getElementById('sendMemo');
-    this.memoGroup = document.getElementById('sendMemoGroup');
+    this.modal = document.getElementById('evmSendModal');
+    this.sendForm = document.getElementById('evmSendForm');
+    this.usernameInput = document.getElementById('evmSendRecipient');
+    this.amountInput = document.getElementById('evmSendAmount');
+    this.memoInput = document.getElementById('evmSendMemo');
+    this.memoGroup = document.getElementById('evmSendMemoGroup');
     this.memoCounter = this.memoGroup.querySelector('.memo-byte-counter');
-    this.submitButton = this.sendForm?.querySelector('button[type="submit"]');
-    this.networkSelect = document.getElementById('sendNetwork');
-    this.networkStatus = document.getElementById('sendNetworkStatus');
-    this.assetSelectDropdown = document.getElementById('sendAsset');
-    this.balanceWarning = document.getElementById('balanceWarning');
-    this.usernameAvailable = document.getElementById('sendToAddressError');
-    this.closeButton = document.getElementById('closeSendAssetFormModal');
-    if (!this.sendForm || !this.usernameInput || !this.amountInput || !this.submitButton) return;
-
-    this.memoInput.addEventListener('input', (event) => {
-      if (!this.isEvmSelected()) return;
-      event.stopImmediatePropagation();
-      this.scheduleRefresh();
-    }, true);
-    this.sendForm.addEventListener('submit', (event) => this.handleSubmit(event), true);
-    this.usernameInput.addEventListener(
-      'input',
-      (event) => this.handleRecipientInput(event),
-      true,
-    );
-    for (const element of [
-      this.amountInput,
-      this.networkSelect,
-      this.assetSelectDropdown,
-    ]) {
-      element?.addEventListener('input', () => this.scheduleRefresh());
-      element?.addEventListener('change', () => this.scheduleRefresh());
-    }
-    this.closeButton?.addEventListener('click', () => this.resetContext());
-    if (this.modal && globalThis.MutationObserver) {
-      this.modalObserver = new MutationObserver(() => {
-        if (!this.modal.classList.contains('active')) this.resetContext();
-      });
-      this.modalObserver.observe(this.modal, { attributes: true, attributeFilter: ['class'] });
-    }
+    this.submitButton = this.sendForm.querySelector('button[type="submit"]');
+    this.balanceWarning = document.getElementById('evmSendWarning');
+    this.usernameAvailable = document.getElementById('evmSendRecipientStatus');
+    this.balanceSymbol = document.getElementById('evmSendSymbol');
+    this.balanceAmount = document.getElementById('evmSendBalance');
+    this.assetLabel = document.getElementById('evmSendAssetLabel');
+    this.qrFileInput = document.getElementById('evmSendQRFile');
+    document.getElementById('closeEvmSendModal').addEventListener('click', () => this.close());
+    this.sendForm.addEventListener('submit', (event) => this.handleSubmit(event));
+    this.usernameInput.addEventListener('input', (event) => this.handleRecipientInput(event));
+    this.memoInput.addEventListener('input', () => this.refreshSendButtonDisabledState());
+    this.amountInput.addEventListener('input', () => {
+      this.amountInput.value = normalizeUnsignedFloat(this.amountInput.value);
+      this.refreshSendButtonDisabledState();
+    });
+    document.getElementById('evmSendAvailable').addEventListener('click', () => this.fillAmount());
+    document.getElementById('evmSendScanQR').addEventListener('click', () => this.scanQR());
+    document.getElementById('evmSendUploadQR').addEventListener('click', () => this.qrFileInput.click());
+    this.qrFileInput.addEventListener('change', (event) => this.readQRFile(event));
     this.loaded = true;
+  }
+
+  open({ networkId, assetKey }) {
+    if (this.modal.classList.contains('active')) return false;
+    const { walletNetwork, asset } = this.controller.findAsset(networkId, assetKey);
+    if (!asset) {
+      this.controller.showToast('This asset is no longer available. Refresh and try again.', 3000, 'warning');
+      return false;
+    }
+    this.resetForm();
+    const assetLabel = asset.tokenName === asset.tokenSymbol
+      ? asset.tokenSymbol : `${asset.tokenName} (${asset.tokenSymbol})`;
+    this.assetLabel.textContent = `${assetLabel} · ${walletNetwork.name}`;
+    this.balanceSymbol.textContent = asset.tokenSymbol;
+    this.balanceAmount.textContent = `${this.controller.formatTokenAmount(asset.tokenAmount)} ${asset.tokenSymbol}`;
+    if (!openModal(this.modal)) return false;
+    const session = this.session = { networkId, assetKey };
+    this.refreshBalance(session);
+    return true;
+  }
+
+  isCurrentSession(session) {
+    return Boolean(session && this.session === session);
+  }
+
+  getSelectedAsset() {
+    if (!this.session) return null;
+    return this.controller.findAsset(this.session.networkId, this.session.assetKey).asset;
+  }
+
+  async refreshBalance(session) {
+    try {
+      await this.controller.refresh();
+      if (!this.isCurrentSession(session)) return;
+      const asset = this.getSelectedAsset();
+      this.balanceAmount.textContent = asset
+        ? `${this.controller.formatTokenAmount(asset.tokenAmount)} ${asset.tokenSymbol}` : 'Unavailable';
+      this.refreshSendButtonDisabledState();
+    } catch (error) {
+      if (!this.isCurrentSession(session)) return;
+      this.balanceAmount.textContent = 'Unavailable';
+      this.submitButton.disabled = true;
+      this.controller.showToast('Unable to refresh asset balance', 3000, 'warning');
+    }
+  }
+
+  fillAmount() {
+    const asset = this.getSelectedAsset();
+    if (!asset) return;
+    this.amountInput.value = asset.tokenAmount || '0';
+    this.refreshSendButtonDisabledState();
   }
 
   setRecipientStatus(message = '', status = 'error') {
@@ -2112,11 +1999,6 @@ class EvmSendFormAdapter {
   }
 
   handleRecipientInput(event) {
-    if (!this.isEvmSelected()) return;
-
-    // The shared Liberdus form has its own username/address listener. EVM Assets
-    // owns this event while an EVM asset is selected so the two flows cannot race.
-    event.stopImmediatePropagation();
     this.clearRecipientLookup();
     this.submitButton.disabled = true;
 
@@ -2125,13 +2007,13 @@ class EvmSendFormAdapter {
       event.target.value = recipient.username;
     }
     if (!recipient.input) {
-      this.scheduleRefresh();
+      this.refreshSendButtonDisabledState();
       return;
     }
 
     if (recipient.kind === 'username' && recipient.username.length < 3) {
       this.setRecipientStatus('too short');
-      this.scheduleRefresh();
+      this.refreshSendButtonDisabledState();
       return;
     }
 
@@ -2150,68 +2032,229 @@ class EvmSendFormAdapter {
       };
       this.setRecipientStatus(messages[error?.code] || error?.message || 'enter a valid recipient');
     }
-    this.scheduleRefresh();
+    this.refreshSendButtonDisabledState();
   }
 
-  isEvmSelected() {
-    return this.controller.getNetwork(this.networkSelect?.value)?.source === 'evm';
-  }
-
-  scheduleRefresh() {
-    clearTimeout(this.refreshTimer);
-    this.refreshTimer = setTimeout(() => {
-      if (!this.modal?.classList.contains('active') || !this.isEvmSelected()) return;
-      this.controller.refreshSendButtonState(this);
-    }, 0);
-  }
-
-  updateNetworkStatus() {
-    const network = this.controller.getNetwork(this.networkSelect?.value);
-    if (!this.networkStatus || network?.source !== 'evm') return;
-    this.networkStatus.textContent = `${network.name} is connected for balances, receiving, and sending.`;
-    this.networkStatus.dataset.status = network.connected ? 'connected' : 'ready';
-    this.usernameInput.placeholder = 'Enter username or 0x wallet address';
-  }
-
-  applyContext() {
-    this.clearRecipientLookup();
-    this.updateNetworkStatus();
-    this.scheduleRefresh();
-  }
-
-  resetContext() {
-    clearTimeout(this.refreshTimer);
-    this.clearRecipientLookup();
-  }
-
-  async handleSubmit(event) {
-    if (!this.isEvmSelected()) return;
+  handleSubmit(event) {
     event.preventDefault();
-    event.stopImmediatePropagation();
-    await this.controller.handleSendFormSubmit(this);
+    if (!this.isCurrentSession(this.session)) return;
+    return this.controller.handleSendFormSubmit(this);
   }
 
-  async close() {
-    this.resetContext();
-    if (this.closeButton) {
-      this.closeButton.click();
-    } else {
-      this.modal?.classList.remove('active');
-      this.sendForm?.reset();
+  refreshSendButtonDisabledState() {
+    if (this.isCurrentSession(this.session)) this.controller.refreshSendButtonState(this);
+  }
+
+  resetForm() {
+    this.sendForm.reset();
+    this.clearRecipientLookup();
+    this.balanceWarning.textContent = '';
+    this.balanceWarning.style.display = 'none';
+    this.submitButton.disabled = true;
+  }
+
+  close() {
+    this.session = null;
+    this.modal?.classList.remove('active');
+    if (this.loaded) this.resetForm();
+  }
+
+  scanQR() {
+    const session = this.session;
+    this.controller.openQRScanner((data) => {
+      if (this.isCurrentSession(session)) this.fillFromQR(data);
+    });
+  }
+
+  async readQRFile(event) {
+    const input = event.target;
+    const file = input.files[0];
+    if (!file) return;
+    const session = this.session;
+    try {
+      const text = await QRImageDecoder.decode(file);
+      if (this.isCurrentSession(session) && input.files[0] === file) this.fillFromQR(text);
+    } catch (error) {
+      if (!this.isCurrentSession(session) || input.files[0] !== file) return;
+      this.controller.showToast('Could not read QR code from image', 0, 'error');
+      this.resetForm();
+    } finally {
+      if (input.files[0] === file) input.value = '';
     }
   }
 
-  async refreshSendButtonDisabledState() {
-    this.controller.refreshSendButtonState(this);
+  fillFromQR(data) {
+    this.resetForm();
+    try {
+      if (!data?.startsWith('liberdus://')) throw new Error('Invalid payment QR code format.');
+      const payment = JSON.parse(bin2utf8(base642bin(data.slice('liberdus://'.length))));
+      // Preserve the existing username/amount QR behavior; QR data does not change the selected asset.
+      this.usernameInput.value = payment.u || '';
+      this.amountInput.value = payment.a || '';
+      this.usernameInput.dispatchEvent(new Event('input'));
+    } catch (error) {
+      this.controller.showToast('Invalid payment QR code format.', 3000, 'error');
+    }
+  }
+}
+
+class EvmReceiveModal {
+  constructor(controller) {
+    this.controller = controller;
+    this.session = null;
+  }
+
+  load() {
+    this.modal = document.getElementById('evmReceiveModal');
+    this.assetLabel = document.getElementById('evmReceiveAssetLabel');
+    this.amountInput = document.getElementById('evmReceiveAmount');
+    this.balanceSymbol = document.getElementById('evmReceiveSymbol');
+    this.toggleButton = document.getElementById('toggleEvmReceiveBalance');
+    this.displayAddress = document.getElementById('evmReceiveAddress');
+    this.copyButton = document.getElementById('copyEvmReceiveAddress');
+    this.qrcodeContainer = document.getElementById('evmReceiveQRCode');
+    this.preview = document.getElementById('evmReceiveQRPreview');
+    document.getElementById('closeEvmReceiveModal').addEventListener('click', () => this.close());
+    this.copyButton.addEventListener('click', () => this.copyAddress());
+    this.displayAddress.addEventListener('click', () => this.copyAddress());
+    this.toggleButton.addEventListener('click', () => this.handleToggleBalance());
+    this.amountInput.addEventListener('input', () => {
+      this.amountInput.value = normalizeUnsignedFloat(this.amountInput.value);
+      this.scheduleQRCode();
+    });
+  }
+
+  open({ networkId, assetKey }) {
+    if (this.modal.classList.contains('active')) return false;
+    const account = this.controller.getAccount();
+    const { walletNetwork, asset } = this.controller.findAsset(networkId, assetKey);
+    if (!account || !asset) {
+      this.controller.showToast('This asset is no longer available. Refresh and try again.', 3000, 'warning');
+      return false;
+    }
+    this.close();
+    this.session = { account, network: walletNetwork, asset, address: walletProbeAddress(account.keys.address) };
+    this.amountInput.value = '';
+    const assetLabel = asset.tokenName === asset.tokenSymbol
+      ? asset.tokenSymbol : `${asset.tokenName} (${asset.tokenSymbol})`;
+    this.assetLabel.textContent = `${assetLabel} · ${walletNetwork.name}`;
+    this.balanceSymbol.textContent = asset.tokenSymbol;
+    this.displayAddress.textContent = this.session.address;
+    this.updateQRCode();
+    if (!openModal(this.modal)) {
+      this.close();
+      return false;
+    }
+    this.refreshAsset(this.session);
+    return true;
+  }
+
+  isCurrentSession(session) {
+    return Boolean(session && this.session === session);
+  }
+
+  async refreshAsset(session) {
+    try {
+      await this.controller.refresh();
+      if (!this.isCurrentSession(session)) return;
+      const { asset } = this.controller.findAsset(session.network.id, session.asset.key);
+      if (asset) session.asset = asset;
+    } catch (error) {
+      // Receiving still works with the selected address/asset; USD conversion may be unavailable.
+      if (this.isCurrentSession(session)) this.controller.showToast('Asset prices could not be refreshed', 3000, 'warning');
+    }
+  }
+
+  scheduleQRCode() {
+    clearTimeout(this.qrTimer);
+    this.qrTimer = setTimeout(() => this.updateQRCode(), 300);
+  }
+
+  createQRPaymentData() {
+    const { account, network, asset, address } = this.session;
+    const data = {
+      u: account.username,
+      n: network.id,
+      c: network.chainId,
+      i: asset.contractAddress || asset.key,
+      s: asset.tokenSymbol,
+      d: this.balanceSymbol.textContent.toUpperCase(),
+      r: address,
+    };
+    const amount = this.amountInput.value.trim();
+    if (amount) data.a = amount;
+    return data;
+  }
+
+  updateQRCode() {
+    if (!this.isCurrentSession(this.session)) return;
+    this.qrcodeContainer.replaceChildren();
+    this.preview.style.display = 'none';
+    this.preview.textContent = '';
+    try {
+      const text = `liberdus://${bin2base64(utf82bin(JSON.stringify(this.createQRPaymentData())))}`;
+      const bytes = qr.encodeQR(text, 'gif', { scale: 4 });
+      const img = document.createElement('img');
+      img.src = `data:image/gif;base64,${bin2base64(new Uint8Array(bytes))}`;
+      img.width = 200;
+      img.height = 200;
+      img.alt = 'EVM payment request QR code';
+      this.qrcodeContainer.appendChild(img);
+      return text;
+    } catch (error) {
+      // A username-only fallback would lose the EVM network and asset identity.
+      this.preview.textContent = 'Unable to generate the payment QR code. You can still copy your address.';
+      this.preview.style.display = 'block';
+    }
+  }
+
+  handleToggleBalance() {
+    if (!this.isCurrentSession(this.session)) return;
+    const { asset } = this.session;
+    const price = Number(asset.tokenPriceUsd);
+    if (!Number.isFinite(price) || price <= 0) {
+      this.controller.showToast(`${asset.tokenSymbol}/USD price is unavailable`, 2500, 'warning');
+      return;
+    }
+    const showUsd = this.balanceSymbol.textContent !== 'USD';
+    this.balanceSymbol.textContent = showUsd ? 'USD' : asset.tokenSymbol;
+    const amount = this.amountInput.value.trim();
+    if (amount && Number.isFinite(Number(amount))) {
+      this.amountInput.value = String(showUsd ? Number(amount) * price : Number(amount) / price);
+    }
+    this.updateQRCode();
+  }
+
+  async copyAddress() {
+    const session = this.session;
+    if (!this.isCurrentSession(session)) return;
+    try {
+      await navigator.clipboard.writeText(session.address);
+      if (!this.isCurrentSession(session)) return;
+      this.controller.showToast('Address copied to clipboard', 2000, 'success');
+      this.copyButton.classList.add('success');
+      clearTimeout(this.copyTimer);
+      this.copyTimer = setTimeout(() => this.copyButton.classList.remove('success'), 2000);
+    } catch (error) {
+      if (this.isCurrentSession(session)) this.controller.showToast('Failed to copy address', 3000, 'error');
+    }
+  }
+
+  close() {
+    this.session = null;
+    clearTimeout(this.qrTimer);
+    clearTimeout(this.copyTimer);
+    this.modal?.classList.remove('active');
+    this.copyButton?.classList.remove('success');
+    if (this.displayAddress) this.displayAddress.textContent = '';
+    this.qrcodeContainer?.replaceChildren();
   }
 }
 
 class EvmAssetsController {
   constructor() {
     this.getAccount = () => null;
-    this.getLiberdusAsset = () => null;
-    this.openSend = () => {};
-    this.openReceive = () => {};
+    this.openQRScanner = () => {};
     this.showToast = () => {};
     this.hideToast = () => {};
     this.syncSelect = () => {};
@@ -2228,7 +2271,6 @@ class EvmAssetsController {
     this.saveSubmission = () => { throw new Error('Payment storage is unavailable'); };
     this.discovery = new WalletDiscoveryService({
       getAccount: () => this.getAccount(),
-      getLiberdusAsset: () => this.getLiberdusAsset(),
     });
     this.recipients = new LiberdusEvmRecipientResolver({
       getAccount: () => this.getAccount(),
@@ -2258,12 +2300,12 @@ class EvmAssetsController {
     });
     this.assetsModal = new AssetsModal(this);
     this.assetDetailsModal = new AssetDetailsModal(this);
-    this.sendFormAdapter = new EvmSendFormAdapter(this);
+    this.sendModal = new EvmSendModal(this);
+    this.receiveModal = new EvmReceiveModal(this);
   }
 
   configure({
     getAccount,
-    getLiberdusAsset,
     findContact,
     prepareChatPayment,
     preparePaymentMessage,
@@ -2273,15 +2315,13 @@ class EvmAssetsController {
     saveSubmission,
     checkPayment,
     dismissPayment,
-    openSend,
-    openReceive,
+    openQRScanner,
     showToast,
     hideToast,
     confirmTransfer,
     syncSelect,
   } = {}) {
     if (typeof getAccount === 'function') this.getAccount = getAccount;
-    if (typeof getLiberdusAsset === 'function') this.getLiberdusAsset = getLiberdusAsset;
     if (typeof findContact === 'function') this.findContact = findContact;
     if (typeof getPayments === 'function') this.getPayments = getPayments;
     if (typeof savePayment === 'function') this.savePayment = savePayment;
@@ -2291,8 +2331,7 @@ class EvmAssetsController {
     if (typeof preparePaymentMessage === 'function') this.preparePaymentMessage = preparePaymentMessage;
     if (typeof sendChatPayment === 'function') this.sendChatPayment = sendChatPayment;
     if (typeof prepareChatPayment === 'function') this.prepareChatPayment = prepareChatPayment;
-    if (typeof openSend === 'function') this.openSend = openSend;
-    if (typeof openReceive === 'function') this.openReceive = openReceive;
+    if (typeof openQRScanner === 'function') this.openQRScanner = openQRScanner;
     if (typeof showToast === 'function') this.showToast = showToast;
     if (typeof hideToast === 'function') this.hideToast = hideToast;
     if (typeof confirmTransfer === 'function') this.confirmTransfer = confirmTransfer;
@@ -2304,7 +2343,8 @@ class EvmAssetsController {
     this.assetsModal.load();
     this.assetDetailsModal.load();
     this.confirmationModal.load();
-    this.sendFormAdapter.load();
+    this.sendModal.load();
+    this.receiveModal.load();
     document.getElementById('openAssets').addEventListener('click', () => this.assetsModal.open());
     this.loaded = true;
   }
@@ -2313,9 +2353,23 @@ class EvmAssetsController {
     this.discovery.reset();
     this.transactions.paymentEvidence.clear();
     this.confirmationModal.reset();
+    this.sendModal.close();
+    this.receiveModal.close();
   }
 
   close(modalId) {
+    if (modalId === 'evmReceiveModal') {
+      this.receiveModal.close();
+      return true;
+    }
+    if (modalId === 'evmSendConfirmModal') {
+      this.confirmationModal.reset();
+      return true;
+    }
+    if (modalId === 'evmSendModal') {
+      this.sendModal.close();
+      return true;
+    }
     if (modalId === 'assetsModal') {
       this.assetsModal.close();
       return true;
@@ -2335,28 +2389,20 @@ class EvmAssetsController {
     return catalog;
   }
   rebuildCatalog() { return this.discovery.rebuildCatalog(); }
-  getCatalog() { return this.discovery.getCatalog(); }
-  getEvmCatalog() { return this.discovery.getEvmCatalog(); }
-  getTotalUsd(options) { return this.discovery.getTotalUsd(options); }
+  getEvmCatalog() { return this.discovery.getCatalog(); }
+  getTotalUsd() { return this.discovery.getTotalUsd(); }
   getStatus() { return this.discovery.getStatus(); }
   getUpdatedAt() { return this.discovery.getUpdatedAt(); }
   getNetwork(networkId) { return this.discovery.getNetwork(networkId); }
-  getSelectedAsset(networkId, select) {
-    return this.discovery.getSelectedAsset(networkId, select);
-  }
-  findAsset(networkId, assetKey, options) {
-    return this.discovery.findAsset(networkId, assetKey, options);
+  findAsset(networkId, assetKey) {
+    return this.discovery.findAsset(networkId, assetKey);
   }
   populateNetworkSelect(select, options) {
     this.discovery.populateNetworkSelect(select, options);
     this.syncSelect(select);
   }
-  populateAssetSelect(select, networkId) {
-    this.discovery.populateAssetSelect(select, networkId);
-    this.syncSelect(select);
-  }
   validateTransfer({ networkId, assetKey, recipient, amount }) {
-    const { walletNetwork, asset } = this.findAsset(networkId, assetKey, { evmOnly: true });
+    const { walletNetwork, asset } = this.findAsset(networkId, assetKey);
     return this.transactions.validate({
       network: walletNetwork,
       asset,
@@ -2364,8 +2410,8 @@ class EvmAssetsController {
       amount,
     });
   }
-  async sendTransfer({ networkId, assetKey, recipient, recipientLabel = null, amount, chat, beforeBroadcast }) {
-    const { walletNetwork, asset } = this.findAsset(networkId, assetKey, { evmOnly: true });
+  async sendTransfer({ networkId, assetKey, recipient, recipientLabel = null, amount, chat, beforeBroadcast, isCurrent }) {
+    const { walletNetwork, asset } = this.findAsset(networkId, assetKey);
     return this.transactions.send({
       network: walletNetwork,
       asset,
@@ -2374,21 +2420,20 @@ class EvmAssetsController {
       amount,
       chat,
       beforeBroadcast,
+      isCurrent,
     });
   }
   openContextualSend(options) {
-    const opening = this.openSend(options);
-    this.sendFormAdapter.applyContext();
-    return opening;
+    return this.sendModal.open(options);
   }
-  openContextualReceive(options) { return this.openReceive(options); }
+  openContextualReceive(options) { return this.receiveModal.open(options); }
   refreshSendButtonState(form) {
     const resolution = form.getResolvedRecipient();
     const amount = form.amountInput.value.trim();
     const validation = resolution && amount
       ? this.validateTransfer({
-        networkId: form.networkSelect.value,
-        assetKey: form.assetSelectDropdown.value,
+        networkId: form.session.networkId,
+        assetKey: form.session.assetKey,
         recipient: resolution.address,
         amount,
       })
@@ -2538,13 +2583,14 @@ class EvmAssetsController {
       const network = this.getEvmCatalog().find((item) => item.chainId === payment.chainId);
       const asset = network?.assets?.find((item) => (item.contractAddress?.toLowerCase() || null) === payment.contractAddress);
       if (!asset) throw new Error('Refresh EVM Assets to load this asset before retrying it.');
-      await this.openSend({ mode: 'evm', networkId: network.id, assetKey: asset.key });
-      const form = this.sendFormAdapter;
+      const form = this.sendModal;
+      if (!form.open({ networkId: network.id, assetKey: asset.key })) return;
       form.usernameInput.value = recipient;
       form.amountInput.value = evmPaymentAmount(payment);
       form.usernameInput.dispatchEvent(new Event('input', { bubbles: true }));
       // Restore the note after recipient input clears the memo.
       form.memoInput.value = payment.note || '';
+      form.refreshSendButtonDisabledState();
       this.showToast('Review the recipient and amount. Nothing has been sent.', 5000, 'info');
     } catch (error) {
       this.showToast(error.message, 0, 'warning');
@@ -2555,9 +2601,11 @@ class EvmAssetsController {
     if (this.sending) return;
     this.sending = true;
     const account = this.getAccount();
+    const session = form.session;
+    const isCurrent = () => form.isCurrentSession(session);
     const input = form.usernameInput.value;
     const note = form.memoInput.value.trim();
-    const selection = { networkId: form.networkSelect.value, assetKey: form.assetSelectDropdown.value, amount: form.amountInput.value.trim() };
+    const selection = { networkId: session.networkId, assetKey: session.assetKey, amount: form.amountInput.value.trim() };
     form.submitButton.disabled = true;
     try {
       const network = this.getNetwork(selection.networkId);
@@ -2574,6 +2622,7 @@ class EvmAssetsController {
         record.broadcastState = 'nonce_used';
         this.savePayment(record, account);
       }
+      if (!isCurrent()) return { status: 'cancelled', transactionHash: null };
       const previousResolution = form.getResolvedRecipient();
       if (!previousResolution) {
         throw new EvmTransferError(
@@ -2608,17 +2657,19 @@ class EvmAssetsController {
       };
       const result = await this.sendTransfer({
         ...selection,
+        isCurrent,
         chat,
         beforeBroadcast,
         recipient: resolution.address,
         recipientLabel: resolution.username || resolution.display,
       });
-      if (['pending', 'confirmed', 'reverted'].includes(result.status)) {
+      if (isCurrent() && ['pending', 'confirmed', 'reverted'].includes(result.status)) {
         await form.close();
       }
       return result;
     } catch (error) {
       console.error('EVM transfer failed:', error);
+      if (!isCurrent()) return { status: 'cancelled', transactionHash: null };
       if (error?.code === 'USERNAME_ASSOCIATION_CHANGED') {
         form.clearRecipientLookup({ hideStatus: false });
         form.setRecipientStatus('recipient changed—review username');
@@ -2627,7 +2678,7 @@ class EvmAssetsController {
       return { status: 'failed', error };
     } finally {
       this.sending = false;
-      await form.refreshSendButtonDisabledState();
+      form.refreshSendButtonDisabledState();
     }
   }
   getConnectionText() { return this.discovery.getConnectionText(); }

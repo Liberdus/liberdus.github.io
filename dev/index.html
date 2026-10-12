@@ -424,58 +424,75 @@
           <div class="modal-title" id="daoModalTitle">DAO</div>
         </div>
         <div class="modal-content">
-          <div class="dao-toolbar">
-            <div class="dao-filter-bar" id="daoFilterBar" role="tablist" aria-label="Proposal and project filters">
-              <button class="dao-filter-chip" type="button" role="tab" data-filter-key="review" aria-selected="false">
-                <span class="dao-filter-chip-label">Review</span>
-                <span class="dao-filter-chip-count" aria-label="0 review proposals">0</span>
-              </button>
-              <button class="dao-filter-chip" type="button" role="tab" data-filter-key="voting" aria-selected="false">
-                <span class="dao-filter-chip-label">Vote</span>
-                <span class="dao-filter-chip-count" aria-label="0 voting proposals">0</span>
-              </button>
-              <button class="dao-filter-chip" type="button" role="tab" data-filter-key="accepted" aria-selected="false">
-                <span class="dao-filter-chip-label">Accepted</span>
-                <span class="dao-filter-chip-count" aria-label="0 accepted proposals">0</span>
-              </button>
-              <button class="dao-filter-chip" type="button" role="tab" data-filter-key="claimable" aria-selected="false" title="View proposals with rewards ready to claim">
-                <span class="dao-filter-chip-label">Claim</span>
-                <span class="dao-filter-chip-count" aria-label="0 claimable proposals">0</span>
-              </button>
-              <button class="dao-filter-chip" type="button" role="tab" data-filter-key="withheld" aria-selected="false">
-                <span class="dao-filter-chip-label">Withheld</span>
-                <span class="dao-filter-chip-count" aria-label="0 withheld proposals">0</span>
-              </button>
-              <button class="dao-filter-chip" type="button" role="tab" data-filter-key="rejected" aria-selected="false">
-                <span class="dao-filter-chip-label">Rejected</span>
-                <span class="dao-filter-chip-count" aria-label="0 rejected proposals">0</span>
-              </button>
-              <button class="dao-filter-chip" type="button" role="tab" data-filter-key="applied" aria-selected="false">
-                <span class="dao-filter-chip-label">Applied</span>
-                <span class="dao-filter-chip-count" aria-label="0 applied proposals">0</span>
-              </button>
-              <button class="dao-filter-chip" type="button" role="tab" data-filter-key="all" aria-selected="false">
-                <span class="dao-filter-chip-label">All</span>
-                <span class="dao-filter-chip-count" aria-label="0 all proposals">0</span>
-              </button>
-              <div class="dao-project-filter-row" role="presentation">
-                <span class="dao-filter-row-label" aria-hidden="true">Projects:</span>
-                <button class="dao-filter-chip" type="button" role="tab" data-filter-key="executing" aria-selected="false">
-                  <span class="dao-filter-chip-label">Executing</span>
-                  <span class="dao-filter-chip-count" aria-label="0 executing projects">0</span>
-                </button>
-                <button class="dao-filter-chip" type="button" role="tab" data-filter-key="terminated" aria-selected="false">
-                  <span class="dao-filter-chip-label">Terminated</span>
-                  <span class="dao-filter-chip-count" aria-label="0 terminated projects">0</span>
-                </button>
-                <button class="dao-filter-chip" type="button" role="tab" data-filter-key="completed" aria-selected="false">
-                  <span class="dao-filter-chip-label">Completed</span>
-                  <span class="dao-filter-chip-count" aria-label="0 completed projects">0</span>
-                </button>
+          <div class="dao-list-pane">
+            <div class="dao-toolbar">
+              <div class="dao-filter-bar" id="daoFilterBar" aria-label="DAO navigation">
+                    <div class="dao-filter-row" role="group" aria-label="All DAO items and claims">
+                      <button class="dao-filter-chip" type="button" data-filter-key="all" aria-pressed="false">
+                        <span class="dao-filter-chip-label">All</span>
+                        <span class="dao-filter-chip-count">—</span>
+                      </button>
+                      <button class="dao-filter-chip" type="button" data-filter-key="claimable" aria-pressed="false">
+                        <span class="dao-filter-chip-label">Claim</span>
+                        <span class="dao-filter-chip-count">—</span>
+                      </button>
+                    </div>
+                <div class="dao-context-switch" role="group" aria-label="DAO section">
+                  <button type="button" data-dao-context="proposals" aria-pressed="true">Proposals</button>
+                  <button type="button" data-dao-context="projects" aria-pressed="false">Projects</button>
+                </div>
+                <div class="dao-filter-label">Filter</div>
+                <div class="dao-filter-slot">
+                  <div class="dao-context-filters" data-dao-filters="proposals">
+                    <div class="dao-filter-row" role="group" aria-label="Review filters">
+                      <button class="dao-filter-chip" type="button" data-filter-key="review" aria-pressed="false">
+                        <span class="dao-filter-chip-label">Review</span>
+                        <span class="dao-filter-chip-count">—</span>
+                      </button>
+                      <button class="dao-filter-chip" type="button" data-filter-key="withheld" aria-pressed="false">
+                        <span class="dao-filter-chip-label">Withheld</span>
+                        <span class="dao-filter-chip-count">—</span>
+                      </button>
+                    </div>
+                    <div class="dao-filter-row dao-filter-row--outcomes" role="group" aria-label="Voting and result filters">
+                      <button class="dao-filter-chip" type="button" data-filter-key="voting" aria-pressed="false">
+                        <span class="dao-filter-chip-label">Vote</span>
+                        <span class="dao-filter-chip-count">—</span>
+                      </button>
+                      <button class="dao-filter-chip" type="button" data-filter-key="rejected" aria-pressed="false">
+                        <span class="dao-filter-chip-label">Rejected</span>
+                        <span class="dao-filter-chip-count">—</span>
+                      </button>
+                      <button class="dao-filter-chip" type="button" data-filter-key="accepted" aria-pressed="false">
+                        <span class="dao-filter-chip-label">Accepted</span>
+                        <span class="dao-filter-chip-count">—</span>
+                      </button>
+                      <button class="dao-filter-chip" type="button" data-filter-key="applied" aria-pressed="false">
+                        <span class="dao-filter-chip-label">Applied</span>
+                        <span class="dao-filter-chip-count">—</span>
+                      </button>
+                    </div>
+                  </div>
+                  <div class="dao-context-filters dao-filter-inactive" data-dao-filters="projects" inert aria-hidden="true">
+                    <div class="dao-filter-row dao-filter-row--projects" role="group" aria-label="Project filters">
+                      <button class="dao-filter-chip" type="button" data-filter-key="executing" aria-pressed="false">
+                        <span class="dao-filter-chip-label">Executing</span>
+                        <span class="dao-filter-chip-count">—</span>
+                      </button>
+                      <button class="dao-filter-chip" type="button" data-filter-key="terminated" aria-pressed="false">
+                        <span class="dao-filter-chip-label">Terminated</span>
+                        <span class="dao-filter-chip-count">—</span>
+                      </button>
+                      <button class="dao-filter-chip" type="button" data-filter-key="completed" aria-pressed="false">
+                        <span class="dao-filter-chip-label">Completed</span>
+                        <span class="dao-filter-chip-count">—</span>
+                      </button>
+                    </div>
+                  </div>
+                  <div class="dao-filter-placeholder dao-filter-inactive" aria-hidden="true">Showing all proposals and projects.</div>
+                </div>
               </div>
             </div>
-          </div>
-          <div class="dao-list-pane">
             <ul class="chat-list" id="daoProposalList">
               <div class="empty-state" id="daoProposalEmptyState">
                 <div></div>
@@ -2639,16 +2656,6 @@
         </div>
         <div class="modal-content">
           <div class="form-container">
-            <div class="form-group connected-wallet-only" id="receiveNetworkGroup" hidden>
-              <label for="receiveNetwork">Network</label>
-              <select id="receiveNetwork" class="form-control wallet-network-select">
-                <option value="liberdus">Liberdus (LIB)</option>
-                <option value="ethereum">Ethereum (ETH)</option>
-                <option value="bsc">BNB Smart Chain (BSC)</option>
-                <option value="polygon">Polygon (POL)</option>
-              </select>
-              <div id="receiveNetworkStatus" class="wallet-network-hint">The same account address is used across connected EVM networks.</div>
-            </div>
             <div class="form-group">
               <label>Your Address</label>
               <div class="address-container">
@@ -2707,6 +2714,52 @@
         <a class="last-item" href="#"> </a>
       </div>
 
+      <!-- EVM Receive Modal -->
+      <div class="modal fixed-header" id="evmReceiveModal">
+        <div class="modal-header">
+          <button class="back-button" id="closeEvmReceiveModal"></button>
+          <div class="modal-title">Receive</div>
+        </div>
+        <div class="modal-content">
+          <div class="form-container">
+            <p id="evmReceiveAssetLabel" class="wallet-network-hint"></p>
+            <div class="form-group">
+              <label>Your Address</label>
+              <div class="address-container">
+                <div
+                  id="evmReceiveAddress"
+                  class="form-control address-display"
+                ></div>
+                <button
+                  id="copyEvmReceiveAddress"
+                  class="icon-button address-copy-button"
+                ></button>
+              </div>
+              <div id="evmReceiveQRCode"></div>
+
+              <div id="evmReceiveQRPreview" class="form-control qr-data-preview" style="display: none"></div>
+            </div>
+
+            <div class="form-group">
+              <label for="evmReceiveAmount">Amount (Optional)</label>
+              <div class="amount-container">
+                <input
+                  inputmode="decimal"
+                  type="text"
+                  id="evmReceiveAmount"
+                  class="form-control"
+                  placeholder="Enter amount"
+                />
+                <button id="toggleEvmReceiveBalance" class="toggle-balance">
+                  <span id="evmReceiveSymbol"></span>
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+        <a class="last-item" href="#"> </a>
+      </div>
+
       <!-- History Modal -->
       <div class="modal fixed-header" id="historyModal">
         <div class="modal-header">
@@ -2741,16 +2794,6 @@
         <div class="modal-content">
           <div class="form-container">
             <form id="sendForm" class="form--narrow">
-              <div class="form-group connected-wallet-only" id="sendNetworkGroup" hidden>
-                <label for="sendNetwork">Network</label>
-                <select id="sendNetwork" class="form-control wallet-network-select" required>
-                  <option value="liberdus">Liberdus (LIB)</option>
-                  <option value="ethereum">Ethereum (ETH)</option>
-                  <option value="bsc">BNB Smart Chain (BSC)</option>
-                  <option value="polygon">Polygon (POL)</option>
-                </select>
-                <div id="sendNetworkStatus" class="wallet-network-hint">Liberdus transfers are ready.</div>
-              </div>
               <div class="form-group">
                 <label for="sendAsset">Asset</label>
                 <select id="sendAsset" class="form-control" required></select>
@@ -2813,7 +2856,7 @@
                     required
                   />
                   <!-- add button to toggle between LIB and USD -->
-                  <button id="toggleBalance" class="toggle-balance">
+                  <button type="button" id="toggleBalance" class="toggle-balance">
                     <span id="balanceSymbol">LIB</span>
                   </button>
                 </div>
@@ -2856,6 +2899,89 @@
         <a class="last-item" href="#"> </a>
       </div>
 
+      <!-- EVM Send Modal -->
+      <div class="modal fixed-header" id="evmSendModal">
+        <div class="modal-header">
+          <button class="back-button" id="closeEvmSendModal"></button>
+          <div class="modal-title">Send</div>
+        </div>
+        <div class="modal-content">
+          <div class="form-container">
+            <form id="evmSendForm" class="form--narrow">
+              <p id="evmSendAssetLabel" class="wallet-network-hint"></p>
+              <div class="form-group">
+                <label for="evmSendRecipient"
+                  >Recipient <span id="evmSendRecipientStatus" style="color: #dc3545; display: none"></span
+                ></label>
+                <div style="display: flex; align-items: center; gap: 0.5rem">
+                  <input
+                    type="text"
+                    id="evmSendRecipient"
+                    class="form-control"
+                    placeholder="Enter username or 0x wallet address"
+                    required
+                    style="flex: 1"
+                  />
+                  <button
+                    type="button"
+                    id="evmSendUploadQR"
+                    class="icon-button"
+                    title="Upload QR Code"
+                    style="flex-shrink: 0"
+                  >
+                    <svg viewBox="0 0 24 24" width="24" height="24" style="fill: #007bff">
+                      <path
+                        d="M19 7v2.99s-1.99.01-2 0V7h-3s.01-1.99 0-2h3V2h2v3h3v2h-3zm-3 4V8h-3V5H5c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2v-8h-3zM5 19l3-4 2 3 3-4 4 5H5z"
+                      />
+                    </svg>
+                  </button>
+                  <button type="button" id="evmSendScanQR" class="icon-button" title="Scan QR Code" style="flex-shrink: 0">
+                    <svg viewBox="0 0 24 24" width="24" height="24" style="fill: #007bff">
+                      <path
+                        d="M3,3 L10,3 L10,10 L3,10 Z M5,5 L5,8 L8,8 L8,5 Z M14,3 L21,3 L21,10 L14,10 Z M16,5 L16,8 L19,8 L19,5 Z M3,14 L10,14 L10,21 L3,21 Z M5,16 L5,19 L8,19 L8,16 Z M14,14 L21,14 L21,21 L14,21 Z M16,16 L16,19 L19,19 L19,16 Z M11,3 L13,3 L13,10 L11,10 Z M11,14 L13,14 L13,21 L11,21 Z M3,11 L10,11 L10,13 L3,13 Z M14,11 L21,11 L21,13 L14,13 Z"
+                      />
+                    </svg>
+                  </button>
+                  <input type="file" id="evmSendQRFile" accept="image/*" style="display: none" />
+                </div>
+              </div>
+              <div class="form-group">
+                <label for="evmSendAmount">
+                  Amount <span id="evmSendWarning" class="balance-warning"></span>
+                </label>
+                <div class="amount-container">
+                  <input
+                    inputmode="decimal"
+                    type="text"
+                    id="evmSendAmount"
+                    class="form-control"
+                    required
+                  />
+                  <span id="evmSendSymbol" class="toggle-balance"></span>
+                </div>
+                <div id="evmSendAvailable" class="available-balance">
+                  <div class="balance-info">
+                    <span>Available: <span id="evmSendBalance"></span></span>
+                    <span class="fee-info">Fee: Calculated at send</span>
+                  </div>
+                </div>
+              </div>
+              <div class="form-group" id="evmSendMemoGroup" hidden>
+                <label for="evmSendMemo">
+                  Add a note (optional)
+                  <span class="memo-byte-counter" style="font-size: 12px; margin-left: 8px; font-weight: normal; display: none;"></span>
+                </label>
+                <textarea id="evmSendMemo" class="form-control"></textarea>
+              </div>
+              <div class="form-actions">
+                <button type="submit" class="btn btn--primary btn--pill btn--full">Send</button>
+              </div>
+            </form>
+          </div>
+        </div>
+        <a class="last-item" href="#"> </a>
+      </div>
+
       <!-- Send Asset Confirmation Modal -->
       <div class="modal fixed-header" id="sendAssetConfirmModal">
         <div class="modal-header">
@@ -2886,6 +3012,52 @@
             <div class="form-actions">
               <button id="confirmSendButton" class="btn btn--primary btn--pill btn--full">Confirm Send</button>
               <button id="cancelSendButton" class="btn btn--danger btn--pill btn--full">Cancel</button>
+            </div>
+          </div>
+        </div>
+        <a class="last-item" href="#"> </a>
+      </div>
+
+      <!-- EVM Send Confirmation Modal -->
+      <div class="modal fixed-header" id="evmSendConfirmModal">
+        <div class="modal-header">
+          <button class="back-button" id="closeEvmSendConfirmModal"></button>
+          <div class="modal-title">Confirm Transaction</div>
+        </div>
+        <div class="modal-content">
+          <div class="form-container">
+            <div class="confirmation-details">
+              <div class="form-group">
+                <label>Recipient</label>
+                <div id="evmConfirmRecipient" class="confirm-value"></div>
+              </div>
+              <div class="form-group">
+                <label>Amount</label>
+                <div id="evmConfirmAmount" class="confirm-value"></div>
+                <div id="evmConfirmAmountUSD" class="confirm-value-secondary usd-equivalent"></div>
+              </div>
+              <div class="form-group">
+                <label>Asset</label>
+                <div id="evmConfirmAsset" class="confirm-value"></div>
+              </div>
+              <div class="form-group" id="evmConfirmMemoGroup" style="display: none">
+                <label>Memo</label>
+                <div id="evmConfirmMemo" class="confirm-value"></div>
+              </div>
+              <div class="form-group">
+                <label>Network</label>
+                <div id="evmConfirmNetwork" class="confirm-value"></div>
+              </div>
+              <div class="form-group">
+                <label>Maximum network fee</label>
+                <div id="evmConfirmFee" class="confirm-value"></div>
+                <div id="evmConfirmFeeUSD" class="confirm-value-secondary usd-equivalent"></div>
+              </div>
+              <div id="evmConfirmSigningNotice" class="wallet-network-hint"></div>
+            </div>
+            <div class="form-actions">
+              <button id="confirmEvmSendButton" class="btn btn--primary btn--pill btn--full">Confirm Send</button>
+              <button id="cancelEvmSendButton" class="btn btn--danger btn--pill btn--full">Cancel</button>
             </div>
           </div>
         </div>

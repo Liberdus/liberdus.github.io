@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MMDD.HHmm like 2025.0125.1005
-const version = 'k'
+const version = 'l'
 const BOOT_SPLASH_HANDOFF_MS = 1000;
 const BOOT_SPLASH_FRAME_TIMEOUT_MS = 100;
 const BOOT_SPLASH_IMAGE_TIMEOUT_MS = 2000;
@@ -165,6 +165,7 @@ import {
   dhkeyCombined,
   decryptChacha,
   generateUUIDv4,
+  verifyMessage,
 } from './crypto.js';
 
 // Put standalone conversion function in lib.js
@@ -190,6 +191,11 @@ import {
   bin2hex,
   linkifyUrls,
   escapeHtml,
+  escapeHtmlAttribute,
+  normalizeHttpsUrl,
+  normalizeMimeType,
+  normalizeResourceUrl,
+  normalizeTransactionId,
   debounce,
   installModalTransitionListeners,
   openModal,
@@ -199,7 +205,12 @@ import {
   truncateMessage,
   normalizeUnsignedFloat,
   getVerifiedUsername,
+  getSafeAttachmentPreviewMime,
   EthNum,
+  getExpectedChatId,
+  isPublicKeyForAddress,
+  validateChatTransaction,
+  QRImageDecoder,
 } from './lib.js';
 
 import {
@@ -255,6 +266,30 @@ let initialViewportHeight = window.innerHeight;
 
 // parameters to add to the call URL when opening the page
 const callUrlParams = `#config.toolbarButtons=["camera","microphone","desktop","hangup"]&config.disableDeepLinking=true&config.prejoinPageEnabled=false&config.startWithAudioMuted=false&startWithVideoMuted=false&userInfo.displayName=`
+const ALLOWED_CALL_ORIGINS = Object.freeze(['https://meet.liberdus.com']);
+
+function normalizeCallUrl(value) {
+  const normalized = normalizeHttpsUrl(value, ALLOWED_CALL_ORIGINS);
+  if (!normalized) return '';
+  const url = new URL(normalized);
+  url.hash = '';
+  return url.toString();
+}
+
+function buildCallJoinUrl(value, displayName) {
+  const callUrl = normalizeCallUrl(value);
+  if (!callUrl) return '';
+  return `${callUrl}${callUrlParams}"${encodeURIComponent(String(displayName || ''))}"`;
+}
+
+function encodeAttachmentName(value) {
+  const fileName = typeof value === 'string' && value ? value.slice(0, 255) : 'Attachment';
+  try {
+    return encodeURIComponent(fileName);
+  } catch {
+    return encodeURIComponent(fileName.replace(/[\uD800-\uDFFF]/g, '\uFFFD'));
+  }
+}
 
 // Used in getNetworkParams function
 const NETWORK_ACCOUNT_UPDATE_INTERVAL_MS = 10 * 60 * 1000; // 10 minutes in milliseconds
@@ -520,6 +555,8 @@ function clearMyData() {
   myAccount = null;
   stopEvmPaymentChecks();
   evmAssets.reset();
+  sendAssetFormModal.reset();
+  receiveModal.close();
   multichain.reset();
   daoRepo.reset();
   daoModal.resetNotificationState();
@@ -2276,6 +2313,27 @@ class WalletScreen {
     return network?.name === 'Mainnet';
   }
 
+  getAssets() {
+    return (myData?.wallet?.assets || []).filter((asset) => isLibAsset(asset));
+  }
+
+  getAsset(assetId) {
+    const assets = this.getAssets();
+    return assets.find((asset) => asset.id === assetId) || assets[0] || null;
+  }
+
+  populateAssetSelect(select) {
+    const options = this.getAssets().map((asset) => {
+      const option = document.createElement('option');
+      option.value = asset.id;
+      option.textContent = asset.name === asset.symbol
+        ? asset.symbol : `${asset.name} (${asset.symbol})`;
+      return option;
+    });
+    select.replaceChildren(...options);
+    PopupSelect.sync(select);
+  }
+
   // Update wallet view; refresh wallet
   async updateWalletView() {
     const walletData = myData.wallet;
@@ -2712,7 +2770,7 @@ async function refreshDaoNotificationSummary() {
 
 const DAO_PROPOSAL_PAGE_SIZE = 10;
 const DAO_ALL_FILTER = { key: 'all', label: 'All' };
-const DAO_CLAIMABLE_FILTER = { key: 'claimable', label: 'Claimable' };
+const DAO_CLAIMABLE_FILTER = { key: 'claimable', label: 'Claim' };
 const DAO_FILTER_OPTIONS = [
   DAO_ALL_FILTER,
   ...DAO_STATES,
@@ -2772,7 +2830,9 @@ function formatDaoProposalTitle(proposal) {
 class DaoModal {
   constructor() {
     this.loadingToastId = null;
+    this.loadingSession = null;
     this.selectedFilterKey = 'voting';
+    this.contextFilters = { proposals: 'voting', projects: 'executing' };
     this.refreshState = 'loading';
     this.refreshSequence = 0;
     this.openRefreshId = 0;
@@ -2808,6 +2868,11 @@ class DaoModal {
 
     if (this.filterBar) {
       this.filterBar.addEventListener('click', (e) => {
+        const contextButton = e.target.closest('[data-dao-context]');
+        if (contextButton) {
+          this.setFilter(this.contextFilters[contextButton.dataset.daoContext]);
+          return;
+        }
         const chip = e.target.closest('.dao-filter-chip');
         if (!chip) return;
         const key = chip.dataset.filterKey;
@@ -2833,10 +2898,9 @@ class DaoModal {
     // Do not close the menu or start a refresh while another modal is still opening.
     if (!this.isActive() && !openModal(this.modal)) return;
 
-    const refreshId = ++this.refreshSequence;
-    this.openRefreshId = refreshId;
-    this.proposalOpenSequence += 1;
-    this.refreshState = 'loading';
+    const session = this.beginLoadingSession();
+    daoRepo.reset();
+    const refreshId = this.openRefreshId;
 
     // Close the main menu if opened from it
     if (menuModal?.isActive?.()) menuModal.close();
@@ -2844,29 +2908,26 @@ class DaoModal {
 
     enterFullscreen();
 
-    this.selectedFilterKey = initialFilterKey || this.selectedFilterKey || 'voting';
+    this.selectFilter(initialFilterKey || this.selectedFilterKey);
     this.visibleProposalCount = DAO_PROPOSAL_PAGE_SIZE;
     this.render();
 
     const notificationCutoff = getCorrectedTimestamp();
-    this.hideLoadingToast();
     const toastId = showToast('Loading DAO proposals...', 0, 'loading', false, { dedupe: false });
     this.loadingToastId = toastId;
     try {
-      await daoRepo.refresh({ force: true });
-      if (!this.isActive() || refreshId !== this.openRefreshId) return;
+      await daoRepo.refresh({ force: true, signal: session.controller.signal });
+      if (!this.isLoadingSessionCurrent(session) || refreshId !== this.openRefreshId) return;
       this.acknowledgeNotifications(notificationCutoff);
-      const refreshedClaimProposalNumbers = await this.syncTrackedClaimWindows();
-      if (!this.isActive() || refreshId !== this.openRefreshId) return;
+      await this.syncTrackedClaimWindows(session.controller.signal);
+      if (!this.isLoadingSessionCurrent(session) || refreshId !== this.openRefreshId) return;
       this.refreshState = 'ready';
-      await this.loadSelectedFilter({
-        reset: true,
-        reuseProposalNumbers: refreshedClaimProposalNumbers,
-      });
+      await this.loadSelectedFilter({ reset: true });
+      if (!this.isLoadingSessionCurrent(session) || refreshId !== this.openRefreshId) return;
       this.lastSuccessfulRefreshId = Math.max(this.lastSuccessfulRefreshId, refreshId);
-      if (!this.isActive() || refreshId !== this.openRefreshId) return;
     } catch (e) {
-      if (refreshId !== this.openRefreshId || this.lastSuccessfulRefreshId > refreshId) return;
+      if (!this.isLoadingSessionCurrent(session) || refreshId !== this.openRefreshId
+        || this.lastSuccessfulRefreshId > refreshId) return;
       this.refreshState = 'error';
       console.warn('Failed to refresh DAO proposals:', e);
       showToast('Failed to load proposals', 2500, 'error');
@@ -2878,10 +2939,7 @@ class DaoModal {
   }
 
   close() {
-    this.openRefreshId = ++this.refreshSequence;
-    this.hideLoadingToast();
-    this.proposalOpenSequence += 1;
-    this.detailsRequest = null;
+    this.cancelLoadingSession();
     this.modal.classList.remove('active');
     enterFullscreen();
 
@@ -2900,6 +2958,32 @@ class DaoModal {
     return this.modal.classList.contains('active');
   }
 
+  beginLoadingSession() {
+    this.cancelLoadingSession();
+    this.loadingSession = {
+      controller: new AbortController(),
+      accountData: myData,
+      networkId: network.netid,
+    };
+    return this.loadingSession;
+  }
+
+  cancelLoadingSession() {
+    this.loadingSession?.controller.abort();
+    this.loadingSession = null;
+    this.openRefreshId = ++this.refreshSequence;
+    this.proposalOpenSequence += 1;
+    this.detailsRequest = null;
+    this.refreshState = 'loading';
+    this.hideLoadingToast();
+  }
+
+  isLoadingSessionCurrent(session) {
+    return Boolean(session && session === this.loadingSession
+      && !session.controller.signal.aborted && session.accountData === myData
+      && session.networkId === network.netid && this.isActive());
+  }
+
   hideLoadingToast() {
     if (!this.loadingToastId) return;
     hideToast(this.loadingToastId);
@@ -2907,8 +2991,11 @@ class DaoModal {
   }
 
   resetNotificationState() {
+    this.cancelLoadingSession();
     this.notificationBatch = createEmptyDaoNotificationSummary();
     this.notificationProposalNumbers.clear();
+    this.selectedFilterKey = 'voting';
+    this.contextFilters = { proposals: 'voting', projects: 'executing' };
   }
 
   acknowledgeNotifications(notificationCutoff) {
@@ -2950,27 +3037,29 @@ class DaoModal {
     return getDaoTrackedProposalMetadataEntries(entries, proposalNumbers);
   }
 
-  async syncTrackedClaimWindows() {
-    const refreshedProposalNumbers = new Set();
+  async syncTrackedClaimWindows(signal) {
     const accountData = myData;
+    const networkId = network.netid;
     const pendingProposalNumbers = daoProposalVoteTracker.getPendingClaimProposalNumbers();
-    if (pendingProposalNumbers.length === 0) return refreshedProposalNumbers;
+    if (pendingProposalNumbers.length === 0) return;
 
     const entries = getDaoTrackedProposalMetadataEntries(
       daoRepo.getProposalMetaForUi(),
       pendingProposalNumbers,
     ).filter((entry) => isDaoFinalResultState(entry.status));
 
-    const proposals = await Promise.all(entries.map(async (entry) => {
-      try {
-        return await daoRepo.refreshProposal(entry.proposal);
-      } catch (error) {
-        console.warn(`Failed to refresh tracked DAO proposal #${entry.proposal}:`, error);
-        return null;
+    const proposals = [];
+    for (let start = 0; start < entries.length; start += 4) {
+      signal?.throwIfAborted();
+      const results = await Promise.allSettled(entries.slice(start, start + 4)
+        .map(entry => daoRepo.refreshProposal(entry.proposal, signal)));
+      signal?.throwIfAborted();
+      if (accountData !== myData || networkId !== network.netid) return;
+      for (const result of results) {
+        if (result.status === 'fulfilled' && result.value) proposals.push(result.value);
       }
-    }));
+    }
 
-    if (accountData !== myData) return refreshedProposalNumbers;
     for (const proposal of proposals) {
       if (!proposal || !Number(proposal.votingEndedAt)) continue;
       const claimWindow = getDaoProposalClaimWindow(proposal);
@@ -2979,9 +3068,7 @@ class DaoModal {
         claimWindow.start,
         claimWindow.end,
       );
-      refreshedProposalNumbers.add(proposal.number);
     }
-    return refreshedProposalNumbers;
   }
 
   getSelectedMetadataEntries(entries) {
@@ -2997,40 +3084,62 @@ class DaoModal {
     });
   }
 
-  async loadSelectedFilter({ reset, reuseProposalNumbers = new Set() }) {
+  async loadSelectedFilter({ reset }) {
+    const session = this.loadingSession;
+    if (!this.isLoadingSessionCurrent(session)) return;
     const entries = this.getSelectedMetadataEntries(daoRepo.getProposalMetaForUi());
 
     if (reset) this.visibleProposalCount = DAO_PROPOSAL_PAGE_SIZE;
     const pageStart = reset ? 0 : Math.max(this.visibleProposalCount - DAO_PROPOSAL_PAGE_SIZE, 0);
     const entriesToLoad = entries.slice(pageStart, this.visibleProposalCount);
-    const entriesToFetch = entriesToLoad.filter((entry) => !reuseProposalNumbers.has(entry.proposal));
+    const cachedNumbers = new Set(daoRepo.getProposalsForUi().map(proposal => proposal.number));
+    const entriesToFetch = entriesToLoad.filter(entry => !cachedNumbers.has(entry.proposal));
+    if (entriesToFetch.length === 0) {
+      this.detailsRequest = null;
+      this.render();
+      return;
+    }
 
-    const request = daoRepo.loadProposalEntries(entriesToFetch, { append: true });
+    const request = daoRepo.loadProposalEntries(entriesToFetch, { append: true, signal: session.controller.signal });
     this.detailsRequest = request;
     this.render();
 
     try {
       await request;
+      if (!this.isLoadingSessionCurrent(session) || this.detailsRequest !== request) return;
+      const loadedNumbers = new Set(daoRepo.getProposalsForUi().map((proposal) => proposal.number));
+      if (entriesToLoad.some((entry) => !loadedNumbers.has(entry.proposal))) {
+        throw new Error('Some DAO items could not be loaded');
+      }
+    } catch (error) {
+      if (!this.isLoadingSessionCurrent(session) || this.detailsRequest !== request) return;
+      this.refreshState = 'error';
+      throw error;
     } finally {
       if (this.detailsRequest === request) this.detailsRequest = null;
     }
-    if (this.detailsRequest || !this.isActive()) return;
+    if (!this.isLoadingSessionCurrent(session)) return;
 
     this.render();
   }
 
-  async loadMore() {
-    if (this.detailsRequest) return;
-    this.visibleProposalCount += DAO_PROPOSAL_PAGE_SIZE;
-
+  async loadPageWithFeedback(reset, errorMessage) {
+    const session = this.loadingSession;
+    const key = this.selectedFilterKey;
     try {
-      await this.loadSelectedFilter({ reset: false });
+      await this.loadSelectedFilter({ reset });
     } catch (error) {
-      this.visibleProposalCount -= DAO_PROPOSAL_PAGE_SIZE;
-      console.warn('Failed to load more DAO proposals:', error);
-      showToast('Failed to load more proposals', 2500, 'error');
+      if (!this.isLoadingSessionCurrent(session) || key !== this.selectedFilterKey) return;
+      console.warn('Failed to load DAO page:', error);
+      showToast(errorMessage, 2500, 'error');
       this.render();
     }
+  }
+
+  async loadMore() {
+    if (this.refreshState !== 'ready' || this.detailsRequest) return;
+    this.visibleProposalCount += DAO_PROPOSAL_PAGE_SIZE;
+    return this.loadPageWithFeedback(false, 'Failed to load more proposals');
   }
 
   async refreshAfterDaoSettlement(pendingTxInfo, outcome) {
@@ -3047,12 +3156,9 @@ class DaoModal {
     let didRefreshDaoData = false;
     try {
       await daoRepo.refresh({ force: true });
-      const refreshedClaimProposalNumbers = await this.syncTrackedClaimWindows();
+      await this.syncTrackedClaimWindows(null);
       if (this.isActive()) {
-        await this.loadSelectedFilter({
-          reset: true,
-          reuseProposalNumbers: refreshedClaimProposalNumbers,
-        });
+        await this.loadSelectedFilter({ reset: true });
       }
       if (!daoRepo.getProposalById(pendingTxInfo?.proposalStoreId)) {
         await daoRepo.refreshProposal(pendingTxInfo?.proposalNumber);
@@ -3088,17 +3194,40 @@ class DaoModal {
     return didRefreshDaoData;
   }
 
-  async setFilter(key) {
-    if (key === this.selectedFilterKey || this.detailsRequest) return;
-    this.proposalOpenSequence += 1;
+  selectFilter(key) {
+    assert(DAO_FILTER_OPTIONS.some((filter) => filter.key === key), 'Unknown DAO filter');
     this.selectedFilterKey = key;
-    try {
-      await this.loadSelectedFilter({ reset: true });
-    } catch (error) {
-      console.warn('Failed to load DAO proposal filter:', error);
-      showToast('Failed to load proposals', 2500, 'error');
-      this.render();
+    if (key === 'all' || key === 'claimable') return;
+    const context = DAO_PROJECT_FILTER_KEYS.has(key) ? 'projects' : 'proposals';
+    this.contextFilters[context] = key;
+  }
+
+  async setFilter(key) {
+    if (key === this.selectedFilterKey || this.refreshState !== 'ready' || this.detailsRequest) return;
+    this.proposalOpenSequence += 1;
+    this.selectFilter(key);
+    this.list?.parentElement.scrollTo({ top: 0 });
+    return this.loadPageWithFeedback(true, 'Failed to load proposals');
+  }
+
+  renderFilterArea() {
+    const key = this.selectedFilterKey;
+    const context = key === 'all' || key === 'claimable'
+      ? null : DAO_PROJECT_FILTER_KEYS.has(key) ? 'projects' : 'proposals';
+    for (const button of this.filterBar.querySelectorAll('[data-dao-context]')) {
+      button.setAttribute('aria-pressed', String(button.dataset.daoContext === context));
     }
+    for (const panel of this.filterBar.querySelectorAll('[data-dao-filters]')) {
+      const inactive = panel.dataset.daoFilters !== context;
+      panel.classList.toggle('dao-filter-inactive', inactive);
+      panel.inert = inactive;
+      panel.setAttribute('aria-hidden', String(inactive));
+    }
+    const placeholder = this.filterBar.querySelector('.dao-filter-placeholder');
+    placeholder.classList.toggle('dao-filter-inactive', context !== null);
+    placeholder.setAttribute('aria-hidden', String(context !== null));
+    placeholder.textContent = key === 'claimable'
+      ? 'Voting rewards available to your account.' : 'Showing all proposals and projects.';
   }
 
   render() {
@@ -3124,11 +3253,8 @@ class DaoModal {
     counts[DAO_ALL_FILTER.key] = metadataEntries.length;
     counts[DAO_CLAIMABLE_FILTER.key] = claimCandidateMetadataEntries.length;
 
-    const label = DAO_FILTER_OPTIONS.find((filter) => filter.key === this.selectedFilterKey)?.label
-      || this.selectedFilterKey;
-    if (this.titleEl) {
-      this.titleEl.textContent = isClaimableFilter ? `DAO - ${label} (this account)` : `DAO - ${label}`;
-    }
+    if (this.titleEl) this.titleEl.textContent = 'DAO';
+    if (this.filterBar) this.renderFilterArea();
 
     for (const filter of DAO_FILTER_OPTIONS) {
       const chip = this.filterBar?.querySelector(`.dao-filter-chip[data-filter-key="${filter.key}"]`);
@@ -3141,6 +3267,8 @@ class DaoModal {
         if (hasFreshData) {
           if (filter.key === DAO_CLAIMABLE_FILTER.key) {
             countAriaLabel = `${count} tracked claim candidates`;
+          } else if (filter.key === DAO_ALL_FILTER.key) {
+            countAriaLabel = `${count} DAO items`;
           } else if (DAO_PROJECT_FILTER_KEYS.has(filter.key)) {
             countAriaLabel = `${count} ${filter.label.toLowerCase()} projects`;
           } else {
@@ -3153,7 +3281,7 @@ class DaoModal {
         const selected = filter.key === this.selectedFilterKey;
         chip.classList.toggle('active', selected);
         chip.classList.toggle('has-notification', this.hasNotificationForFilter(filter.key));
-        chip.setAttribute('aria-selected', selected ? 'true' : 'false');
+        chip.setAttribute('aria-pressed', String(selected));
       }
     }
 
@@ -3186,7 +3314,7 @@ class DaoModal {
         if (sublineEl) sublineEl.textContent = 'Please wait';
       } else if (this.refreshState === 'error') {
         if (headlineEl) headlineEl.textContent = 'Failed to load proposals';
-        if (sublineEl) sublineEl.textContent = 'Close and reopen the DAO to retry';
+        if (sublineEl) sublineEl.textContent = 'Close and reopen the DAO to try again';
       } else if (isClaimableFilter) {
         if (headlineEl) headlineEl.textContent = 'No claimable proposals found';
         if (sublineEl) sublineEl.textContent = 'Claimable proposals appear here when available';
@@ -3204,6 +3332,7 @@ class DaoModal {
     for (const p of filtered) {
       const li = document.createElement('li');
       li.classList.add('chat-item', 'dao-proposal-row');
+      li.dataset.proposalNumber = String(p.number);
 
       const rowTitleText = formatDaoProposalTitle(p);
       const title = escapeHtml(rowTitleText);
@@ -3386,10 +3515,12 @@ class DaoModal {
   }
 
   async openProposal(proposal, proposalRow) {
+    const session = this.loadingSession;
+    if (!this.isLoadingSessionCurrent(session)) return;
     const openId = ++this.proposalOpenSequence;
     try {
-      const refreshed = await daoRepo.refreshProposal(proposal.number);
-      if (openId !== this.proposalOpenSequence || !this.isActive()) return;
+      const refreshed = await daoRepo.refreshProposal(proposal.number, session.controller.signal);
+      if (!this.isLoadingSessionCurrent(session) || openId !== this.proposalOpenSequence) return;
       if (!refreshed) throw new Error(`Proposal #${proposal.number} is unavailable`);
       if (this.clearNotificationForProposal(proposal.number)) {
         proposalRow.classList.remove('has-notification');
@@ -3397,11 +3528,18 @@ class DaoModal {
         if (ariaLabel) proposalRow.setAttribute('aria-label', ariaLabel.replace(/^New DAO activity\. /, ''));
       }
       proposalInfoModal.open(proposal.id);
+      this.returnProposalNumber = proposal.number;
     } catch (error) {
-      if (openId !== this.proposalOpenSequence || !this.isActive()) return;
+      if (!this.isLoadingSessionCurrent(session) || openId !== this.proposalOpenSequence) return;
       console.warn('Failed to refresh DAO proposal:', error);
       showToast('Failed to load proposal', 2500, 'error');
     }
+  }
+
+  restoreListFocus() {
+    if (!this.isActive()) return;
+    const row = this.list.querySelector(`[data-proposal-number="${this.returnProposalNumber}"]`);
+    (row || this.filterBar.querySelector('[aria-pressed="true"]'))?.focus();
   }
 }
 
@@ -7841,6 +7979,7 @@ class ProposalInfoModal {
     if (this.isSubmitting) return;
     this.modal.classList.remove('active');
     enterFullscreen();
+    daoModal.restoreListFocus();
   }
 
   refreshIfOpen(proposalId, { resetVoteForm = false } = {}) {
@@ -10957,11 +11096,12 @@ class CallsModal {
       showToast(`Call scheduled for ${chatModal.formatLocalDateTime(callGroup.callTime)}`, 2500, 'info');
       return;
     }
-    if (!callGroup.callUrl) {
+    const callJoinUrl = buildCallJoinUrl(callGroup.callUrl, myAccount.username);
+    if (!callJoinUrl) {
       showToast('Call link not found', 0, 'error');
       return;
     }
-    window.open(callGroup.callUrl+`${callUrlParams}"${myAccount.username}"`, '_blank');
+    window.open(callJoinUrl, '_blank', 'noopener,noreferrer');
   }
 
   /**
@@ -11424,6 +11564,30 @@ async function ensureContactKeys(address) {
   } catch (e) {
     console.error('ensureContactKeys error:', e);
     return false;
+  }
+}
+
+async function getVerifiedChatContactKeys(address) {
+  const existingContact = myData.contacts[address];
+  const existingPublicKey = existingContact?.public;
+  if (isPublicKeyForAddress(existingPublicKey, address, generateAddress)) {
+    return {
+      public: existingPublicKey.replace(/^0x/i, ''),
+      pqPublic: existingContact.pqPublic ?? null,
+    };
+  }
+
+  try {
+    const accountInfo = await queryNetwork(`/account/${longAddress(address)}`);
+    const publicKey = accountInfo?.account?.publicKey;
+    if (!isPublicKeyForAddress(publicKey, address, generateAddress)) return null;
+    return {
+      public: publicKey.replace(/^0x/i, ''),
+      pqPublic: accountInfo?.account?.pqPublicKey || existingContact?.pqPublic || null,
+    };
+  } catch (error) {
+    console.warn('Unable to resolve authenticated chat participant keys', error);
+    return null;
   }
 }
 
@@ -12776,17 +12940,81 @@ async function processChats(chats, keys) {
   let needsUpcomingCallsUiRefresh = false;
   let syncedEvmPayment = false;
   const currentUserAddress = normalizeAddress(keys.address);
+  const currentUserPublicKey = isPublicKeyForAddress(keys.public, currentUserAddress, generateAddress)
+    ? keys.public
+    : bin2hex(getPublicKey(hex2bin(keys.secret)));
+  const verifiedChats = new Map();
 
-  for (let sender in chats) {
+  // Prepare the whole batch before changing contacts, messages, or the sync cursor.
+  for (const sender in chats) {
+    let from;
+    let expectedChatId;
+    try {
+      from = normalizeAddress(sender);
+      expectedChatId = getExpectedChatId(currentUserAddress, from, hashBytes);
+    } catch {
+      console.warn('Ignoring chat entry with an invalid participant address');
+      continue;
+    }
+    if (chats[sender] !== expectedChatId) {
+      console.warn('Ignoring chat entry with a mismatched chat identifier');
+      continue;
+    }
+
     // Fetch messages using the adjusted timestamp
-    const res = await queryNetwork(`/messages/${chats[sender]}/${messageQueryTimestamp}`);
+    const res = await queryNetwork(`/messages/${expectedChatId}/${messageQueryTimestamp}`);
     if (res && res.messages) {
-      const from = normalizeAddress(sender);
+      const contactKeys = await getVerifiedChatContactKeys(from);
+      const verifiedMessages = [];
+      for (const [order, tx] of Object.entries(res.messages)) {
+        let transactionFrom = '';
+        try {
+          transactionFrom = normalizeAddress(tx?.from);
+        } catch {
+          // validateChatTransaction returns the specific participant error below.
+        }
+        const publicKey = transactionFrom === currentUserAddress
+          ? currentUserPublicKey
+          : contactKeys?.public;
+        const validation = validateChatTransaction(tx, {
+          currentAddress: currentUserAddress,
+          contactAddress: from,
+          expectedChatId,
+          networkId: network.netid,
+          publicKey,
+        }, {
+          ethHashMessage,
+          generateAddress,
+          hashBytes,
+          stringify,
+          verifyMessage,
+        });
+        if (!validation.ok) {
+          if (validation.reason === 'public_key_unavailable') {
+            console.warn('Deferring chat sync until the participant signing key is available');
+            return;
+          }
+          console.warn(`Ignoring unauthenticated chat transaction: ${validation.reason}`);
+          continue;
+        }
+        verifiedMessages.push({ order, tx, txid: validation.txid });
+      }
+      if (verifiedMessages.length === 0) continue;
+      verifiedChats.set(sender, { from, contactKeys, verifiedMessages });
+    }
+  }
+
+  for (const sender in chats) {
+    const verifiedChat = verifiedChats.get(sender);
+    if (verifiedChat) {
+      const { from, contactKeys, verifiedMessages } = verifiedChat;
       if (!myData.contacts[from]) {
         // New inbound chat (not previously in contacts): create as tolled + allow one-time tolled deposit toast
         createNewContact(from, undefined, 1, false);
       }
       const contact = myData.contacts[from];
+      if (contactKeys?.public) contact.public = contactKeys.public;
+      if (contactKeys?.pqPublic) contact.pqPublic = contactKeys.pqPublic;
       // Set username to "Liberdus Faucet" if there is no username for the faucet address contact
       if (isFaucetAddress(from) && !contact.username) {
         contact.username = 'Liberdus Faucet';
@@ -12812,14 +13040,12 @@ async function processChats(chats, keys) {
       const inActiveChatWithSender =
         chatModal.address === from && chatModal.isActive();
 
-      for (let i in res.messages) {
-        const tx = res.messages[i]; // the messages are actually the whole tx
-        // compute the transaction id (txid)
-        const txidHex = getTxid(tx);
+      for (const verifiedMessage of verifiedMessages) {
+        const { order: i, tx, txid: txidHex } = verifiedMessage;
         let useTxTimestamp = false;
 
         newTimestamp = tx.timestamp > newTimestamp ? tx.timestamp : newTimestamp;
-        mine = tx.from == longAddress(keys.address) ? true : false;
+        mine = normalizeAddress(tx.from) === currentUserAddress;
         // timestamp-skew check for incoming messages/transfers (ensures we don't use out of range sent_timestamp)
         if (!mine && (tx.type === 'message' || tx.type === 'transfer')) {
           const sentTs = Number(((tx.type === 'message' ? tx.xmessage : tx.xmemo) || {}).sent_timestamp || 0);
@@ -19921,6 +20147,7 @@ const validatorModal = new ValidatorStakingModal();
 
 class StakeValidatorModal {
   constructor() {
+    this.openContext = null;
     this.stakedAmount = 0n;
     this.lastValidationTimestamp = 0;
     this.hasNominee = false;
@@ -19964,7 +20191,7 @@ class StakeValidatorModal {
     this.amountInput.addEventListener('input', this.debouncedValidateStakeInputs);
     this.scanStakeQRButton.addEventListener('click', () => qrScanModal.open());
     this.uploadStakeQRButton.addEventListener('click', () => this.stakeQRFileInput.click());
-    this.stakeQRFileInput.addEventListener('change', (event) => sendAssetFormModal.handleQRFileSelect(event, this));
+    this.stakeQRFileInput.addEventListener('change', (event) => this.readQRFile(event));
     this.faucetButton.addEventListener('click', withButtonCooldown(
       this.faucetButton,
       FAUCET_COOLDOWN_MS,
@@ -19977,7 +20204,8 @@ class StakeValidatorModal {
   }
 
   open() {
-    openModal(this.modal);
+    if (!openModal(this.modal)) return;
+    this.openContext = { account: myAccount };
 
     // Set the correct fill function for the staking context
     qrScanModal.fillFunction = this.fillFromQR.bind(this);
@@ -20008,6 +20236,7 @@ class StakeValidatorModal {
   }
 
   close() {
+    this.openContext = null;
     this.modal.classList.remove('active');
     // Reset the form fields
     this.resetForm();
@@ -20019,6 +20248,27 @@ class StakeValidatorModal {
    */
   isActive() {
     return this.modal?.classList.contains('active') || false;
+  }
+
+  isCurrentOpening(context) {
+    return Boolean(context && this.openContext === context && context.account === myAccount && this.isActive());
+  }
+
+  async readQRFile(event) {
+    const input = event.target;
+    const file = input.files[0];
+    if (!file) return;
+    const context = this.openContext;
+    try {
+      const text = await QRImageDecoder.decode(file);
+      if (this.isCurrentOpening(context) && input.files[0] === file) await this.fillFromQR(text);
+    } catch (error) {
+      if (!this.isCurrentOpening(context) || input.files[0] !== file) return;
+      showToast('Could not read QR code from image', 0, 'error');
+      this.resetForm();
+    } finally {
+      if (input.files[0] === file) input.value = '';
+    }
   }
 
   async handleSubmit(event) {
@@ -23307,10 +23557,10 @@ class ChatModal {
   renderChatMessageHTML(item, { contact, lastReadTs }) {
     const timeString = formatTime(item.timestamp);
     // Use a consistent timestamp attribute for potential future use (e.g., message jumping)
-    const timestampAttribute = `data-message-timestamp="${item.timestamp}"`;
+    const timestampAttribute = `data-message-timestamp="${escapeHtmlAttribute(item.timestamp)}"`;
     // Add txid attribute if available
-    const txidAttribute = item.txid ? `data-txid="${item.txid}"` : '';
-    const statusAttribute = item.status ? `data-status="${item.status}"` : '';
+    const txidAttribute = item.txid ? `data-txid="${escapeHtmlAttribute(item.txid)}"` : '';
+    const statusAttribute = item.status ? `data-status="${escapeHtmlAttribute(item.status)}"` : '';
 
     if (item.type === 'update_toll_required') {
       const statusText = escapeHtml(getUpdateTollRequiredPreviewText(item, contact));
@@ -23327,7 +23577,7 @@ class ChatModal {
       // Format amount correctly using big2str
       const amountStr = big2str(item.amount, 18);
       const amountNum = parseFloat(amountStr);
-      const amountDisplay = `${amountNum.toFixed(6)} ${item.symbol || 'LIB'}`;
+      const amountDisplay = `${amountNum.toFixed(6)} ${escapeHtml(item.symbol || 'LIB')}`;
       const directionText = item.my ? '-' : '+';
       const messageClass = item.my ? 'sent' : 'received';
       const showEditedDot = !item.my && item.edited && item.edited_timestamp && item.edited_timestamp > lastReadTs && !isDeleted(item);
@@ -23351,7 +23601,7 @@ class ChatModal {
       // Render deleted message with special styling
       return `
                     <div class="message ${messageClass} deleted-message" ${timestampAttribute} ${txidAttribute} ${statusAttribute}>
-                        <div class="message-content deleted-content">${item.message}</div>
+                        <div class="message-content deleted-content">${escapeHtml(item.message)}</div>
                         <div class="message-time">${timeString}</div>
                     </div>
                 `;
@@ -23361,11 +23611,12 @@ class ChatModal {
 
     let replyHTML = '';
     // --- Render Reply Quote if present ---
-    if (item.replyId) {
+    const replyId = normalizeTransactionId(item.replyId);
+    if (replyId) {
       const replyText = escapeHtml(item.replyMessage || 'View original message');
       // Determine owner label: "You" if the referenced message is ours, else contact name
       const ownerIsMineHint = item.replyOwnerIsMine;
-      const targetMsg = contact.messages.find((message) => message.txid === item.replyId);
+      const targetMsg = contact.messages.find((message) => message.txid === replyId);
       // Use both item.my and replyOwnerIsMine to determine from current viewer's perspective
       // item.my: true if reply is from current user (viewer's perspective)
       // replyOwnerIsMine: true if original message was from sender's perspective
@@ -23378,7 +23629,7 @@ class ChatModal {
       const replyOwnerLabel = `<span class="reply-quote-label ${ownerClass}">${escapeHtml(ownerText)}</span>`;
 
       replyHTML = `
-                <div class="reply-quote ${ownerClass}" data-reply-txid="${escapeHtml(item.replyId)}">
+                <div class="reply-quote ${ownerClass}" data-reply-txid="${escapeHtmlAttribute(replyId)}">
                   ${replyOwnerLabel}
                   <div class="reply-quote-text">${replyText}</div>
                 </div>
@@ -23389,33 +23640,36 @@ class ChatModal {
     let attachmentsHTML = '';
     if (item.xattach && Array.isArray(item.xattach) && item.xattach.length > 0) {
       attachmentsHTML = item.xattach.map(att => {
-        const fileUrl = att.url || '#';
-        const fileName = att.name || 'Attachment';
+        const fileUrl = normalizeResourceUrl(att.url || '#', window.location.href) || '#';
+        const previewUrl = normalizeResourceUrl(att.pUrl || '', window.location.href);
+        const fileName = typeof att.name === 'string' && att.name ? att.name.slice(0, 255) : 'Attachment';
+        const encodedFileName = encodeAttachmentName(fileName);
+        const mimeType = att.type ? normalizeMimeType(att.type) : '';
         const fileSize = att.size ? this.formatFileSize(att.size) : '';
-        const fileType = att.type ? att.type.split('/').pop().toUpperCase() : '';
-        const isImage = att.type && att.type.startsWith('image/');
-        const isVideo = att.type && att.type.startsWith('video/');
+        const fileType = mimeType ? mimeType.split('/').pop().toUpperCase() : '';
+        const isImage = mimeType.startsWith('image/');
+        const isVideo = mimeType.startsWith('video/');
         const hasThumbnail = isImage || isVideo;
-        const fileTypeIcon = this.getFileTypeForIcon(att.type || '', fileName);
+        const fileTypeIcon = this.getFileTypeForIcon(mimeType, fileName);
         const paddingStyle = hasThumbnail ? 'padding: 5px 5px;' : 'padding: 10px 12px;';
         return `
                 <div class="attachment-row" style="display: flex; ${hasThumbnail ? 'flex-direction: column;' : 'align-items: center;'} background: #f5f5f7; border-radius: 12px; ${paddingStyle} margin-bottom: 6px;"
-                  data-url="${fileUrl}"
-                  data-p-url="${att.pUrl || ''}"
-                  data-name="${encodeURIComponent(fileName)}"
-                  data-type="${att.type || ''}"
+                  data-url="${escapeHtmlAttribute(fileUrl)}"
+                  data-p-url="${escapeHtmlAttribute(previewUrl)}"
+                  data-name="${escapeHtmlAttribute(encodedFileName)}"
+                  data-type="${escapeHtmlAttribute(mimeType)}"
                   ${isImage ? 'data-image-attachment="true"' : ''}
                   ${isVideo ? 'data-video-attachment="true"' : ''}
                 >
                   <div class="attachment-icon-container" style="${hasThumbnail ? 'margin-bottom: 10px; flex-direction: column;' : 'margin-right: 14px; flex-shrink: 0;'}">
-                    <div class="attachment-icon" data-file-type="${fileTypeIcon}"></div>
+                    <div class="attachment-icon" data-file-type="${escapeHtmlAttribute(fileTypeIcon)}"></div>
                     ${hasThumbnail ? '<div class="attachment-preview-hint">Click for options</div>' : ''}
                   </div>
                   <div style="min-width:0;">
                     <span class="attachment-label" style="font-weight:500;color:#222;display:block;word-wrap:break-word;">
-                      ${fileName}
+                      ${escapeHtml(fileName)}
                     </span><br>
-                    <span class="attachment-meta" style="color: #888;">${fileType}${fileType && fileSize ? ' · ' : ''}${fileSize}</span>
+                    <span class="attachment-meta" style="color: #888;">${escapeHtml(fileType)}${fileType && fileSize ? ' · ' : ''}${escapeHtml(fileSize)}</span>
                   </div>
                 </div>
               `;
@@ -23448,15 +23702,13 @@ class ChatModal {
         } else {
           // Build scheduled label if in the future
           const scheduleHTML = this.buildCallScheduleHTML(callTimeMs);
+          const callJoinUrl = buildCallJoinUrl(item.message, myAccount.username);
           // Render call message with a left circular phone icon (clickable) and plain text to the right
-          // TODO - remove the href and instead have it call a function which will open the URL and at the time of opening it adds the callUrlParam and username
           messageTextHTML = `
                   <div class="call-message">
-                    <a href='${item.message}${callUrlParams}"${myAccount.username}"' target="_blank" rel="noopener noreferrer" class="call-message-phone-button" aria-label="Join Video Call">
-                      <span class="sr-only">Join Video Call</span>
-                    </a>
+                    ${callJoinUrl ? `<a href="${escapeHtmlAttribute(callJoinUrl)}" target="_blank" rel="noopener noreferrer" class="call-message-phone-button" aria-label="Join Video Call"><span class="sr-only">Join Video Call</span></a>` : ''}
                     <div>
-                      <div class="call-message-text">Join Video Call</div>
+                      <div class="call-message-text">${callJoinUrl ? 'Join Video Call' : 'Call link unavailable'}</div>
                       ${scheduleHTML}
                     </div>
                   </div>`;
@@ -23468,9 +23720,10 @@ class ChatModal {
         const durationSeconds = this.getPositiveDurationSeconds(item.duration);
         const currentTime = this.formatVoiceProgressTime(0, durationSeconds);
         const duration = formatVoiceTimer(durationSeconds);
+        const voiceUrl = normalizeResourceUrl(item.url || '', window.location.href);
         // Use audio encryption keys for playback, fall back to message encryption keys if not available
         messageTextHTML = `
-              <div class="voice-message" data-url="${item.url || ''}" data-name="voice-message" data-type="audio/webm" data-duration="${durationSeconds}">
+              <div class="voice-message" data-url="${escapeHtmlAttribute(voiceUrl)}" data-name="voice-message" data-type="audio/webm" data-duration="${escapeHtmlAttribute(durationSeconds)}">
                 <div class="voice-message-controls">
                   <div class="voice-message-top-row">
                     <button class="voice-message-play-button" aria-label="Play voice message">
@@ -23557,7 +23810,7 @@ class ChatModal {
         }
     }
 
-    const callTimeAttribute = messageType === 'call' && item.callTime ? `data-call-time="${item.callTime}"` : '';
+    const callTimeAttribute = messageType === 'call' && item.callTime ? `data-call-time="${escapeHtmlAttribute(item.callTime)}"` : '';
     const showEditedDot = !item.my && item.edited && item.edited_timestamp && item.edited_timestamp > lastReadTs && !isDeleted(item);
     return `
             <div class="message ${messageClass}" ${timestampAttribute} ${txidAttribute} ${statusAttribute} ${callTimeAttribute}>
@@ -24599,34 +24852,6 @@ class ChatModal {
   }
 
   /**
-   * Determines if a file type can be viewed in a browser
-   * @param {string} mimeType - The MIME type of the file
-   * @returns {boolean} True if the file type can be viewed in a browser, false otherwise
-   */
-  isViewableInBrowser(mimeType) {
-    if (!mimeType) return false;
-
-    const normalizedMime = mimeType.toLowerCase().trim();
-
-    // Exclude vCard types (VCF). Many servers report vcf as a text/* subtype
-    // but vCard files shouldn't be opened inline in the browser here.
-    if (normalizedMime.includes('vcard')) return false;
-
-    const viewableTypes = [
-      'image/',           // All images
-      'text/',            // Text files
-      'application/pdf',  // PDFs
-      'video/',           // Videos
-      'audio/',           // Audio files
-      'application/json', // JSON
-      'application/xml',  // XML
-      'text/xml'          // XML (alternative)
-    ];
-
-    return viewableTypes.some(type => normalizedMime.startsWith(type));
-  }
-
-  /**
    * Triggers a file download
    * @param {string} blobUrl - The URL of the file to download
    * @param {string} filename - The name of the file to download
@@ -24807,20 +25032,23 @@ class ChatModal {
       const blob = isImage
         ? await this.getFullImageBlob(item, linkEl)
         : await this.decryptAttachmentToBlob(item, linkEl);
-      const blobUrl = URL.createObjectURL(blob);
       const filename = decodeURIComponent(linkEl.dataset.name || 'download');
+      const safePreviewMime = await getSafeAttachmentPreviewMime(blob);
+      const safePreviewBlob = safePreviewMime
+        ? new Blob([blob], { type: safePreviewMime })
+        : null;
 
       // Generate and cache thumbnail for images and videos, then update in place
-      if (blob.type.startsWith('image/') || blob.type.startsWith('video/')) {
+      if (safePreviewMime.startsWith('image/') || safePreviewMime.startsWith('video/')) {
         const attachmentUrl = linkEl.dataset.url;
         const attachmentRow = linkEl.closest('.attachment-row') || linkEl.closest(CHAT_THUMBNAIL_ATTACHMENT_SELECTOR);
         
-        const thumbnailPromise = blob.type.startsWith('image/')
-          ? thumbnailCache.generateThumbnail(blob)
-          : thumbnailCache.extractVideoThumbnail(blob);
+        const thumbnailPromise = safePreviewMime.startsWith('image/')
+          ? thumbnailCache.generateThumbnail(safePreviewBlob)
+          : thumbnailCache.extractVideoThumbnail(safePreviewBlob);
         
         thumbnailPromise
-          .then(thumbnail => thumbnailCache.save(attachmentUrl, thumbnail, blob.type))
+          .then(thumbnail => thumbnailCache.save(attachmentUrl, thumbnail, safePreviewMime))
           .then(async () => {
             // Update thumbnail in place
             if (attachmentRow) {
@@ -24851,16 +25079,20 @@ class ChatModal {
         reader.readAsDataURL(blob);
       } else {
         // Web browser handling
-        const isViewable = this.isViewableInBrowser(blob.type);
+        const downloadUrl = URL.createObjectURL(blob);
+        const previewUrl = safePreviewBlob ? URL.createObjectURL(safePreviewBlob) : '';
         
         try {
-          if (isViewable) {
-            window.open(blobUrl, '_blank');
+          if (previewUrl) {
+            window.open(previewUrl, '_blank', 'noopener,noreferrer');
           }
-          this.triggerFileDownload(blobUrl, filename);
+          this.triggerFileDownload(downloadUrl, filename);
         } finally {
           // Clean up blob URL after enough time for downloads/tabs to initialize
-          setTimeout(() => URL.revokeObjectURL(blobUrl), 2000);
+          setTimeout(() => {
+            URL.revokeObjectURL(downloadUrl);
+            if (previewUrl) URL.revokeObjectURL(previewUrl);
+          }, 2000);
         }
       }
 
@@ -26383,7 +26615,11 @@ class ChatModal {
       });
       if (loadingToastId) hideToast(loadingToastId);
       loadingToastId = null;
-      fullImageModal.open(blob, filename);
+      const safePreviewMime = await getSafeAttachmentPreviewMime(blob);
+      if (!safePreviewMime.startsWith('image/')) {
+        throw new Error('Attachment is not a verified previewable image');
+      }
+      fullImageModal.open(new Blob([blob], { type: safePreviewMime }), filename);
     } catch (err) {
       console.error('Image open failed:', err);
       this.handleAttachmentError(err, 'Failed to open image.');
@@ -27067,27 +27303,14 @@ class ChatModal {
       ? messageRecord.message.trim()
       : '';
     const anchorHref = messageEl.querySelector('.call-message a')?.href?.trim() || '';
-    const callUrl = recordUrl || anchorHref.split('#')[0];
+    const callUrl = normalizeCallUrl(recordUrl || anchorHref);
     if (!callUrl) return '';
 
-    const urlToCopy = callUrl.includes('#') ? callUrl : `${callUrl}${callUrlParams}`;
-    return this.removeCallDisplayNameParam(urlToCopy);
-  }
-
-  removeCallDisplayNameParam(callUrl) {
-    const [baseUrl, hash = ''] = callUrl.split('#');
-    if (!hash) return callUrl;
-
-    const filteredHash = hash
-      .split('&')
-      .filter((param) => !param.startsWith('userInfo.displayName='))
-      .join('&');
-
-    return filteredHash ? `${baseUrl}#${filteredHash}` : baseUrl;
+    return `${callUrl}${callUrlParams}`;
   }
 
     /**
-   * Copies message content to clipboard
+     * Copies message content to clipboard
    * @param {HTMLElement} messageEl - The message element
    */
   async copyMessageContent(messageEl) {
@@ -27162,14 +27385,17 @@ class ChatModal {
       return showToast('This call is being deleted.', 2000, 'warning');
     }
 
-    const callUrl = messageEl.querySelector('.call-message a')?.href;
+    const callUrl = buildCallJoinUrl(
+      messageEl.querySelector('.call-message a')?.href,
+      myAccount.username
+    );
     if (!callUrl) return showToast('Call link not found', 2000, 'error');
     // Gate future scheduled calls (context menu path)
     if (this.gateScheduledCall(messageEl)) {
       this.closeContextMenu();
       return;
     }
-    window.open(callUrl+`${callUrlParams}"${myAccount.username}"`, '_blank');
+    window.open(callUrl, '_blank', 'noopener,noreferrer');
     this.closeContextMenu();
   }
 
@@ -27649,7 +27875,7 @@ class ChatModal {
       
       if (success) {
         if (chosenCallTime === 0) {
-          window.open(callUrl + `${callUrlParams}"${myAccount.username}"`, '_blank');
+          window.open(buildCallJoinUrl(callUrl, myAccount.username), '_blank', 'noopener,noreferrer');
         } else {
           showToast(`Call scheduled for ${this.formatLocalDateTime(chosenCallTime)}`, 3000, 'success');
         }
@@ -32926,7 +33152,7 @@ const createAccountModal = new CreateAccountModal();
  */
 class SendAssetFormModal {
   constructor() {
-    this.mode = 'liberdus';
+    this.session = null;
     this.username = null;
     this.sendAssetFormModalCheckTimeout = null;
     this.foundAddressObject = { address: null };
@@ -32950,9 +33176,6 @@ class SendAssetFormModal {
     this.retryTxIdInput = document.getElementById('retryOfPaymentTxId');
     this.usernameAvailable = document.getElementById('sendToAddressError');
     this.submitButton = document.querySelector('#sendForm button[type="submit"]');
-    this.networkSelect = document.getElementById('sendNetwork');
-    this.networkGroup = document.getElementById('sendNetworkGroup');
-    this.networkStatus = document.getElementById('sendNetworkStatus');
     this.assetSelectDropdown = document.getElementById('sendAsset');
     this.balanceSymbol = document.getElementById('balanceSymbol');
     this.availableBalance = document.getElementById('availableBalance');
@@ -32963,14 +33186,14 @@ class SendAssetFormModal {
     this.transactionFee = document.getElementById('transactionFee');
     this.balanceWarning = document.getElementById('balanceWarning');
     this.memoLabel = document.querySelector('label[for="sendMemo"]');
-    this.memoByteCounter = document.querySelector('.memo-byte-counter');
+    this.memoByteCounter = this.memoGroup.querySelector('.memo-byte-counter');
 
     // TODO add comment about which send form this is for chat or assets
     this.closeSendAssetFormModalButton.addEventListener('click', this.close.bind(this));
     this.sendForm.addEventListener('submit', withButtonCooldown(
       this.submitButton,
       BUTTON_COOLDOWN_MS,
-      null,
+      () => this.refreshSendButtonDisabledState(),
       (e) => this.handleSendFormSubmit(e)
     ));
     // TODO: need to add check that it's not a back/delete key
@@ -32979,7 +33202,6 @@ class SendAssetFormModal {
     });
 
     this.availableBalance.addEventListener('click', this.fillAmount.bind(this));
-    this.networkSelect.addEventListener('change', () => this.handleNetworkChange());
     this.assetSelectDropdown.addEventListener('change', () => this.handleAssetChange());
     // amount input listener for normalizing
     this.amountInput.addEventListener('input', () => this.amountInput.value = normalizeUnsignedFloat(this.amountInput.value));
@@ -33005,127 +33227,75 @@ class SendAssetFormModal {
     this.scanQRButton = document.getElementById('scanQRButton');
     this.uploadQRButton = document.getElementById('uploadQRButton');
     this.qrFileInput = document.getElementById('qrFileInput');
-    this.scanQRButton.addEventListener('click', () => qrScanModal.open());
+    this.scanQRButton.addEventListener('click', () => this.scanQR());
     this.uploadQRButton.addEventListener('click', () => {this.qrFileInput.click();});
-    this.qrFileInput.addEventListener('change', (event) => this.handleQRFileSelect(event, this));
+    this.qrFileInput.addEventListener('change', (event) => this.readQRFile(event));
   }
 
   /**
    * Opens the send asset modal
    * @returns {Promise<void>}
    */
-  async open({ mode = 'liberdus', networkId = null, assetKey = null } = {}) {
-    this.mode = mode;
-    const hasFixedNetwork = mode === 'evm' && Boolean(networkId);
-    const hasFixedAsset = hasFixedNetwork && Boolean(assetKey);
-    this.networkGroup.hidden = mode !== 'evm' || hasFixedNetwork;
-    this.assetSelectDropdown.closest('.form-group').hidden = hasFixedAsset;
-    this.memoGroup.hidden = mode === 'evm';
-    document.getElementById('sendMemoLabel').textContent = mode === 'evm' ? 'Add a note (optional)' : 'Memo (Optional)';
+  async open() {
+    if (this.isActive()) return false;
+    this.reset();
     this.memoInput.setCustomValidity('');
-    this.memoValidation = {};
+    this.memoValidation = this.validateMemoSize('');
     this.memoByteCounter.textContent = '';
     this.memoByteCounter.style.display = 'none';
-
-    // Clear fields when opening the modal
-    this.usernameInput.value = '';
-    this.amountInput.value = '';
-    this.memoInput.value = '';
-    this.retryTxIdInput.value = '';
-    this.tollMemoSpan.textContent = '';
-    this.foundAddressObject.address = null;
-
     this.usernameAvailable.style.display = 'none';
+    this.balanceWarning.textContent = '';
+    this.balanceWarning.style.display = 'none';
     this.submitButton.disabled = true;
-    qrScanModal.fillFunction = this.fillFromQR.bind(this); // set function to handle filling the payment form from QR data
+    this.balanceSymbol.textContent = 'LIB';
+    this.balanceAmount.textContent = 'Loading…';
+    this.transactionFee.textContent = 'Loading…';
+    walletScreen.populateAssetSelect(this.assetSelectDropdown);
 
-    if (this.mode === 'evm') {
-      this.prepareEvmContext(networkId, assetKey);
-    }
-
-    if (!openModal(this.modal)) return;
-
+    if (!openModal(this.modal)) return false;
+    const session = this.session = { account: myAccount };
     if (this.username) {
       this.usernameInput.value = this.username;
-      setTimeout(() => {
-        this.usernameInput.dispatchEvent(new Event('input'));
-      }, 500);
+      this.usernameInput.dispatchEvent(new Event('input'));
       this.username = null;
     }
-
-    if (this.mode === 'evm') {
-      await evmAssets.refresh();
-      if (!['connected', 'partial'].includes(evmAssets.getStatus())) return;
+    try {
+      await walletScreen.updateWalletBalances();
+      if (!this.isCurrentSession(session)) return false;
       await this.updateAvailableBalance();
-      return;
+    } catch (error) {
+      if (!this.isCurrentSession(session)) return false;
+      this.balanceAmount.textContent = 'Unavailable';
+      this.transactionFee.textContent = 'Unavailable';
+      this.submitButton.disabled = true;
+      showToast('Unable to refresh LIB balance', 3000, 'warning');
     }
-
-    await walletScreen.updateWalletBalances();
-    evmAssets.rebuildCatalog();
-    evmAssets.populateNetworkSelect(this.networkSelect, { selectedId: 'liberdus' });
-    await this.handleNetworkChange({ resetRecipient: false });
-  }
-
-  prepareEvmContext(networkId, assetKey) {
-    evmAssets.populateNetworkSelect(this.networkSelect, {
-      selectedId: networkId || 'ethereum',
-      evmOnly: true,
-    });
-    evmAssets.populateAssetSelect(this.assetSelectDropdown, this.networkSelect.value);
-    if (assetKey && [...this.assetSelectDropdown.options].some((option) => option.value === assetKey)) {
-      this.assetSelectDropdown.value = assetKey;
-      PopupSelect.sync(this.assetSelectDropdown);
-    }
-
-    const asset = this.getSelectedAsset();
-    this.balanceSymbol.textContent = asset?.tokenSymbol || '';
-    this.balanceAmount.textContent = '';
-    this.transactionFee.textContent = 'Calculated at send';
-    this.toggleBalanceButton.disabled = true;
-  }
-
-  getSelectedNetwork() {
-    return evmAssets.getNetwork(this.networkSelect.value);
+    return this.isCurrentSession(session);
   }
 
   getSelectedAsset() {
-    return evmAssets.getSelectedAsset(this.networkSelect.value, this.assetSelectDropdown);
+    return walletScreen.getAsset(this.assetSelectDropdown.value);
   }
 
-  isLiberdusSelected() {
-    return this.mode === 'liberdus';
+  isCurrentSession(session) {
+    return Boolean(session && this.session === session);
   }
 
-  async handleNetworkChange({ resetRecipient = true } = {}) {
-    const walletNetwork = this.getSelectedNetwork();
-    evmAssets.populateAssetSelect(this.assetSelectDropdown, walletNetwork?.id || 'liberdus');
-
-    if (resetRecipient) {
-      this.usernameInput.value = '';
-      this.foundAddressObject.address = null;
-      this.usernameAvailable.style.display = 'none';
-    }
-    this.amountInput.value = '';
-    this.balanceWarning.textContent = '';
-    this.balanceWarning.style.display = 'none';
-
-    if (walletNetwork?.source === 'evm') {
-      this.usernameInput.placeholder = 'Enter 0x wallet address';
-      this.networkStatus.textContent = `${walletNetwork.name} is connected for balances and receiving. Sending is coming in Phase 2.`;
-      this.networkStatus.dataset.status = walletNetwork.connected ? 'connected' : 'ready';
-    } else {
-      this.usernameInput.placeholder = 'Enter username';
-      this.networkStatus.textContent = 'Liberdus transfers are ready.';
-      this.networkStatus.dataset.status = 'connected';
-    }
-
-    await this.handleAssetChange();
+  reset() {
+    this.session = null;
+    clearTimeout(this.sendAssetFormModalCheckTimeout);
+    this.sendAssetFormModalCheckTimeout = null;
+    this.foundAddressObject = { address: null };
+    this.needTollInfo = false;
+    this.tollInfo = {};
+    this.sendForm?.reset();
+    if (this.tollMemoSpan) this.tollMemoSpan.textContent = '';
+    this.modal?.classList.remove('active');
   }
 
   async handleAssetChange() {
     const asset = this.getSelectedAsset();
-    this.balanceSymbol.textContent = asset?.tokenSymbol || 'LIB';
-    this.toggleBalanceButton.disabled = !this.isLiberdusSelected();
+    this.balanceSymbol.textContent = asset?.symbol || 'LIB';
     await this.updateAvailableBalance();
   }
 
@@ -33135,8 +33305,7 @@ class SendAssetFormModal {
    */
   async close() {
     chatsScreen.updateChatList();
-    this.modal.classList.remove('active');
-    this.sendForm.reset();
+    this.reset();
     PopupSelect.syncAll(this.sendForm);
     this.username = null;
   }
@@ -33149,7 +33318,11 @@ class SendAssetFormModal {
    */
   async handleSendToAddressInput(e) {
     this.submitButton.disabled = true;
+    const session = this.session;
     const rawInput = e.target.value.trim();
+    this.foundAddressObject = { address: null };
+    this.tollInfo = {};
+    this.needTollInfo = false;
 
     // Cancel any queued lookup before handling a new recipient value.
     if (this.sendAssetFormModalCheckTimeout) {
@@ -33157,20 +33330,8 @@ class SendAssetFormModal {
       this.sendAssetFormModalCheckTimeout = null;
     }
 
-    if (!this.isLiberdusSelected()) {
-      this.clearFormInfo();
-      const isValidAddress = isValidEthereumAddress(rawInput);
-      this.foundAddressObject.address = isValidAddress ? rawInput : null;
-      this.usernameAvailable.textContent = isValidAddress ? 'valid address' : 'enter a valid 0x address';
-      this.usernameAvailable.style.color = isValidAddress ? '#28a745' : '#dc3545';
-      this.usernameAvailable.style.display = rawInput ? 'inline' : 'none';
-      await this.refreshSendButtonDisabledState();
-      return;
-    }
-
     if (isValidEthereumAddress(rawInput)) {
       this.clearFormInfo();
-      this.foundAddressObject.address = null;
       this.usernameAvailable.textContent = 'address not supported';
       this.usernameAvailable.style.color = '#dc3545';
       this.usernameAvailable.style.display = 'inline';
@@ -33184,7 +33345,6 @@ class SendAssetFormModal {
     const usernameAvailable = this.usernameAvailable;
 
     this.clearFormInfo();
-    this.foundAddressObject.address = null;
 
     // Check if username is too short
     if (username.length < 3) {
@@ -33197,7 +33357,11 @@ class SendAssetFormModal {
 
     // Check network availability
     this.sendAssetFormModalCheckTimeout = setTimeout(async () => {
-      const taken = await checkUsernameAvailability(username, myAccount.keys.address, this.foundAddressObject);
+      const found = { address: null };
+      if (!this.isCurrentSession(session)) return;
+      const taken = await checkUsernameAvailability(username, session.account.keys.address, found);
+      if (!this.isCurrentSession(session) || this.usernameInput.value !== username) return;
+      this.foundAddressObject = found;
       if (taken == 'taken') {
         usernameAvailable.textContent = 'found';
         usernameAvailable.style.color = '#28a745';
@@ -33226,6 +33390,9 @@ class SendAssetFormModal {
   }
 
   async validateForm() {
+    const session = this.session;
+    const recipient = this.foundAddressObject;
+    if (!this.isCurrentSession(session)) return;
     if (this.needTollInfo) {
       const myAddr = longAddress(myAccount.keys.address);
       const contactAddr = longAddress(this.foundAddressObject.address);
@@ -33237,7 +33404,8 @@ class SendAssetFormModal {
       // query
       const tollInfo_ = await queryNetwork(`/messages/${chatId}/toll`);
       // query account for toll set by receiver
-      const accountData = await queryNetwork(`/account/${this.foundAddressObject.address}`);
+      const accountData = await queryNetwork(`/account/${recipient.address}`);
+      if (!this.isCurrentSession(session) || this.foundAddressObject !== recipient) return;
       const queriedToll = accountData?.account?.data?.toll; // type bigint
       const queriedTollUnit = accountData?.account?.data?.tollUnit; // type string
       this.tollInfo = {
@@ -33344,11 +33512,8 @@ class SendAssetFormModal {
    */
   async handleSendFormSubmit(event) {
     event.preventDefault();
-
-    if (!this.isLiberdusSelected()) {
-      showToast('EVM sending will be enabled in Phase 2. Balances and receiving are available now.', 5000, 'info');
-      return;
-    }
+    const session = this.session;
+    const recipient = this.foundAddressObject;
 
     const hasPendingTransfer =
       Array.isArray(myData?.pending) &&
@@ -33381,6 +33546,7 @@ class SendAssetFormModal {
       await getNetworkParams();
       const myIsPrivate = !!myData?.account?.private;
       const recipientAccountRes = await queryNetwork(`/account/${longAddress(recipientAddress)}`);
+      if (!this.isCurrentSession(session) || this.foundAddressObject !== recipient) return;
       if (!recipientAccountRes?.account) {
         showToast('Account not found, try again.', 0, 'error');
         return;
@@ -33391,6 +33557,7 @@ class SendAssetFormModal {
         return;
       }
     } catch (error) {
+      if (!this.isCurrentSession(session)) return;
       console.error('Error checking account type:', error);
       showToast('Error checking account type', 0, 'error');
       return;
@@ -33435,17 +33602,12 @@ class SendAssetFormModal {
    * @returns {void}
    */
   async fillAmount() {
-    const selectedAsset = this.getSelectedAsset();
-    if (!selectedAsset) return;
-
-    if (!this.isLiberdusSelected()) {
-      this.amountInput.value = selectedAsset.tokenAmount || '0';
-      this.amountInput.dispatchEvent(new Event('input'));
-      return;
-    }
+    const session = this.session;
+    const asset = this.getSelectedAsset();
+    if (!asset) return;
 
     await getNetworkParams();
-    const asset = selectedAsset.walletAsset;
+    if (!this.isCurrentSession(session)) return;
     const feeInWei = getTransactionFeeWei();
     const maxAmount = BigInt(asset.balance) - feeInWei;
     const maxAmountStr = big2str(maxAmount > 0n ? maxAmount : 0n, 18).slice(0, -16);
@@ -33486,20 +33648,15 @@ class SendAssetFormModal {
    * @returns {void}
    */
   async updateBalanceDisplay(asset) {
+    const session = this.session;
     if (!asset) {
       this.balanceAmount.textContent = '0.0000';
       this.transactionFee.textContent = '0.00';
       return;
     }
 
-    if (asset.source === 'evm') {
-      this.balanceSymbol.textContent = asset.tokenSymbol;
-      this.balanceAmount.textContent = `${evmAssets.formatTokenAmount(asset.tokenAmount)} ${asset.tokenSymbol}`;
-      this.transactionFee.textContent = 'Calculated at send';
-      return;
-    }
-
     await getNetworkParams();
+    if (!this.isCurrentSession(session)) return;
     const txFeeInLIB = getTransactionFeeWei();
     const stabilityFactor = getStabilityFactor();
 
@@ -33509,10 +33666,10 @@ class SendAssetFormModal {
 
     // Only set to asset symbol if it's empty (initial state)
     if (!currentSymbol) {
-      this.balanceSymbol.textContent = asset.tokenSymbol;
+      this.balanceSymbol.textContent = asset.symbol;
     }
 
-    const balanceInLIB = big2str(BigInt(asset.walletAsset.balance), 18).slice(0, -12);
+    const balanceInLIB = big2str(BigInt(asset.balance), 18).slice(0, -12);
     const feeInLIB = big2str(txFeeInLIB, 18).slice(0, -16);
 
     this.updateBalanceAndFeeDisplay(balanceInLIB, feeInLIB, isCurrentlyUSD, stabilityFactor);
@@ -33537,13 +33694,9 @@ class SendAssetFormModal {
    * @returns {Promise<void>}
    */
   async refreshSendButtonDisabledState() {
-    if (!this.isLiberdusSelected()) {
-      this.balanceWarning.textContent = '';
-      this.balanceWarning.style.display = 'none';
-      this.submitButton.disabled = true;
-      return;
-    }
-
+    const session = this.session;
+    const recipient = this.foundAddressObject;
+    if (!this.isCurrentSession(session)) return;
     // If offline, keep button disabled
     if (!isOnline) {
       this.submitButton.disabled = true;
@@ -33564,7 +33717,7 @@ class SendAssetFormModal {
     }
 
     const selectedAsset = this.getSelectedAsset();
-    const assetIndex = myData.wallet.assets.indexOf(selectedAsset?.walletAsset);
+    const assetIndex = myData.wallet.assets.indexOf(selectedAsset);
     if (assetIndex < 0) {
       this.submitButton.disabled = true;
       return;
@@ -33575,6 +33728,7 @@ class SendAssetFormModal {
     let amountForValidation = amount;
     if (isUSD && amount) {
       await getNetworkParams();
+      if (!this.isCurrentSession(session) || this.amountInput.value.trim() !== amount) return;
       const stabilityFactor = getStabilityFactor();
       amountForValidation = parseFloat(amount) / stabilityFactor;
     }
@@ -33583,7 +33737,12 @@ class SendAssetFormModal {
     const amountBigInt = bigxnum2big(wei, amountForValidation.toString());
 
     // returns false if the amount/balance is invalid.
-    const isAmountAndBalanceValid = await validateBalance(amountBigInt, assetIndex, this.balanceWarning);
+    // Validate into a detached element so an old request cannot change a newer form.
+    const warning = document.createElement('span');
+    const isAmountAndBalanceValid = await validateBalance(amountBigInt, assetIndex, warning);
+    if (!this.isCurrentSession(session) || this.foundAddressObject !== recipient || this.amountInput.value.trim() !== amount) return;
+    this.balanceWarning.textContent = warning.textContent;
+    this.balanceWarning.style.display = warning.style.display;
 
     let isAmountAndTollValid = true;
     if (this.foundAddressObject.address) {
@@ -33592,7 +33751,7 @@ class SendAssetFormModal {
       }
     }
     // Enable button only if both conditions are met.
-    if (isAddressConsideredValid && isAmountAndBalanceValid && isAmountAndTollValid && this.memoValidation.isValid) {
+    if (!this.needTollInfo && isAddressConsideredValid && isAmountAndBalanceValid && isAmountAndTollValid && this.memoValidation.isValid) {
       this.submitButton.disabled = false;
     } else {
       this.submitButton.disabled = true;
@@ -33625,11 +33784,9 @@ class SendAssetFormModal {
    * @returns {void}
    */
   async handleToggleBalance(e) {
+    const session = this.session;
     if (e && typeof e.preventDefault === 'function') {
       e.preventDefault();
-    }
-    if (!this.isLiberdusSelected()) {
-      return;
     }
     this.balanceSymbol.textContent = this.balanceSymbol.textContent === 'LIB' ? 'USD' : 'LIB';
 
@@ -33638,10 +33795,11 @@ class SendAssetFormModal {
 
     // get the scalability factor for LIB/USD conversion
     await getNetworkParams();
+    if (!this.isCurrentSession(session)) return;
     const stabilityFactor = getStabilityFactor();
 
     // Get the raw values in LIB format
-    const asset = this.getSelectedAsset()?.walletAsset;
+    const asset = this.getSelectedAsset();
     if (!asset) return;
     const txFeeInWei = getTransactionFeeWei();
     const balanceInLIB = big2str(BigInt(asset.balance), 18).slice(0, -12);
@@ -33700,9 +33858,10 @@ class SendAssetFormModal {
     const tempMemo = this.memoInput?.value;
     await this.close();
     this.username = tempUsername;
-    await this.open();
+    if (!await this.open()) return;
     this.amountInput.value = tempAmount;
     this.memoInput.value = tempMemo || '';
+    if (this.foundAddressObject.address && !this.needTollInfo) await this.validateForm();
   }
 
   /**
@@ -33724,87 +33883,29 @@ class SendAssetFormModal {
     this.balanceWarning.textContent = '';
   }
 
-  /**   * Handles QR file selection and decoding
-   * @param {Event} event - The file input change event
-   * @param {Object} targetModal - The modal instance to fill with QR data
-   * @returns {Promise<void>}
-   * */
-  async handleQRFileSelect(event, targetModal) {
-    const file = event.target.files[0];
-    if (!file) {
-      return; // No file selected
+  scanQR() {
+    const session = this.session;
+    qrScanModal.fillFunction = (data) => {
+      if (this.isCurrentSession(session)) this.fillFromQR(data);
+    };
+    qrScanModal.open();
+  }
+
+  async readQRFile(event) {
+    const input = event.target;
+    const file = input.files[0];
+    if (!file) return;
+    const session = this.session;
+    try {
+      const text = await QRImageDecoder.decode(file);
+      if (this.isCurrentSession(session) && input.files[0] === file) await this.fillFromQR(text);
+    } catch (error) {
+      if (!this.isCurrentSession(session) || input.files[0] !== file) return;
+      showToast('Could not read QR code from image', 0, 'error');
+      this.resetForm();
+    } finally {
+      if (input.files[0] === file) input.value = '';
     }
-
-    const reader = new FileReader();
-
-    reader.onload = function (e) {
-      const img = new Image();
-      img.onload = async function () {
-        const canvas = document.createElement('canvas');
-        const context = canvas.getContext('2d');
-        if (!context) {
-          console.error('Could not get 2d context from canvas');
-          showToast('Error processing image', 0, 'error');
-          event.target.value = ''; // Reset file input
-          return;
-        }
-        canvas.width = img.width;
-        canvas.height = img.height;
-        context.drawImage(img, 0, 0, img.width, img.height);
-        const imageData = context.getImageData(0, 0, img.width, img.height);
-
-        try {
-          // Use qr.js library for decoding
-          const decodedData = qr.decodeQR({
-            data: imageData.data,
-            width: imageData.width,
-            height: imageData.height,
-          });
-
-          if (decodedData) {
-            if (typeof targetModal.fillFromQR === 'function') {
-              targetModal.fillFromQR(decodedData); // Call the provided fill function
-            } else {
-              console.error('No valid fill function provided for QR file select');
-              // Fallback or default behavior if needed, e.g., show generic error
-              showToast('Internal error handling QR data', 0, 'error');
-            }
-          } else {
-            // qr.decodeQR might throw an error instead of returning null/undefined
-            // This else block might not be reached if errors are always thrown
-            console.error('No QR code found in image (qr.js)');
-            showToast('No QR code found in image', 0, 'error');
-            // Clear the form fields in case of failure to find QR code
-            targetModal.resetForm();
-          }
-        } catch (error) {
-          console.error('Error processing QR code image with qr.js:', error);
-          // Assume error means no QR code found or decoding failed
-          showToast('Could not read QR code from image', 0, 'error');
-          // Clear the form fields in case of error
-          targetModal.resetForm();
-
-        } finally {
-          event.target.value = ''; // Reset the file input value regardless of outcome
-        }
-      };
-      img.onerror = function () {
-        console.error('Error loading image');
-        showToast('Error loading image file', 0, 'error');
-        event.target.value = ''; // Reset the file input value
-        // Clear the form fields in case of image loading error
-        targetModal.resetForm();
-      };
-      img.src = e.target.result;
-    };
-
-    reader.onerror = function () {
-      console.error('Error reading file');
-      showToast('Error reading file', 0, 'error');
-      event.target.value = ''; // Reset the file input value
-    };
-
-    reader.readAsDataURL(file);
   }
 
   /**
@@ -33813,6 +33914,7 @@ class SendAssetFormModal {
    * @returns {void}
    * */
   async fillFromQR(data) {
+    const session = this.session;
     // Explicitly check for the required prefix
     if (!data || !data.startsWith('liberdus://')) {
       console.error("Invalid payment QR code format. Missing 'liberdus://' prefix.", data);
@@ -33852,10 +33954,11 @@ class SendAssetFormModal {
           console.error('Error toggling balance from QR display unit field', err);
         }
       }
+      if (!this.isCurrentSession(session)) return;
       if (paymentData.a) {
         this.amountInput.value = paymentData.a;
       }
-      if (paymentData.m && this.mode !== 'evm') {
+      if (paymentData.m) {
         this.memoInput.value = paymentData.m;
       }
 
@@ -33923,8 +34026,8 @@ class SendAssetConfirmModal {
   async handleSendAsset(event) {
     event.preventDefault();
     const selectedAsset = sendAssetFormModal.getSelectedAsset();
-    if (!sendAssetFormModal.isLiberdusSelected() || selectedAsset?.source !== 'liberdus') {
-      showToast('EVM sending will be enabled in Phase 2.', 5000, 'info');
+    if (!selectedAsset) {
+      showToast('Selected Liberdus asset is unavailable.', 3000, 'warning');
       this.close();
       return;
     }
@@ -33942,7 +34045,7 @@ class SendAssetConfirmModal {
     }
 
     const wallet = myData.wallet;
-    const assetIndex = wallet.assets.indexOf(selectedAsset.walletAsset);
+    const assetIndex = wallet.assets.indexOf(selectedAsset);
     if (assetIndex < 0) {
       showToast('Selected Liberdus asset is unavailable.', 0, 'error');
       return;
@@ -34210,18 +34313,14 @@ const sendAssetConfirmModal = new SendAssetConfirmModal();
 
 class ReceiveModal {
   constructor() {
-    this.mode = 'liberdus';
+    this.session = null;
   }
 
   load() {
     this.modal = document.getElementById('receiveModal');
-    this.networkSelect = document.getElementById('receiveNetwork');
-    this.networkGroup = document.getElementById('receiveNetworkGroup');
-    this.networkStatus = document.getElementById('receiveNetworkStatus');
     this.assetSelect = document.getElementById('receiveAsset');
     this.amountInput = document.getElementById('receiveAmount');
     this.memoInput = document.getElementById('receiveMemo');
-    this.memoGroup = document.getElementById('receiveMemoGroup');
     this.displayAddress = document.getElementById('displayAddress');
     this.qrcodeContainer = document.getElementById('qrcode');
     this.previewElement = document.getElementById('qrDataPreview');
@@ -34229,9 +34328,6 @@ class ReceiveModal {
     this.toggleReceiveBalanceButton = document.getElementById('toggleReceiveBalance');
     this.receiveBalanceSymbol = document.getElementById('receiveBalanceSymbol');
     this.fullAddress = null; // Store full address for copying
-
-    // Create debounced function
-    this.debouncedUpdateQRCode = debounce(() => this.updateQRCode(), 300);
 
     // Modal close
     document.getElementById('closeReceiveModal').addEventListener('click', () => this.close());
@@ -34241,91 +34337,57 @@ class ReceiveModal {
     this.displayAddress.addEventListener('click', () => this.copyAddress());
     
     // QR code updates
-    this.networkSelect.addEventListener('change', () => this.handleNetworkChange());
     this.assetSelect.addEventListener('change', () => this.handleAssetChange());
     this.amountInput.addEventListener('input', () => this.amountInput.value = normalizeUnsignedFloat(this.amountInput.value));
-    this.amountInput.addEventListener('input', this.debouncedUpdateQRCode);
-    this.memoInput.addEventListener('input', this.debouncedUpdateQRCode);
+    this.amountInput.addEventListener('input', () => this.scheduleQRCode());
+    this.memoInput.addEventListener('input', () => this.scheduleQRCode());
     this.toggleReceiveBalanceButton.addEventListener('click', this.handleToggleBalance.bind(this));
   }
 
-  async open({ mode = 'liberdus', networkId = null, assetKey = null } = {}) {
-    this.mode = mode;
-    const hasFixedNetwork = mode === 'evm' && Boolean(networkId);
-    const hasFixedAsset = hasFixedNetwork && Boolean(assetKey);
-    this.networkGroup.hidden = mode !== 'evm' || hasFixedNetwork;
-    this.assetSelect.closest('.form-group').hidden = hasFixedAsset;
-    this.memoGroup.hidden = mode === 'evm';
-
-    // Clear input fields
+  open() {
+    if (this.modal.classList.contains('active') || !myAccount) return false;
+    this.close();
+    this.session = { account: myAccount };
     this.amountInput.value = '';
     this.memoInput.value = '';
-
-    if (this.mode === 'evm') {
-      this.prepareEvmContext(networkId, assetKey);
+    walletScreen.populateAssetSelect(this.assetSelect);
+    this.receiveBalanceSymbol.textContent = 'LIB';
+    this.toggleReceiveBalanceButton.disabled = false;
+    this.updateDisplayAddress();
+    if (!openModal(this.modal)) {
+      this.close();
+      return false;
     }
-
-    if (!openModal(this.modal)) return;
-
-    if (this.mode === 'evm') {
-      await evmAssets.refresh();
-      return;
-    }
-
-    evmAssets.rebuildCatalog();
-    evmAssets.populateNetworkSelect(this.networkSelect, { selectedId: 'liberdus' });
-    await this.handleNetworkChange();
+    return true;
   }
 
-  prepareEvmContext(networkId, assetKey) {
-    evmAssets.populateNetworkSelect(this.networkSelect, {
-      selectedId: networkId || 'ethereum',
-      evmOnly: true,
-    });
-    evmAssets.populateAssetSelect(this.assetSelect, this.networkSelect.value);
-    if (assetKey && [...this.assetSelect.options].some((option) => option.value === assetKey)) {
-      this.assetSelect.value = assetKey;
-      PopupSelect.sync(this.assetSelect);
-    }
-
-    const walletNetwork = this.getSelectedNetwork();
-    const asset = this.getSelectedAsset();
-    this.networkStatus.textContent = `Receive on ${walletNetwork.name} using this account's shared EVM address.`;
-    this.networkStatus.dataset.status = walletNetwork.connected ? 'connected' : 'ready';
-    this.receiveBalanceSymbol.textContent = asset?.tokenSymbol || '';
-    this.updateReceiveAddresses();
+  isCurrentSession(session) {
+    return Boolean(session && this.session === session);
   }
 
   close() {
-    this.modal.classList.remove('active');
-  }
-
-  getSelectedNetwork() {
-    return evmAssets.getNetwork(this.networkSelect.value);
+    this.session = null;
+    clearTimeout(this.qrTimer);
+    clearTimeout(this.copyTimer);
+    this.modal?.classList.remove('active');
+    this.copyButton?.classList.remove('success');
+    this.fullAddress = null;
+    if (this.displayAddress) this.displayAddress.textContent = '';
+    if (this.qrcodeContainer) this.qrcodeContainer.innerHTML = '';
   }
 
   getSelectedAsset() {
-    return evmAssets.getSelectedAsset(this.networkSelect.value, this.assetSelect);
+    return walletScreen.getAsset(this.assetSelect.value);
   }
 
-  async handleNetworkChange() {
-    const walletNetwork = this.getSelectedNetwork();
-    evmAssets.populateAssetSelect(this.assetSelect, walletNetwork?.id || 'liberdus');
-    this.networkStatus.textContent = walletNetwork?.source === 'evm'
-      ? `Receive on ${walletNetwork.name} using this account's shared EVM address.`
-      : 'Receive Liberdus using your account address.';
-    this.networkStatus.dataset.status = walletNetwork?.connected ? 'connected' : 'ready';
-    await this.handleAssetChange();
+  scheduleQRCode() {
+    clearTimeout(this.qrTimer);
+    this.qrTimer = setTimeout(() => this.updateQRCode(), 300);
   }
 
-  async handleAssetChange() {
+  handleAssetChange() {
     const asset = this.getSelectedAsset();
-    this.receiveBalanceSymbol.textContent = asset?.tokenSymbol || 'LIB';
-    this.updateReceiveAddresses();
-  }
-
-  updateReceiveAddresses() {
-    // Update display address
+    this.receiveBalanceSymbol.textContent = asset?.symbol || 'LIB';
     this.updateDisplayAddress();
   }
 
@@ -34333,7 +34395,7 @@ class ReceiveModal {
     // Clear previous QR code
     this.qrcodeContainer.innerHTML = '';
 
-    const address = myAccount.keys.address;
+    const address = this.session.account.keys.address;
     const addressWithPrefix = address.startsWith('0x') ? address : `0x${address}`;
     
     // Store full address for copying
@@ -34360,25 +34422,13 @@ class ReceiveModal {
 
   // Create QR payment data object based on form values
   createQRPaymentData() {
-    const walletNetwork = this.getSelectedNetwork();
     const asset = this.getSelectedAsset();
-
-    const paymentData = this.mode === 'evm'
-      ? {
-          u: myAccount.username,
-          n: walletNetwork?.id || 'ethereum',
-          c: walletNetwork?.chainId || 1,
-          i: asset?.contractAddress || asset?.key || 'native',
-          s: asset?.tokenSymbol || walletNetwork?.nativeSymbol || 'ETH',
-          d: String(this.receiveBalanceSymbol.textContent || asset?.tokenSymbol || 'ETH').toUpperCase(),
-          r: this.fullAddress,
-        }
-      : {
-          u: myAccount.username,
-          i: asset?.walletAsset?.id || 'liberdus',
-          s: asset?.tokenSymbol || 'LIB',
-          d: String(this.receiveBalanceSymbol.textContent || 'LIB').toUpperCase(),
-        };
+    const paymentData = {
+      u: this.session.account.username,
+      i: asset?.id || 'liberdus',
+      s: asset?.symbol || 'LIB',
+      d: String(this.receiveBalanceSymbol.textContent || 'LIB').toUpperCase(),
+    };
 
     // Add optional fields if they have values
     const amount = this.amountInput.value.trim();
@@ -34396,6 +34446,7 @@ class ReceiveModal {
 
   // Update QR code with current payment data
   updateQRCode() {
+    if (!this.isCurrentSession(this.session)) return;
     this.qrcodeContainer.innerHTML = '';
     this.previewElement.style.display = 'none'; // Hide preview/error area initially
     this.previewElement.innerHTML = ''; // Clear any previous error message
@@ -34432,7 +34483,7 @@ class ReceiveModal {
       // Fallback to basic username QR code in liberdus:// format
       try {
         // Use short key 'u' for username
-        const fallbackData = { u: myAccount.username };
+        const fallbackData = { u: this.session.account.username };
         const fallbackJsonData = JSON.stringify(fallbackData);
         const fallbackBase64Data = btoa(fallbackJsonData);
         const fallbackQrText = `liberdus://${fallbackBase64Data}`;
@@ -34467,15 +34518,18 @@ class ReceiveModal {
    * Toggle LIB/USD display for the receive amount and update the QR accordingly
    */
   async handleToggleBalance() {
+    const session = this.session;
+    if (!this.isCurrentSession(session)) return;
+    this.toggleReceiveBalanceButton.disabled = true;
     try {
       const asset = this.getSelectedAsset();
-      const tokenSymbol = asset?.tokenSymbol || 'LIB';
+      const tokenSymbol = asset?.symbol || 'LIB';
       const isShowingToken = this.receiveBalanceSymbol.textContent !== 'USD';
-      this.receiveBalanceSymbol.textContent = isShowingToken ? 'USD' : tokenSymbol;
-      const tokenPrice = Number(asset?.tokenPriceUsd);
+      const tokenPrice = Number(asset?.price);
       let conversionPrice = Number.isFinite(tokenPrice) && tokenPrice > 0 ? tokenPrice : null;
-      if (conversionPrice === null && asset?.source === 'liberdus') {
+      if (conversionPrice === null) {
         await getNetworkParams();
+        if (!this.isCurrentSession(session)) return;
         const stabilityFactor = getStabilityFactor();
         conversionPrice = Number.isFinite(stabilityFactor) && stabilityFactor > 0
           ? stabilityFactor
@@ -34483,12 +34537,12 @@ class ReceiveModal {
       }
 
       if (conversionPrice === null) {
-        this.receiveBalanceSymbol.textContent = tokenSymbol;
         showToast(`${tokenSymbol}/USD price is unavailable`, 2500, 'warning');
         return;
       }
 
-      if (this.amountInput && this.amountInput.value.trim() !== '') {
+      this.receiveBalanceSymbol.textContent = isShowingToken ? 'USD' : tokenSymbol;
+      if (this.amountInput.value.trim() !== '') {
         const currentValue = parseFloat(this.amountInput.value);
         if (!isNaN(currentValue)) {
           if (this.receiveBalanceSymbol.textContent === 'USD') {
@@ -34502,20 +34556,24 @@ class ReceiveModal {
       this.updateQRCode();
     } catch (err) {
       console.error('Error toggling receive balance:', err);
+    } finally {
+      if (this.isCurrentSession(session)) this.toggleReceiveBalanceButton.disabled = false;
     }
   }
 
   async copyAddress() {
-    // Copy the full address, not the displayed truncated version and toast
-    const address = this.fullAddress || this.displayAddress.textContent;
+    const session = this.session;
+    if (!this.isCurrentSession(session)) return;
+    const address = this.fullAddress;
     try {
       await navigator.clipboard.writeText(address);
+      if (!this.isCurrentSession(session)) return;
       showToast('Address copied to clipboard', 2000, 'success');
       this.copyButton.classList.add('success');
-      setTimeout(() => {
-        this.copyButton.classList.remove('success');
-      }, 2000);
+      clearTimeout(this.copyTimer);
+      this.copyTimer = setTimeout(() => this.copyButton.classList.remove('success'), 2000);
     } catch (err) {
+      if (!this.isCurrentSession(session)) return;
       console.error('Failed to copy:', err);
       showToast('Failed to copy address', 0, 'error');
     }
@@ -34598,7 +34656,21 @@ function evmPaymentRecordId(record) {
 function queueEvmPaymentMessage(message) {
   const payment = parseEvmTransferMessage(message.payment);
   if (!payment || message.deleted) return;
-  const records = loadEvmPayments();
+  let records;
+  try {
+    records = loadEvmPayments();
+  } catch (error) {
+    // Saved recovery failures must not interrupt delivery of other chat messages.
+    if (queueEvmPaymentMessage.warningAccount !== myAccount) {
+      console.warn('Skipping EVM payment verification queue:', {
+        txid: message.txid,
+        reason: error.message,
+      });
+      queueEvmPaymentMessage.warningAccount = myAccount;
+    }
+    return;
+  }
+  queueEvmPaymentMessage.warningAccount = null;
   const claim = stringify(payment);
   const existing = records.find((record) => stringify(record.payment) === claim);
   if (!existing && ['settled', 'failed'].includes(message.paymentVerified)
@@ -34616,16 +34688,23 @@ function queueEvmPaymentMessage(message) {
   }
   saveEvmPayment(record);
 }
+queueEvmPaymentMessage.warningAccount = null;
 
 // EVM recovery lives in myData and follows the normal account save lifecycle.
 function loadEvmPayments() {
   const records = myData.evmPayments ?? [];
-  if (!Array.isArray(records) || records.some((record) => !['outgoing', 'verification'].includes(record?.kind)
-    || !parseEvmTransferMessage(record.payment))) {
+  if (!Array.isArray(records)) {
     throw new Error('Saved EVM payment records could not be read.');
   }
+  const validRecords = records.filter((record) => ['outgoing', 'verification'].includes(record?.kind)
+    && parseEvmTransferMessage(record.payment));
+  if (validRecords.length !== records.length) {
+    // Invalid records came from pre-release testing and can be discarded.
+    myData.evmPayments = validRecords;
+    console.warn('Removed invalid saved EVM payment records:', records.length - validRecords.length);
+  }
   // Async callers work on a snapshot, without changing the current record until saved.
-  return parse(stringify(records));
+  return parse(stringify(validRecords));
 }
 
 function saveEvmPayment(record) {
@@ -34671,11 +34750,10 @@ evmAssets.configure({
     removeEvmPayment(record);
     saveState();
   },
-  getLiberdusAsset: () => myData?.wallet?.assets?.find((asset) => isLibAsset(asset))
-    || myData?.wallet?.assets?.[0]
-    || null,
-  openSend: (options) => sendAssetFormModal.open(options),
-  openReceive: (options) => receiveModal.open(options),
+  openQRScanner: (fill) => {
+    qrScanModal.fillFunction = fill;
+    qrScanModal.open();
+  },
   showToast,
   hideToast,
   syncSelect: (select) => PopupSelect.sync(select),
@@ -38762,6 +38840,9 @@ const modalCloseHandlers = new Map([
   // Structural exceptions require an id or a controller-specific close method.
   ['assetsModal', () => evmAssets.close('assetsModal')],
   ['assetDetailsModal', () => evmAssets.close('assetDetailsModal')],
+  ['evmSendModal', () => evmAssets.close('evmSendModal')],
+  ['evmReceiveModal', () => evmAssets.close('evmReceiveModal')],
+  ['evmSendConfirmModal', () => evmAssets.close('evmSendConfirmModal')],
   ['multichainModal', () => multichain.close('multichainModal')],
   ['multichainAssetModal', () => multichain.close('multichainAssetModal')],
   ['multichainReceiveModal', () => multichain.close('multichainReceiveModal')],
@@ -38771,10 +38852,7 @@ const modalCloseHandlers = new Map([
   ['chatSendModal', () => chatPaymentPanel.close()],
   ['chatSendContactModal', () => chatPaymentPanel.contactPicker.close()],
   ['multichainConfirmModal', () => multichain.close('multichainConfirmModal')],
-  ['sendAssetConfirmModal', () => {
-    evmAssets.confirmationModal.reset();
-    sendAssetConfirmModal.close();
-  }],
+  ['sendAssetConfirmModal', () => sendAssetConfirmModal.close()],
   ['googleDrivePickerModal', () => importModal.closeGoogleDrivePicker()],
 ]);
 
