@@ -250,8 +250,8 @@ export class ProposalDetailModal {
     const ts = Number(event?.timestamp || 0);
     const proposedAt = ts ? new Date(ts * 1000).toLocaleString() : '';
     const deadline = details?.deadline ? new Date(details.deadline * 1000).toLocaleString() : '';
-    const executed = details?.executed ? 'Yes' : 'No';
-    const expired = details?.expired ? 'Yes' : 'No';
+    const executed = details?.executed == null ? 'Unknown' : (details.executed ? 'Yes' : 'No');
+    const expired = details?.expired == null ? 'Unknown' : (details.expired ? 'Yes' : 'No');
 
     const rawValue = details?.value ?? event?.value;
     const valueDisplay = formatValueForOpType(opType, rawValue);

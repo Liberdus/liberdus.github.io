@@ -6,8 +6,7 @@ import { MulticallService } from '../utils/multicall-service.js';
  * ContractManager (Phase 3)
  * - Loads ABI from `./abi.json` (repo root)
  * - Maintains read-only provider (Polygon RPC from config)
- * - When tx-enabled (wallet connected + on Polygon), uses wallet provider for reads
- *   and signer for writes.
+ * - Site reads always use the configured provider; wallet signers handle writes.
  */
 export class ContractManager {
   constructor({ walletManager, networkManager } = {}) {
@@ -38,7 +37,10 @@ export class ContractManager {
 
   load() {
     if (this._loadPromise) return this._loadPromise;
-    this._loadPromise = this._load();
+    this._loadPromise = this._load().catch((error) => {
+      this._loadPromise = null;
+      throw error;
+    });
     return this._loadPromise;
   }
 
@@ -81,13 +83,8 @@ export class ContractManager {
   updateConnections() {
     const txEnabled = !!this.networkManager?.isTxEnabled?.();
 
-    if (txEnabled) {
-      this.provider = this.walletManager?.getProvider?.() || this.readOnlyProvider;
-      this.signer = this.walletManager?.getSigner?.() || null;
-    } else {
-      this.provider = this.readOnlyProvider;
-      this.signer = null;
-    }
+    this.provider = this.readOnlyProvider;
+    this.signer = txEnabled ? (this.walletManager?.getSigner?.() || null) : null;
 
     this.contractRead = this._makeContract(this.provider);
     this.contractWrite = this.signer ? this._makeContract(this.signer) : null;
@@ -496,7 +493,7 @@ export class ContractManager {
               numSignatures: Number(op[4].toString()),
               executed: !!op[5],
               deadline: Number(op[6].toString()),
-              expired: !!expired,
+              expired: expired == null ? null : !!expired,
             });
           }
 

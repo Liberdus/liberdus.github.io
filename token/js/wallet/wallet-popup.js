@@ -44,7 +44,7 @@ export class WalletPopup {
 
     // Load balance (best-effort)
     try {
-      const provider = this.walletManager?.getProvider?.();
+      const provider = window.contractManager?.getReadOnlyProvider?.();
       if (provider && provider.getBalance && window.ethers) {
         const bal = await provider.getBalance(address);
         const formatted = window.ethers.utils.formatEther(bal);

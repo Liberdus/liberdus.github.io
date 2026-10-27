@@ -2,7 +2,7 @@ export const CONFIG = {
   APP: {
     NAME: 'Liberdus Token UI',
     // Bump manually for now; later we can automate if needed.
-    VERSION: '0.0.15',
+    VERSION: '0.0.16',
     // Phase 9.4 (optional): enable low-priority prefetch of shared reads
     PREFETCH_ON_IDLE: false,
   },
@@ -12,8 +12,12 @@ export const CONFIG = {
     // Polygon mainnet (Polygon-only app)
     CHAIN_ID: 137,
     NAME: 'Polygon',
-    // Primary RPC (Infura). If this endpoint fails, the app will show an error.
+    // Site reads use this primary RPC, then the public fallbacks in order.
     RPC_URL: 'https://polygon-mainnet.infura.io/v3/47dd60e8fe6447ac804a25ea6ec97077',
+    RPC_FALLBACK_URLS: [
+      'https://tenderly.rpc.polygon.community',
+      'https://rpc-mainnet.matic.quiknode.pro',
+    ],
     BLOCK_EXPLORER: 'https://polygonscan.com',
     NATIVE_CURRENCY: { name: 'MATIC', symbol: 'MATIC', decimals: 18 },
   },

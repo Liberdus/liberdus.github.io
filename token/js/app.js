@@ -49,7 +49,15 @@ document.addEventListener('DOMContentLoaded', async () => {
   await walletManager.init();
   networkManager.load();
   walletPopup.load();
-  await contractManager.load();
+  const startupToast = toastManager.loading('Connecting to Polygon…', { id: 'startup-rpc' });
+  try {
+    await contractManager.load();
+  } catch (error) {
+    toastManager.error(`${error.message} Reload this page to retry.`, { title: 'Unable to load contract' });
+    return;
+  } finally {
+    toastManager.dismiss(startupToast);
+  }
   
   // Pre-fetch parameters to ensure symbol is available for components
   contractManager.getParametersBatch?.().catch(() => {});

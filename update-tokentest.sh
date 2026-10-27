@@ -4,8 +4,8 @@
 # UPDATE TOKENTEST SCRIPT
 # =============================================================================
 #
-# PURPOSE: This script updates the tokentest staging frontend by copying files
-#          from liberdus-token-ui to liberdus.github.io/tokentest
+# PURPOSE: This script updates the token frontend using only committed files
+#          from the current liberdus-token-ui branch.
 #
 # PREREQUISITES:
 # 1. This script must be located in the liberdus.github.io directory
@@ -19,13 +19,17 @@
 # USAGE:
 # 1. Run the script from anywhere: ./update-tokentest.sh
 #    (or: cd liberdus.github.io && ./update-tokentest.sh)
+# 2. To update the production folder instead: ./update-tokentest.sh token
 #
 # WHAT IT DOES:
-# - Initializes liberdus-token-ui submodules (vendor/liberdus-wallet-module)
-# - Copies liberdus-token-ui/* to liberdus.github.io/tokentest/
+# - Exports the current HEAD and its recorded submodule commits to a temp directory
+# - Leaves source branches, the index, and local changes untouched; does not pull
+# - Requires submodules and their recorded commits to already be available locally
+# - Copies the committed snapshot to tokentest/ (default) or token/
 # - Excludes node_modules, .git, and other build/IDE artifacts
+# - For token/, also excludes docs, tests, package files, and local scripts
 # - Mirrors source to target (removes files not in source)
-# - Increments VERSION in tokentest/js/config.js (patch increment: 0.0.X -> 0.0.X+1)
+# - Increments VERSION in the target's js/config.js (patch increment: 0.0.X -> 0.0.X+1)
 #
 # =============================================================================
 
@@ -34,7 +38,14 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_DIR="$SCRIPT_DIR"
 SOURCE_DIR="$(dirname "$REPO_DIR")/liberdus-token-ui"
-TARGET_DIR="$REPO_DIR/tokentest"
+TARGET_NAME="${1:-tokentest}"
+
+if [ "$#" -gt 1 ] || [[ "$TARGET_NAME" != "token" && "$TARGET_NAME" != "tokentest" ]]; then
+    echo "Usage: $0 [tokentest|token]"
+    exit 1
+fi
+
+TARGET_DIR="$REPO_DIR/$TARGET_NAME"
 
 cd "$REPO_DIR"
 
@@ -44,30 +55,53 @@ if [ ! -d "$SOURCE_DIR" ]; then
     exit 1
 fi
 
-if [ -z "$(ls -A "$SOURCE_DIR")" ]; then
-    echo "Error: Source directory is empty: $SOURCE_DIR"
+if ! command -v rsync &> /dev/null; then
+    echo "Error: rsync is required for update-tokentest.sh"
     exit 1
 fi
 
-echo "Initializing source submodules..."
-if ! git -C "$SOURCE_DIR" submodule update --init --recursive; then
-    echo "Error: Failed to initialize submodules in $SOURCE_DIR"
-    exit 1
-fi
+export_committed_tree() {
+    local repository="$1" commit="$2" destination="$3"
+    local metadata path mode type object
 
-if [ ! -f "$SOURCE_DIR/vendor/liberdus-wallet-module/index.js" ]; then
-    echo "Warning: vendor/liberdus-wallet-module/index.js not found in source."
-    echo "The wallet module submodule may be missing from the checked-out branch."
-fi
+    if [ ! -e "$repository/.git" ] || ! git -C "$repository" cat-file -e "${commit}^{commit}" 2>/dev/null; then
+        echo "Error: Commit $commit is not available in $repository"
+        echo "Initialize or fetch the missing submodule before retrying."
+        exit 1
+    fi
 
-mkdir -p "$TARGET_DIR"
+    mkdir -p "$destination"
+    git -C "$repository" archive "$commit" | tar -x -C "$destination"
 
-echo "Copying token UI contents to tokentest..."
+    while IFS=$'\t' read -r -d '' metadata path; do
+        read -r mode type object <<< "$metadata"
+        if [ "$mode" = "160000" ]; then
+            export_committed_tree "$repository/$path" "$object" "$destination/$path"
+        fi
+    done < <(git -C "$repository" ls-tree -rz "$commit")
+}
+
+SOURCE_COMMIT="$(git -C "$SOURCE_DIR" rev-parse --verify 'HEAD^{commit}')"
+SNAPSHOT_DIR="$(mktemp -d)"
+trap 'rm -rf "$SNAPSHOT_DIR"' EXIT
+
+echo "Exporting committed source files..."
 echo "Source: $SOURCE_DIR"
+echo "Source commit: $SOURCE_COMMIT"
+export_committed_tree "$SOURCE_DIR" "$SOURCE_COMMIT" "$SNAPSHOT_DIR"
+
+for runtime_file in index.html js/config.js vendor/liberdus-wallet-module/index.js; do
+    if [ ! -f "$SNAPSHOT_DIR/$runtime_file" ]; then
+        echo "Error: $runtime_file not found in committed source"
+        exit 1
+    fi
+done
+
+echo "Copying committed token UI contents to $TARGET_NAME..."
 echo "Target: $TARGET_DIR"
 echo "Note: If no files are listed, source and target are identical."
 
-CONFIG_SRC="$SOURCE_DIR/js/config.js"
+CONFIG_SRC="$SNAPSHOT_DIR/js/config.js"
 CONFIG_TGT="$TARGET_DIR/js/config.js"
 current_version="0.0.0"
 
@@ -84,7 +118,26 @@ IFS=. read -r maj min patch _ <<< "${current_version}.0"
 patch=$((patch + 1))
 new_version="$maj.$min.$patch"
 
+rsync_options=()
+if [ "$TARGET_NAME" = "token" ]; then
+    rsync_options=(
+        --delete-excluded
+        --exclude='.gitignore'
+        --exclude='.github'
+        --exclude='.cursor'
+        --exclude='docs'
+        --exclude='tests'
+        --exclude='scripts'
+        --exclude='*.md'
+        --exclude='*.MD'
+        --exclude='package.json'
+        --exclude='package-lock.json'
+    )
+fi
+
+mkdir -p "$TARGET_DIR"
 rsync -av --delete \
+  "${rsync_options[@]}" \
   --exclude='node_modules' \
   --exclude='.git' \
   --exclude='.gitmodules' \
@@ -95,24 +148,26 @@ rsync -av --delete \
   --exclude='*.log' \
   --exclude='vendor/liberdus-wallet-module/test' \
   --exclude='vendor/liberdus-wallet-module/demo.html' \
-  "$SOURCE_DIR/" "$TARGET_DIR/"
+  "$SNAPSHOT_DIR/" "$TARGET_DIR/"
 
-echo "Updating version in tokentest/js/config.js..."
+echo "Updating version in $TARGET_NAME/js/config.js..."
 if [ -f "$TARGET_DIR/js/config.js" ]; then
     sed -i "s/VERSION: '[0-9.]*'/VERSION: '$new_version'/" "$TARGET_DIR/js/config.js"
     echo "Set VERSION to $new_version"
 else
-    echo "Warning: tokentest/js/config.js not found, skipping version bump"
+    echo "Error: $TARGET_NAME/js/config.js not found after sync"
+    exit 1
 fi
 
 if [ ! -f "$TARGET_DIR/index.html" ]; then
-    echo "Error: index.html not found in tokentest folder"
+    echo "Error: index.html not found in $TARGET_NAME folder"
     exit 1
 fi
 
 if [ ! -f "$TARGET_DIR/vendor/liberdus-wallet-module/index.js" ]; then
-    echo "Warning: tokentest/vendor/liberdus-wallet-module/index.js not found after sync"
+    echo "Error: $TARGET_NAME/vendor/liberdus-wallet-module/index.js not found after sync"
+    exit 1
 fi
 
-echo "Tokentest update completed successfully!"
+echo "$TARGET_NAME update completed successfully!"
 echo "New VERSION in config.js: $new_version"

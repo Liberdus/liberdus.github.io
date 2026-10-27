@@ -4,8 +4,8 @@ import { formatSignatureProgress } from '../utils/proposal-helpers.js';
 // Infura Polygon allows 10,000 blocks per eth_getLogs request.
 const MAX_GET_LOGS_BLOCK_SPAN = 9999;
 const PROPOSALS_PER_LOAD = 3;
-// Tradeoff: loads may scan deeply, with chunk delays, to find the next visible batch.
-const LOG_SCAN_CHUNKS_UNTIL_TARGET = Number.POSITIVE_INFINITY;
+// Each initial/history interaction checks at most 50,000 blocks, including empty ranges.
+const HISTORY_SCAN_CHUNKS_PER_LOAD = 5;
 const GET_LOGS_CHUNK_DELAY_MS = 500;
 const OPERATION_COUNT_TTL_MS = 30 * 1000;
 
@@ -25,6 +25,7 @@ export class ProposalsTab {
     this.initialMinItems = PROPOSALS_PER_LOAD;
 
     this._isLoading = false;
+    this._statusIsProgress = false;
     this._allLogsLoaded = false; // whether we've fetched full historical logs once
 
     this._pendingEvents = []; // prefetched but not yet displayed (newest first)
@@ -33,17 +34,14 @@ export class ProposalsTab {
     this._requiredSignatures = null; // fetched once per session (no persistent caching)
     this._operationCount = null; // fetched from operationCount() and persisted with proposal cache
     this._operationCountFetchedAtMs = 0;
-    this._operationCountRefreshSucceeded = false;
 
     // Cache / refresh
     this.cacheTtlMs = 5 * 60 * 1000;
-    this.cacheMaxItems = 500;
     this._cacheSchemaVersion = 5; // Bumped to add operationCount metadata
 
-    this._lastFetchedBlock = 0; // latest block number at time of last scan (for incremental refresh)
+    this._lastFetchedBlock = 0; // end of the last successfully completed check for new events
     this._nextScanToBlock = null; // next older block to scan when loading historical proposal logs
-    this._refreshInFlight = false;
-    this._resolvedThroughBlock = 0; // highest block where all proposals at/below are terminal
+    this._initialScanHead = null; // frozen target until the first newest chunk succeeds
 
     // Filters
     this._filterOpType = null; // null = all, or number (0-8)
@@ -69,7 +67,7 @@ export class ProposalsTab {
       </div>
 
       <div class="card">
-        <div class="card-title-row">
+        <div class="card-title-row proposals-heading">
           <div class="proposals-description">
             <p class="muted">
               Proposals for operations (Mint, Burn, Distribute, etc.) that require multiple signatures to execute.
@@ -81,8 +79,8 @@ export class ProposalsTab {
               </span>
             </div>
           </div>
-          <div style="display:flex; align-items:center; gap:8px;">
-            <div class="muted" data-proposals-status style="display:none;"></div>
+          <div class="proposals-actions">
+            <div class="muted proposals-status" data-proposals-status role="status" aria-live="polite" aria-busy="false" style="display:none;"></div>
             <button type="button" class="btn btn--ghost" data-proposals-refresh title="Refresh proposals">Refresh</button>
           </div>
         </div>
@@ -155,6 +153,10 @@ export class ProposalsTab {
       }
     });
 
+    document.addEventListener('readRpcRetry', () => {
+      if (this._isLoading && this._statusIsProgress) this._setStatus('Connection interrupted. Retrying…', true);
+    });
+
     document.addEventListener('tabActivated', (e) => {
       if (e?.detail?.tabName === 'proposals') this._onActivated();
     });
@@ -189,24 +191,19 @@ export class ProposalsTab {
   _onActivated() {
     this._isActive = true;
 
-    // Hydrate visible rows best-effort (only pending/unknown).
-    this._ensureRequiredSignaturesAndHydrateVisible().catch(() => {});
-
-    // If we have little/no visible data, load a page now.
-    if (this._loadedEvents.length < this.initialMinItems) {
-      this.loadProposalsPage(
-        PROPOSALS_PER_LOAD,
-        LOG_SCAN_CHUNKS_UNTIL_TARGET
-      ).catch(() => {});
-    }
-
-    // If cache was stale (or an operation was requested while inactive), refresh incrementally.
-    // Avoid doing an "incremental refresh" before we've ever loaded anything.
+    // Check stale existing state before continuing older history, even with a partial page.
     const hasAnyState = this._lastFetchedBlock > 0 || this._loadedEvents.length > 0 || this._pendingEvents.length > 0;
     const staleForRefresh =
       !this._lastRefreshAtMs || Date.now() - this._lastRefreshAtMs > this._activationRefreshMinIntervalMs;
     if (hasAnyState && (this._needsRefresh || !this._cacheWasFresh || staleForRefresh)) {
       this._scheduleBackgroundRefresh();
+    } else if (this._loadedEvents.length < this.initialMinItems && !this._hasNoMoreEventsToLoad()) {
+      this.loadProposalsPage(PROPOSALS_PER_LOAD, HISTORY_SCAN_CHUNKS_PER_LOAD).catch(() => {});
+    } else {
+      this._runProposalJob(async () => {
+        this._setStatus('Updating proposal status…', true);
+        await this._ensureRequiredSignaturesAndHydrateVisible();
+      }, false).catch(() => {});
     }
   }
 
@@ -219,115 +216,103 @@ export class ProposalsTab {
   }
 
   _scheduleBackgroundRefresh() {
-    if (this._refreshDebounceTimer) {
-      clearTimeout(this._refreshDebounceTimer);
+    this._needsRefresh = true;
+    if (this._isLoading) return;
+    if (this._refreshDebounceTimer) clearTimeout(this._refreshDebounceTimer);
+    this._refreshDebounceTimer = setTimeout(() => {
       this._refreshDebounceTimer = null;
-    }
-    this._refreshDebounceTimer = setTimeout(async () => {
-      this._refreshDebounceTimer = null;
-      if (!this._isActive) return;
-      this._needsRefresh = false;
-      try {
-        await this._refreshNewEventsInBackground();
-        this._cacheWasFresh = true;
-        this._lastRefreshAtMs = Date.now();
-      } catch {
-        // ignore
-      }
-      this._updateLoadMoreVisibility();
-      this._renderCount();
+      if (this._isActive) this.refresh(false).catch(() => {});
     }, 250);
   }
 
-  async loadMore() {
-    await this.loadProposalsPage(this.pageSize, LOG_SCAN_CHUNKS_UNTIL_TARGET);
+  _showBusyToast() {
+    window.toastManager?.show?.({
+      id: 'proposals-busy',
+      message: 'Currently loading proposals. Please wait.',
+      timeoutMs: 2500,
+    });
   }
 
-  async loadProposalsPage(pageSize, maxScanChunks) {
-    if (!this.listEl) return;
-    if (this._isLoading || this._hasNoMoreEventsToLoad()) return;
-
-    const contractManager = window.contractManager;
-    if (!contractManager?.isReady?.()) {
-      this._setStatus('Contract not ready');
+  async _runProposalJob(work, manual) {
+    if (this._isLoading) {
+      if (manual) this._showBusyToast();
+      else this._needsRefresh = true;
       return;
     }
 
     this._isLoading = true;
-    this._setStatus('Loading…');
-    this.loadMoreBtn.disabled = true;
+    this.statusEl?.classList?.toggle('is-loading', true);
+    this.statusEl?.setAttribute?.('aria-busy', 'true');
+    this._setStatus('Loading proposals…', true);
+    try {
+      await work();
+    } catch (error) {
+      this._setStatus('Unable to finish proposal checks. Please try again.');
+      throw error;
+    } finally {
+      this._isLoading = false;
+      this.statusEl?.classList?.toggle('is-loading', false);
+      this.statusEl?.setAttribute?.('aria-busy', 'false');
+      if (this._statusIsProgress) this._setStatus('Ready');
+      this._updateLoadMoreVisibility();
+    }
+  }
+
+  async loadMore() {
+    await this.loadProposalsPage(this.pageSize, HISTORY_SCAN_CHUNKS_PER_LOAD, true);
+  }
+
+  async loadProposalsPage(pageSize, maxScanChunks = HISTORY_SCAN_CHUNKS_PER_LOAD, manual = false) {
+    await this._runProposalJob(() => this._loadProposalsPage(pageSize, maxScanChunks), manual);
+  }
+
+  async _loadProposalsPage(pageSize, maxScanChunks) {
+    if (!this.listEl || this._hasNoMoreEventsToLoad()) return false;
+
+    const contractManager = window.contractManager;
+    if (!contractManager?.isReady?.()) {
+      this._setStatus('Contract not ready');
+      return false;
+    }
+
+    this._setStatus('Searching older proposals…', true);
     const toast = window.toastManager;
     const toastId = toast?.loading?.('Retrieving proposals…', { id: 'proposals-loading', delayMs: 250 });
 
     try {
-      // Scan proposal logs until a page is available, or this load's chunk budget is reached.
-      await this._fillPendingUntil(pageSize, maxScanChunks);
+      await this._fillHistoryPage(pageSize, Math.min(maxScanChunks, HISTORY_SCAN_CHUNKS_PER_LOAD));
 
-      if (this._pendingEvents.length === 0) {
-        if (this._loadedEvents.length === 0 && this._allLogsLoaded) {
-          this._setStatus('No proposals found');
-        } else if (this._loadedEvents.length === 0) {
-          this._setStatus('Scanning older proposals…');
-        } else if (this._allLogsLoaded) {
-          this._setStatus('Done');
-        } else {
-          this._setStatus('Ready');
-        }
-        this._updateLoadMoreVisibility();
-        this._renderCount();
-        toast?.dismiss?.(toastId);
-        return;
+      if (this._hasNoMoreEventsToLoad()) {
+        this._setStatus(this._loadedEvents.length === 0 ? 'No proposals found' : 'All proposal history loaded');
+      } else {
+        this._setStatus(this._allLogsLoaded
+          ? 'More proposals available. Select Load more to continue.'
+          : 'More history remains. Select Load more to continue.');
       }
-
-      const page = this._pendingEvents.splice(0, pageSize); // may be < pageSize
-      this._loadedEvents.push(...page);
-
-      // Re-render all loaded events (filtered)
-      this._renderLoadedFromState();
-
-      // Ensure required signatures exists (doesn't block initial row render)
-      if (this._requiredSignatures == null) {
-        this._requiredSignatures = await contractManager.getRequiredSignatures();
-      }
-
-      // Hydrate with on-chain details via direct contract calls (only newly loaded page).
-      // Filters should be purely client-side and should not trigger extra queries.
-      await this._hydrateRows(page.map((e) => e.operationId));
-
-      this._setStatus(this._allLogsLoaded && this._pendingEvents.length === 0 ? 'Done' : 'Ready');
       this._renderCount();
       this._saveCache();
       this._cacheWasFresh = true;
       this._lastRefreshAtMs = Date.now();
       toast?.dismiss?.(toastId);
+      return true;
     } catch (e) {
       if (isRateLimitError(e)) {
-        this._setStatus('Rate limited. Try again shortly.');
+        this._setStatus('Rate limited. Select Load more to retry shortly.');
         toast?.dismiss?.(toastId);
       } else {
-        this._setStatus('Error loading proposals');
+        this._setStatus('Loading stopped. Select Load more to retry.');
         toast?.update?.(toastId, { type: 'error', title: 'Failed to load', message: e?.message || 'Failed to load proposals', timeoutMs: 0, dismissible: true });
       }
-    } finally {
-      this._isLoading = false;
-      // Update button state after _isLoading is set to false
-      this._updateLoadMoreVisibility();
+      return false;
     }
   }
 
-  _hasDiscoveredAllOperations() {
-    if (this._operationCount == null) return false;
-    const knownEvents = dedupeBy([...this._loadedEvents, ...this._pendingEvents], (x) => x.operationId);
-    return knownEvents.length >= this._operationCount;
-  }
-
   _hasNoMoreEventsToLoad() {
-    return this._pendingEvents.length === 0 && (this._allLogsLoaded || this._hasDiscoveredAllOperations());
+    return this._pendingEvents.length === 0 && this._allLogsLoaded;
   }
 
   async _ensureOperationCount(forceRefresh = false) {
     const now = Date.now();
-    this._operationCountRefreshSucceeded = false;
     if (
       !forceRefresh &&
       this._operationCount != null &&
@@ -340,33 +325,24 @@ export class ProposalsTab {
     if (!contract || typeof contract.operationCount !== 'function') return this._operationCount;
 
     try {
-      const previousCount = this._operationCount;
       const value = await contract.operationCount();
       const count = Number(value?.toString?.() ?? value);
       if (!Number.isFinite(count)) return this._operationCount;
 
       this._operationCount = count;
       this._operationCountFetchedAtMs = Date.now();
-      this._operationCountRefreshSucceeded = true;
-
-      if (this._hasDiscoveredAllOperations()) {
-        this._allLogsLoaded = true;
-        this._nextScanToBlock = null;
-      } else if (previousCount != null && count > previousCount) {
-        this._allLogsLoaded = false;
-      }
 
       this._renderCount();
       this._updateLoadMoreVisibility();
       this._saveCache();
       return this._operationCount;
-    } catch (error) {
-      if (isRateLimitError(error)) throw error;
+    } catch {
+      // The count is informational; its failure cannot prevent log discovery.
       return this._operationCount;
     }
   }
 
-  async _fillPendingUntil(minCount, maxScanChunks) {
+  async _fillHistoryPage(pageSize, maxScanChunks = HISTORY_SCAN_CHUNKS_PER_LOAD) {
     const contractManager = window.contractManager;
     const provider = contractManager.getReadOnlyProvider();
     const contract = contractManager.getReadContract();
@@ -374,53 +350,33 @@ export class ProposalsTab {
 
     if (!provider || !contract) return;
 
+    const targetLoadedCount = this._loadedEvents.length + pageSize;
+    await this._showPendingUntil(targetLoadedCount);
+    if (this._allLogsLoaded || this._loadedEvents.length >= targetLoadedCount) return;
+
     await this._ensureOperationCount();
 
-    const remainingAfterLoaded =
-      this._operationCount == null
-        ? minCount
-        : Math.max(0, this._operationCount - this._loadedEvents.length);
-    const targetPendingCount = Math.min(minCount, remainingAfterLoaded);
-    if (targetPendingCount <= 0) {
-      this._allLogsLoaded = true;
-      this._nextScanToBlock = null;
-      this._saveCache();
-      return;
-    }
-
-    if (this._allLogsLoaded) return;
-    // Skip fetch if we already have enough items in pending queue
-    if (this._pendingEvents.length >= targetPendingCount) return;
-
     const topic = contract.interface.getEventTopic('OperationRequested');
-    const latestBlock = Number(await provider.getBlockNumber());
-    if (!Number.isFinite(latestBlock)) return;
-
-    this._lastFetchedBlock = Math.max(Number(this._lastFetchedBlock || 0), latestBlock);
-
-    let toBlock = this._nextScanToBlock == null ? latestBlock : Number(this._nextScanToBlock);
-    if (!Number.isFinite(toBlock) || toBlock > latestBlock) toBlock = latestBlock;
-
-    if (floorBlock > latestBlock || toBlock < floorBlock) {
-      this._allLogsLoaded = true;
-      this._nextScanToBlock = null;
-      return;
+    if (!this._lastFetchedBlock && this._initialScanHead == null) {
+      const head = Number(await provider.getBlockNumber());
+      if (!Number.isSafeInteger(head) || head < floorBlock) {
+        throw new Error('RPC returned a head before the proposal history. Try again.');
+      }
+      this._initialScanHead = head;
+      this._saveCache();
     }
+    let toBlock = this._lastFetchedBlock ? this._nextScanToBlock : this._initialScanHead;
+    if (toBlock == null || toBlock < floorBlock) return;
 
     let chunksScanned = 0;
     while (
-      this._pendingEvents.length < targetPendingCount &&
+      this._loadedEvents.length < targetLoadedCount &&
       !this._allLogsLoaded &&
       chunksScanned < maxScanChunks
     ) {
-      const chunkTo = Math.min(toBlock, latestBlock);
-      if (chunkTo < floorBlock) {
-        this._allLogsLoaded = true;
-        this._nextScanToBlock = null;
-        break;
-      }
-
+      const chunkTo = toBlock;
       const chunkFrom = Math.max(floorBlock, chunkTo - MAX_GET_LOGS_BLOCK_SPAN);
+      this._setStatus('Searching older proposals…', true);
       const logs = await getLogsWithFallback(provider, {
         address: contract.address,
         topics: [topic],
@@ -431,11 +387,20 @@ export class ProposalsTab {
       const existingIds = new Set(
         [...this._loadedEvents, ...this._pendingEvents].map((e) => e.operationId)
       );
-      const parsed = this._parseLogs(contract, logs).filter((e) => !existingIds.has(e.operationId));
+      const parsed = this._parseLogs(contract, logs).filter((e) => {
+        if (existingIds.has(e.operationId)) return false;
+        existingIds.add(e.operationId);
+        return true;
+      });
       this._pendingEvents.push(...parsed);
 
+      if (!this._lastFetchedBlock) {
+        this._lastFetchedBlock = this._initialScanHead;
+        this._initialScanHead = null;
+      }
+
       chunksScanned += 1;
-      if (this._hasDiscoveredAllOperations() || chunkFrom <= floorBlock) {
+      if (chunkFrom <= floorBlock) {
         this._allLogsLoaded = true;
         this._nextScanToBlock = null;
       } else {
@@ -444,9 +409,10 @@ export class ProposalsTab {
       }
 
       this._saveCache();
+      await this._showPendingUntil(targetLoadedCount);
       if (
         !this._allLogsLoaded &&
-        this._pendingEvents.length < targetPendingCount &&
+        this._loadedEvents.length < targetLoadedCount &&
         chunksScanned < maxScanChunks
       ) {
         await sleep(GET_LOGS_CHUNK_DELAY_MS);
@@ -454,43 +420,47 @@ export class ProposalsTab {
     }
   }
 
+  async _showPendingUntil(targetLoadedCount) {
+    const page = this._pendingEvents.splice(0, Math.max(0, targetLoadedCount - this._loadedEvents.length));
+    if (page.length === 0) return;
+    this._loadedEvents.push(...page);
+    this._renderLoadedFromState();
+    this._renderCount();
+    this._saveCache();
+    // Rows are usable before optional details finish or the next range is requested.
+    await this._hydrateProposalRows(page.map((event) => event.operationId));
+  }
+
   _parseLogs(contract, logs) {
-    const parsed = (logs || [])
-      .map((log) => {
-        try {
-          const ev = contract.interface.parseLog(log);
-          const rawValue = ev.args.value || ev.args[4];
-          
-          // Ensure value is preserved as BigNumber (ethers.js should return BigNumber for uint256, but be defensive)
-          let value = rawValue;
-          if (rawValue && window.ethers?.BigNumber?.isBigNumber?.(rawValue)) {
-            value = rawValue; // Already a BigNumber, keep it
-          } else if (rawValue && typeof rawValue === 'object' && rawValue.type === 'BigNumber' && rawValue.hex) {
-            // Serialized BigNumber - restore it
-            value = window.ethers?.BigNumber?.from?.(rawValue.hex) || rawValue;
-          } else if (rawValue != null && window.ethers?.BigNumber) {
-            // Convert to BigNumber to preserve precision
-            value = window.ethers.BigNumber.from(rawValue);
-          }
-          
-          return {
-            operationId: String(ev.args.operationId || ev.args[0]),
-            opType: Number(ev.args.opType?.toString?.() ?? ev.args[1]?.toString?.() ?? 0),
-            requester: String(ev.args.requester || ev.args[2]),
-            target: String(ev.args.target || ev.args[3]),
-            value: value,
-            data: String(ev.args.data || ev.args[5]),
-            deadline: Number((ev.args.deadline || ev.args[6]).toString()),
-            timestamp: Number((ev.args.timestamp || ev.args[7]).toString()),
-            blockNumber: log.blockNumber,
-            transactionHash: log.transactionHash,
-            logIndex: log.logIndex,
-          };
-        } catch {
-          return null;
-        }
-      })
-      .filter(Boolean);
+    // Decode the whole chunk before its events or completed range can be committed.
+    const parsed = (logs || []).map((log) => {
+      const ev = contract.interface.parseLog(log);
+      const rawValue = ev.args.value || ev.args[4];
+
+      // Preserve uint256 precision, including values restored from JSON.
+      let value = rawValue;
+      if (rawValue && window.ethers?.BigNumber?.isBigNumber?.(rawValue)) {
+        value = rawValue;
+      } else if (rawValue && typeof rawValue === 'object' && rawValue.type === 'BigNumber' && rawValue.hex) {
+        value = window.ethers?.BigNumber?.from?.(rawValue.hex) || rawValue;
+      } else if (rawValue != null && window.ethers?.BigNumber) {
+        value = window.ethers.BigNumber.from(rawValue);
+      }
+
+      return {
+        operationId: String(ev.args.operationId || ev.args[0]),
+        opType: Number(ev.args.opType?.toString?.() ?? ev.args[1]?.toString?.() ?? 0),
+        requester: String(ev.args.requester || ev.args[2]),
+        target: String(ev.args.target || ev.args[3]),
+        value,
+        data: String(ev.args.data || ev.args[5]),
+        deadline: Number((ev.args.deadline || ev.args[6]).toString()),
+        timestamp: Number((ev.args.timestamp || ev.args[7]).toString()),
+        blockNumber: log.blockNumber,
+        transactionHash: log.transactionHash,
+        logIndex: log.logIndex,
+      };
+    });
 
     // Sort newest first (block desc, logIndex desc)
     parsed.sort((a, b) => {
@@ -514,17 +484,11 @@ export class ProposalsTab {
 
       const ev = eventMap.get(opId);
       if (ev) {
-        const oldStatus =
-          ev.executed === true ? 'Executed'
-            : (ev.expired === true ? 'Expired'
-              : (ev.executed === false && ev.expired === false ? 'Pending' : 'Unknown'));
-        ev.executed = !!details.executed;
-        ev.expired = !!details.expired;
+        const oldStatus = this._getProposalStatus(ev);
+        ev.executed = details.executed;
+        ev.expired = details.expired;
         ev.numSignatures = Number(details.numSignatures);
-        const newStatus =
-          ev.executed === true ? 'Executed'
-            : (ev.expired === true ? 'Expired'
-              : (ev.executed === false && ev.expired === false ? 'Pending' : 'Unknown'));
+        const newStatus = this._getProposalStatus(ev);
         
         // If status filter is active and status changed, re-render filtered view
         if (this._filterStatus != null && oldStatus !== newStatus) {
@@ -540,39 +504,44 @@ export class ProposalsTab {
           document.createTextNode(formatSignatureProgress(details.numSignatures, this._requiredSignatures))
         );
         row.querySelector('[data-proposal-executed]')?.replaceChildren(
-          document.createTextNode(details.executed ? 'Executed' : (details.expired ? 'Expired' : 'Pending'))
+          document.createTextNode(this._getProposalStatus(details))
         );
-      const isExecuted = !!details.executed;
-      const isExpired = !!details.expired && !isExecuted;
-      row.classList.toggle('is-executed', isExecuted);
-      row.classList.toggle('is-expired', isExpired);
+        row.classList.toggle('is-executed', details.executed === true);
+        row.classList.toggle('is-expired', details.expired === true && details.executed !== true);
       }
     }
-
-    this._recomputeResolvedThroughBlock();
   }
 
   async refreshOne(operationId) {
     if (!this.listEl) return;
-    await this._hydrateRows([operationId]);
+    await this._runProposalJob(async () => {
+      this._setStatus('Updating proposal status…', true);
+      await this._hydrateProposalRows([operationId]);
+    }, false);
   }
 
-  async refresh() {
-    if (this._refreshInFlight) return;
-    const originalText = this.refreshBtn?.textContent || 'Refresh';
-    this.refreshBtn?.setAttribute('disabled', '');
-    this.refreshBtn && (this.refreshBtn.textContent = 'Refreshing…');
-    try {
-      await this._refreshNewEventsInBackground();
-      this._updateLoadMoreVisibility();
-      this._renderCount();
-    } catch (e) {
-      this._setStatus('Error refreshing');
-      window.toastManager?.error?.('Failed to refresh proposals', { message: e?.message || 'Unknown error', timeoutMs: 0, dismissible: true });
-    } finally {
-      this.refreshBtn?.removeAttribute('disabled');
-      this.refreshBtn && (this.refreshBtn.textContent = originalText);
-    }
+  async refresh(manual = true) {
+    await this._runProposalJob(async () => {
+      this._needsRefresh = false;
+      if (this.refreshBtn) this.refreshBtn.textContent = 'Refreshing…';
+      this._setStatus('Checking recent proposals…', true);
+      try {
+        const completed = await this._refreshNewEventsInBackground();
+        if (completed === false) {
+          this._needsRefresh = true;
+          return;
+        }
+        this._cacheWasFresh = true;
+        this._lastRefreshAtMs = Date.now();
+        this._renderCount();
+      } catch (e) {
+        this._needsRefresh = true;
+        this._setStatus('Refresh stopped. Select Refresh to retry.');
+        window.toastManager?.error?.('Failed to refresh proposals', { message: e?.message || 'Unknown error', timeoutMs: 0, dismissible: true });
+      } finally {
+        if (this.refreshBtn) this.refreshBtn.textContent = 'Refresh';
+      }
+    }, manual);
   }
 
   async _ensureRequiredSignaturesAndHydrateVisible() {
@@ -581,46 +550,19 @@ export class ProposalsTab {
 
     const visibleEvents = this._loadedEvents.slice(0, this.pageSize);
 
-    if (this._requiredSignatures == null) {
-      try {
-        this._requiredSignatures = await contractManager.getRequiredSignatures();
-      } catch {
-        // keep null; UI will display '?' as denominator
-      }
-    }
-
-    // Update visible rows' denominator immediately once REQUIRED_SIGNATURES is known.
-    // This avoids showing `?/` indefinitely when the first page is all terminal ops.
-    for (const ev of visibleEvents) {
-      const opId = ev?.operationId;
-      if (!opId) continue;
-      const row = this.listEl?.querySelector?.(`[data-proposal-row="${opId}"]`);
-      if (!row) continue;
-
-      row.querySelector('[data-proposal-sigs]')?.replaceChildren(
-        document.createTextNode(formatSignatureProgress(ev.numSignatures, this._requiredSignatures))
-      );
-    }
-
     // Only hydrate rows that can still change (pending/unknown).
     const pendingIds = visibleEvents
       .filter((e) => !(e?.executed === true || e?.expired === true))
       .map((e) => e.operationId)
       .filter(Boolean);
-    if (pendingIds.length === 0) return;
-
-    await this._hydrateRows(pendingIds);
+    await this._hydrateProposalRows(pendingIds);
   }
 
   _appendRow(ev) {
     const typeLabel = operationEnumToString(ev.opType);
     const when = ev.timestamp ? new Date(ev.timestamp * 1000).toLocaleString() : '';
     const shortOpId = shortHex(ev.operationId);
-    const status =
-      ev.executed === true ? 'Executed'
-        : (ev.expired === true ? 'Expired'
-          : (ev.executed === false && ev.expired === false ? 'Pending' : null));
-    const statusText = status || 'Loading…';
+    const status = this._getProposalStatus(ev);
     const sigsText = formatSignatureProgress(ev.numSignatures, this._requiredSignatures);
 
     const row = document.createElement('button');
@@ -634,7 +576,7 @@ export class ProposalsTab {
       <div class="proposal-row-main">
         <div class="proposal-row-top">
           <div class="proposal-opid"><code>${shortOpId}</code></div>
-          <div class="proposal-status" data-proposal-executed>${statusText}</div>
+          <div class="proposal-status" data-proposal-executed>${status}</div>
         </div>
         <div class="proposal-row-bottom">
           <div class="proposal-meta">${typeLabel} • ${when}</div>
@@ -653,11 +595,14 @@ export class ProposalsTab {
     this.listEl.appendChild(row);
   }
 
-  _setStatus(text) {
+  _setStatus(text, inProgress = false) {
+    // A helper cannot dismiss the active job's loading feedback.
+    if (this._isLoading && (text === 'Ready' || text === 'Done')) return;
+    this._statusIsProgress = inProgress;
     if (!this.statusEl) return;
     this.statusEl.textContent = text;
     // Only show status for loading/error states, hide for "Ready" and "Done"
-    const shouldShow = text && text !== 'Ready' && text !== 'Done';
+    const shouldShow = this._isLoading || (text && text !== 'Ready' && text !== 'Done');
     this.statusEl.style.display = shouldShow ? '' : 'none';
   }
 
@@ -677,8 +622,8 @@ export class ProposalsTab {
     if (!this.loadMoreBtn) return;
     const noMore = this._hasNoMoreEventsToLoad();
     this.loadMoreBtn.classList.toggle('hidden', noMore);
-    // Enable button if not loading and there are more items (either prefetched or not yet scanned)
-    this.loadMoreBtn.disabled = this._isLoading || noMore;
+    // Keep busy actions reachable so the shared guard can explain why they cannot run.
+    this.loadMoreBtn.disabled = noMore;
   }
 
   _renderLoadedFromState() {
@@ -699,13 +644,18 @@ export class ProposalsTab {
 
       // Filter by status
       if (this._filterStatus != null) {
-        if (this._filterStatus === 'Executed' && ev.executed !== true) return false;
-        if (this._filterStatus === 'Expired' && !(ev.expired === true && ev.executed !== true)) return false;
-        if (this._filterStatus === 'Pending' && !(ev.executed !== true && ev.expired !== true)) return false;
+        if (this._getProposalStatus(ev) !== this._filterStatus) return false;
       }
 
       return true;
     });
+  }
+
+  _getProposalStatus(event) {
+    if (event.executed === true) return 'Executed';
+    if (event.expired === true) return 'Expired';
+    if (event.executed === false && event.expired === false) return 'Pending';
+    return 'Unknown';
   }
 
   _onFilterChange() {
@@ -842,16 +792,16 @@ export class ProposalsTab {
     this._pendingEvents = restored.slice(visibleCount);
 
     this._allLogsLoaded = !!cache?.allLogsLoaded;
-    this._lastFetchedBlock = Number(cache?.lastFetchedBlock || 0) || this._lastFetchedBlock;
+    this._lastFetchedBlock = Number(cache?.lastFetchedBlock || 0);
     this._nextScanToBlock =
-      cache?.nextScanToBlock == null ? null : (Number(cache.nextScanToBlock) || null);
+      cache?.nextScanToBlock == null ? null : Number(cache.nextScanToBlock);
+    this._initialScanHead = cache?.initialScanHead == null ? null : Number(cache.initialScanHead);
     this._operationCount =
-      cache?.operationCount == null ? null : (Number(cache.operationCount) || null);
+      cache?.operationCount == null ? null : Number(cache.operationCount);
     this._operationCountFetchedAtMs =
       this._operationCount == null
         ? 0
         : (Number(cache?.cachedAtMs || 0) || 0);
-    this._resolvedThroughBlock = Number(cache?.resolvedThroughBlock || 0) || this._resolvedThroughBlock;
   }
 
   _saveCache() {
@@ -864,9 +814,6 @@ export class ProposalsTab {
     const opStart = Number(CONFIG?.CONTRACT?.OPERATION_REQUESTED_START_BLOCK || 0) || 0;
 
     const combined = dedupeBy([...this._loadedEvents, ...this._pendingEvents], (x) => x.operationId);
-    const wasTruncated = combined.length > this.cacheMaxItems;
-    const capped = combined.slice(0, this.cacheMaxItems);
-    const loadedCount = Math.min(this._loadedEvents.length, capped.length);
 
     const payload = {
       schemaVersion: this._cacheSchemaVersion,
@@ -876,13 +823,11 @@ export class ProposalsTab {
       operationRequestedStartBlock: opStart,
       cachedAtMs: Date.now(),
       lastFetchedBlock: this._lastFetchedBlock || null,
-      nextScanToBlock: this._nextScanToBlock || null,
+      nextScanToBlock: this._nextScanToBlock,
+      initialScanHead: this._initialScanHead,
       operationCount: this._operationCount ?? null,
       allLogsLoaded: this._allLogsLoaded,
-      resolvedThroughBlock: this._resolvedThroughBlock || null,
-      eventsTruncated: wasTruncated,
-      loadedCount,
-      events: capped,
+      events: combined,
     };
 
     try {
@@ -893,6 +838,10 @@ export class ProposalsTab {
   }
 
   _clearCacheAndReload() {
+    if (this._isLoading) {
+      this._showBusyToast();
+      return;
+    }
     const key = this._getCacheKey();
     if (key) {
       try {
@@ -909,10 +858,9 @@ export class ProposalsTab {
     this._requiredSignatures = null;
     this._operationCount = null;
     this._operationCountFetchedAtMs = 0;
-    this._operationCountRefreshSucceeded = false;
     this._lastFetchedBlock = 0;
     this._nextScanToBlock = null;
-    this._resolvedThroughBlock = 0;
+    this._initialScanHead = null;
 
     if (this.listEl) this.listEl.innerHTML = '';
     this._setStatus('Cleared cache');
@@ -923,7 +871,7 @@ export class ProposalsTab {
     if (this._isActive) {
       this.loadProposalsPage(
         PROPOSALS_PER_LOAD,
-        LOG_SCAN_CHUNKS_UNTIL_TARGET
+        HISTORY_SCAN_CHUNKS_PER_LOAD
       ).catch(() => {});
     } else {
       this._needsRefresh = true;
@@ -932,127 +880,100 @@ export class ProposalsTab {
   }
 
   async _refreshNewEventsInBackground() {
-    if (this._refreshInFlight) return;
-    this._refreshInFlight = true;
+    const contractManager = window.contractManager;
+    const provider = contractManager?.getReadOnlyProvider?.();
+    const contract = contractManager?.getReadContract?.();
+    if (!provider || !contract) return false;
 
-    try {
-      const contractManager = window.contractManager;
-      const provider = contractManager?.getReadOnlyProvider?.();
-      const contract = contractManager?.getReadContract?.();
-      if (!provider || !contract) return;
+    if (!this._lastFetchedBlock) {
+      return this._loadProposalsPage(PROPOSALS_PER_LOAD, HISTORY_SCAN_CHUNKS_PER_LOAD);
+    }
 
-      const previousOperationCount = this._operationCount;
-      const currentOperationCount = await this._ensureOperationCount(true);
-      const operationCountRefreshSucceeded = this._operationCountRefreshSucceeded;
+    const latestNow = Number(await provider.getBlockNumber());
+    if (!Number.isFinite(latestNow)) throw new Error('Invalid current block number');
+    await this._ensureOperationCount(true);
 
-      const latestNow = await provider.getBlockNumber();
-      if (!latestNow) return;
+    const last = Number(this._lastFetchedBlock || 0);
+    const floorBlock = this._getScanFloorBlock();
 
-      const last = Number(this._lastFetchedBlock || 0);
-      const floorBlock = this._getScanFloorBlock();
+    if (latestNow <= last) {
+      // Nothing new; refresh visible hydration only.
+      await this._hydrateProposalRows(this._loadedEvents.slice(0, this.pageSize).map((event) => event.operationId));
+      this._setStatus('Ready');
+      return;
+    }
 
-      if (
-        operationCountRefreshSucceeded &&
-        previousOperationCount != null &&
-        currentOperationCount != null &&
-        currentOperationCount <= previousOperationCount
-      ) {
-        await this._ensureRequiredSignaturesAndHydrateVisible();
-        this._saveCache();
-        this._setStatus('Ready');
-        return;
-      }
-
-      if (!last || latestNow <= last) {
-        // Nothing new; refresh visible hydration only.
-        await this._ensureRequiredSignaturesAndHydrateVisible();
-        this._setStatus('Ready');
-        return;
-      }
-
-      const topic = contract.interface.getEventTopic('OperationRequested');
-      const fromBlock = Math.max(last + 1, floorBlock);
+    const topic = contract.interface.getEventTopic('OperationRequested');
+    for (let fromBlock = Math.max(last + 1, floorBlock); fromBlock <= latestNow; fromBlock += MAX_GET_LOGS_BLOCK_SPAN + 1) {
+      const toBlock = Math.min(fromBlock + MAX_GET_LOGS_BLOCK_SPAN, latestNow);
+      this._setStatus('Checking recent proposals…', true);
       const logs = await getLogsWithFallback(provider, {
         address: contract.address,
         topics: [topic],
         fromBlock,
-        toBlock: latestNow,
+        toBlock,
       });
 
-      const newEvents = this._parseLogs(contract, logs);
-      if (newEvents.length === 0) {
-        this._lastFetchedBlock = latestNow;
-        await this._ensureRequiredSignaturesAndHydrateVisible();
-        this._saveCache();
-        this._setStatus('Ready');
-        return;
-      }
-
-      const existingIds = new Set(this._loadedEvents.map((e) => e.operationId));
-      const toInsert = newEvents.filter((e) => !existingIds.has(e.operationId));
-
-      // Prepend to state
-      this._loadedEvents = [...toInsert, ...this._loadedEvents];
-      this._lastFetchedBlock = latestNow;
-      if (this._hasDiscoveredAllOperations()) {
-        this._allLogsLoaded = true;
-        this._nextScanToBlock = null;
-      }
-
-      // Update DOM: insert new rows at top, preserving newest-first ordering.
-      if (this.listEl && toInsert.length > 0) {
-        for (let i = toInsert.length - 1; i >= 0; i--) {
-          const ev = toInsert[i];
-          const before = this.listEl.firstChild;
-          // Reuse renderer by temporarily appending then moving; simplest to keep behavior consistent.
-          this._appendRow(ev);
-          const appended = this.listEl.lastChild;
-          if (before && appended) this.listEl.insertBefore(appended, before);
-        }
-      }
-
+      const events = this._parseLogs(contract, logs);
+      this._mergeRefreshEvents(events);
+      this._lastFetchedBlock = toBlock;
+      this._renderLoadedFromState();
       this._renderCount();
       this._saveCache();
-      await this._ensureRequiredSignaturesAndHydrateVisible();
-      this._setStatus('Ready');
-    } finally {
-      this._refreshInFlight = false;
+
+      if (events.length > 0) {
+        await this._hydrateProposalRows([...new Set(events.map((event) => event.operationId))]);
+      }
+      if (toBlock < latestNow) await sleep(GET_LOGS_CHUNK_DELAY_MS);
     }
+
+    await this._hydrateProposalRows(this._loadedEvents.slice(0, this.pageSize).map((event) => event.operationId));
+    this._setStatus('Ready');
+  }
+
+  _mergeRefreshEvents(events) {
+    const retained = new Map();
+    for (const event of [...this._loadedEvents, ...this._pendingEvents]) {
+      if (!retained.has(event.operationId)) retained.set(event.operationId, event);
+    }
+
+    let visibleCount = new Set(this._loadedEvents.map((event) => event.operationId)).size;
+    for (const event of events) {
+      if (retained.has(event.operationId)) continue;
+      retained.set(event.operationId, event);
+      visibleCount++;
+    }
+
+    const ordered = [...retained.values()].sort((a, b) => {
+      if (b.blockNumber !== a.blockNumber) return b.blockNumber - a.blockNumber;
+      return (b.logIndex || 0) - (a.logIndex || 0);
+    });
+    this._loadedEvents = ordered.slice(0, visibleCount);
+    this._pendingEvents = ordered.slice(visibleCount);
+  }
+
+  async _hydrateProposalRows(operationIds) {
+    if (this._requiredSignatures == null) {
+      try {
+        this._requiredSignatures = await window.contractManager.getRequiredSignatures();
+      } catch {
+        // A missing signature threshold does not prevent operation detail reads.
+      }
+    }
+    try {
+      if (operationIds.length > 0) await this._hydrateRows(operationIds);
+    } catch {
+      // Raw events and coverage were saved first; unknown details can be retried later.
+    }
+    this._renderLoadedFromState();
+    this._renderCount();
+    this._saveCache();
   }
 
   _getScanFloorBlock() {
     const deploymentBlock = Number(CONFIG?.CONTRACT?.DEPLOYMENT_BLOCK || 0);
     const opStartBlock = Number(CONFIG?.CONTRACT?.OPERATION_REQUESTED_START_BLOCK || 0);
-    const baseFloor = Math.max(deploymentBlock, opStartBlock || 0);
-    const resolvedFloor = Number(this._resolvedThroughBlock || 0);
-    return Math.max(baseFloor, resolvedFloor + 1);
-  }
-
-  _recomputeResolvedThroughBlock() {
-    if (!this._allLogsLoaded) return;
-
-    const combined = dedupeBy([...this._loadedEvents, ...this._pendingEvents], (x) => x.operationId);
-    if (combined.length === 0) return;
-
-    // Only advance if we are confident we haven't truncated history.
-    if (combined.length >= this.cacheMaxItems && !this._resolvedThroughBlock) return;
-
-    const sorted = combined.slice().sort((a, b) => {
-      if (a.blockNumber !== b.blockNumber) return a.blockNumber - b.blockNumber;
-      return (a.logIndex || 0) - (b.logIndex || 0);
-    });
-
-    let candidate = null;
-    for (const ev of sorted) {
-      if (!ev?.blockNumber) continue;
-      const isTerminal = ev.executed === true || ev.expired === true;
-      if (!isTerminal) break;
-      candidate = ev.blockNumber;
-    }
-
-    if (candidate != null) {
-      this._resolvedThroughBlock = Math.max(this._resolvedThroughBlock || 0, candidate);
-    }
+    return Math.max(deploymentBlock, opStartBlock || 0);
   }
 }
 
@@ -1099,17 +1020,6 @@ async function getLogsWithFallback(provider, filter) {
     throw new Error('Invalid getLogs block range');
   }
   if (from > to) return [];
-  if (to - from > MAX_GET_LOGS_BLOCK_SPAN) {
-    const logs = [];
-    for (let start = from; start <= to; start += MAX_GET_LOGS_BLOCK_SPAN + 1) {
-      const end = Math.min(start + MAX_GET_LOGS_BLOCK_SPAN, to);
-      const chunkLogs = await getLogsWithFallback(provider, { ...filter, fromBlock: start, toBlock: end });
-      logs.push(...chunkLogs);
-      if (end < to) await sleep(GET_LOGS_CHUNK_DELAY_MS);
-    }
-    return logs;
-  }
-
   try {
     return await provider.getLogs(filter);
   } catch (error) {
