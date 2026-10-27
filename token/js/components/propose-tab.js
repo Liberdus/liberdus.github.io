@@ -621,7 +621,9 @@ export class ProposeTab {
       this._resetForm();
 
       // Ask proposals list to refresh (best-effort).
-      document.dispatchEvent(new CustomEvent('operationRequested', { detail: { txHash: tx.hash, operationId: opId } }));
+      document.dispatchEvent(new CustomEvent('operationRequested', {
+        detail: { txHash: tx.hash, operationId: opId, successMessageHtml: message },
+      }));
 
       // If user requested a Mint proposal, refresh the mint readiness banner (best-effort).
       if (opType === 0) {

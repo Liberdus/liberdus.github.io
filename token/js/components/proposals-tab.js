@@ -4,7 +4,7 @@ import { formatSignatureProgress } from '../utils/proposal-helpers.js';
 // Infura Polygon allows 10,000 blocks per eth_getLogs request.
 const MAX_GET_LOGS_BLOCK_SPAN = 9999;
 const PROPOSALS_PER_LOAD = 3;
-// Each initial/history interaction checks at most 50,000 blocks, including empty ranges.
+// Automatic initial loading checks at most 50,000 blocks, including empty ranges.
 const HISTORY_SCAN_CHUNKS_PER_LOAD = 5;
 const GET_LOGS_CHUNK_DELAY_MS = 500;
 const OPERATION_COUNT_TTL_MS = 30 * 1000;
@@ -50,6 +50,7 @@ export class ProposalsTab {
     // Phase 9.4: lazy tab loading
     this._isActive = false;
     this._needsRefresh = false;
+    this._refreshQueued = false;
     this._cacheWasFresh = false;
     this._refreshDebounceTimer = null;
     this._lastRefreshAtMs = 0;
@@ -145,13 +146,7 @@ export class ProposalsTab {
     });
 
     // When a new operation is requested (Phase 5), refresh proposals in background.
-    document.addEventListener('operationRequested', () => {
-      // Mark stale; only hit RPC if the tab is active.
-      this._needsRefresh = true;
-      if (this._isActive) {
-        this._scheduleBackgroundRefresh();
-      }
-    });
+    document.addEventListener('operationRequested', (e) => this._onOperationRequested(e.detail?.successMessageHtml));
 
     document.addEventListener('readRpcRetry', () => {
       if (this._isLoading && this._statusIsProgress) this._setStatus('Connection interrupted. Retrying…', true);
@@ -217,12 +212,24 @@ export class ProposalsTab {
 
   _scheduleBackgroundRefresh() {
     this._needsRefresh = true;
-    if (this._isLoading) return;
+    this._refreshQueued = true;
+    if (this._isLoading || !this._isActive) return;
     if (this._refreshDebounceTimer) clearTimeout(this._refreshDebounceTimer);
     this._refreshDebounceTimer = setTimeout(() => {
       this._refreshDebounceTimer = null;
       if (this._isActive) this.refresh(false).catch(() => {});
     }, 250);
+  }
+
+  _onOperationRequested(successMessageHtml) {
+    if (this._isLoading && successMessageHtml) {
+      window.toastManager?.update?.('propose-success', {
+        title: 'Proposal confirmed',
+        message: `${successMessageHtml}<br><br>Another search is running; a refresh is queued for the Proposals tab.`,
+        allowHtml: true,
+      });
+    }
+    this._scheduleBackgroundRefresh();
   }
 
   _showBusyToast() {
@@ -236,7 +243,7 @@ export class ProposalsTab {
   async _runProposalJob(work, manual) {
     if (this._isLoading) {
       if (manual) this._showBusyToast();
-      else this._needsRefresh = true;
+      else this._scheduleBackgroundRefresh();
       return;
     }
 
@@ -255,11 +262,12 @@ export class ProposalsTab {
       this.statusEl?.setAttribute?.('aria-busy', 'false');
       if (this._statusIsProgress) this._setStatus('Ready');
       this._updateLoadMoreVisibility();
+      if (this._refreshQueued && this._isActive) this._scheduleBackgroundRefresh();
     }
   }
 
   async loadMore() {
-    await this.loadProposalsPage(this.pageSize, HISTORY_SCAN_CHUNKS_PER_LOAD, true);
+    await this.loadProposalsPage(this.pageSize, Infinity, true);
   }
 
   async loadProposalsPage(pageSize, maxScanChunks = HISTORY_SCAN_CHUNKS_PER_LOAD, manual = false) {
@@ -280,7 +288,7 @@ export class ProposalsTab {
     const toastId = toast?.loading?.('Retrieving proposals…', { id: 'proposals-loading', delayMs: 250 });
 
     try {
-      await this._fillHistoryPage(pageSize, Math.min(maxScanChunks, HISTORY_SCAN_CHUNKS_PER_LOAD));
+      await this._fillHistoryPage(pageSize, maxScanChunks);
 
       if (this._hasNoMoreEventsToLoad()) {
         this._setStatus(this._loadedEvents.length === 0 ? 'No proposals found' : 'All proposal history loaded');
@@ -350,7 +358,8 @@ export class ProposalsTab {
 
     if (!provider || !contract) return;
 
-    const targetLoadedCount = this._loadedEvents.length + pageSize;
+    const initialLoadedCount = this._loadedEvents.length;
+    const targetLoadedCount = initialLoadedCount + pageSize;
     await this._showPendingUntil(targetLoadedCount);
     if (this._allLogsLoaded || this._loadedEvents.length >= targetLoadedCount) return;
 
@@ -369,6 +378,7 @@ export class ProposalsTab {
     if (toBlock == null || toBlock < floorBlock) return;
 
     let chunksScanned = 0;
+    let blocksSearched = 0;
     while (
       this._loadedEvents.length < targetLoadedCount &&
       !this._allLogsLoaded &&
@@ -376,7 +386,7 @@ export class ProposalsTab {
     ) {
       const chunkTo = toBlock;
       const chunkFrom = Math.max(floorBlock, chunkTo - MAX_GET_LOGS_BLOCK_SPAN);
-      this._setStatus('Searching older proposals…', true);
+      this._setHistoryProgress(this._loadedEvents.length - initialLoadedCount, pageSize, blocksSearched);
       const logs = await getLogsWithFallback(provider, {
         address: contract.address,
         topics: [topic],
@@ -400,6 +410,7 @@ export class ProposalsTab {
       }
 
       chunksScanned += 1;
+      blocksSearched += chunkTo - chunkFrom + 1;
       if (chunkFrom <= floorBlock) {
         this._allLogsLoaded = true;
         this._nextScanToBlock = null;
@@ -410,6 +421,7 @@ export class ProposalsTab {
 
       this._saveCache();
       await this._showPendingUntil(targetLoadedCount);
+      this._setHistoryProgress(this._loadedEvents.length - initialLoadedCount, pageSize, blocksSearched);
       if (
         !this._allLogsLoaded &&
         this._loadedEvents.length < targetLoadedCount &&
@@ -418,6 +430,10 @@ export class ProposalsTab {
         await sleep(GET_LOGS_CHUNK_DELAY_MS);
       }
     }
+  }
+
+  _setHistoryProgress(foundCount, targetCount, blocksSearched) {
+    this._setStatus(`Searching older proposals… Found ${foundCount} of ${targetCount} · searched ${blocksSearched.toLocaleString()} blocks`, true);
   }
 
   async _showPendingUntil(targetLoadedCount) {
@@ -522,7 +538,12 @@ export class ProposalsTab {
 
   async refresh(manual = true) {
     await this._runProposalJob(async () => {
+      this._refreshQueued = false;
       this._needsRefresh = false;
+      if (this._refreshDebounceTimer) {
+        clearTimeout(this._refreshDebounceTimer);
+        this._refreshDebounceTimer = null;
+      }
       if (this.refreshBtn) this.refreshBtn.textContent = 'Refreshing…';
       this._setStatus('Checking recent proposals…', true);
       try {
@@ -971,9 +992,7 @@ export class ProposalsTab {
   }
 
   _getScanFloorBlock() {
-    const deploymentBlock = Number(CONFIG?.CONTRACT?.DEPLOYMENT_BLOCK || 0);
-    const opStartBlock = Number(CONFIG?.CONTRACT?.OPERATION_REQUESTED_START_BLOCK || 0);
-    return Math.max(deploymentBlock, opStartBlock || 0);
+    return Number(CONFIG?.CONTRACT?.DEPLOYMENT_BLOCK || 0);
   }
 }
 
