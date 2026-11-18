@@ -5,6 +5,29 @@
    Note: Organizational headers only; no visual changes
    ============================================= */
 
+/* Self-hosted Inter variable font; SIL OFL 1.1 license in fonts/LICENSE.txt. */
+@font-face {
+  font-family: 'Inter';
+  font-style: normal;
+  font-weight: 400 700;
+  font-display: swap;
+  src: url('./fonts/inter-latin.woff2') format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA,
+    U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193,
+    U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+@font-face {
+  font-family: 'Inter';
+  font-style: normal;
+  font-weight: 400 700;
+  font-display: swap;
+  src: url('./fonts/inter-latin-ext.woff2') format('woff2');
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF,
+    U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020,
+    U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+
 /* ========== Settings (tokens/variables) ========== */
 /* Unstake lock info under the Unstake button */
 #unstake-lock-info,
@@ -48,6 +71,7 @@
   --icon-clock: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='12' cy='12' r='10'%3E%3C/circle%3E%3Cpolyline points='12 6 12 12 16 14'%3E%3C/polyline%3E%3C/svg%3E");
   --icon-info: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='12' cy='12' r='10'%3E%3C/circle%3E%3Cline x1='12' y1='16' x2='12' y2='12'%3E%3C/line%3E%3Cline x1='12' y1='8' x2='12.01' y2='8'%3E%3C/line%3E%3C/svg%3E");
   --icon-bridge: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M7 8l-4 4 4 4'%3E%3C/path%3E%3Cpath d='M17 8l4 4-4 4'%3E%3C/path%3E%3Cpath d='M3 12h18'%3E%3C/path%3E%3C/svg%3E");
+  --icon-dao: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m9 12 2 2 4-4'/%3E%3Cpath d='M5 7c0-1.1.9-2 2-2h10a2 2 0 0 1 2 2v12H5V7Z'/%3E%3Cpath d='M22 19H2'/%3E%3C/svg%3E");
   --icon-download: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4'%3E%3C/path%3E%3Cpolyline points='7,10 12,15 17,10'%3E%3C/polyline%3E%3Cline x1='12' y1='15' x2='12' y2='3'%3E%3C/line%3E%3C/svg%3E");
   --icon-share: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='18' cy='5' r='3'%3E%3C/circle%3E%3Ccircle cx='6' cy='12' r='3'%3E%3C/circle%3E%3Ccircle cx='18' cy='19' r='3'%3E%3C/circle%3E%3Cline x1='8.59' y1='13.51' x2='15.42' y2='17.49'%3E%3C/line%3E%3Cline x1='15.41' y1='6.51' x2='8.59' y2='10.49'%3E%3C/line%3E%3C/svg%3E");
   --icon-location: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M20 10c0 4.993-5.539 10.193-7.399 11.799a1 1 0 0 1-1.202 0C9.539 20.193 4 14.993 4 10a8 8 0 0 1 16 0'%3E%3C/path%3E%3Ccircle cx='12' cy='10' r='3'%3E%3C/circle%3E%3C/svg%3E");
@@ -67,7 +91,8 @@
   --icon-sign-out: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='%23dc3545' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4'%3E%3C/path%3E%3Cpolyline points='16,17 21,12 16,7'%3E%3C/polyline%3E%3Cline x1='21' y1='12' x2='9' y2='12'%3E%3C/line%3E%3C/svg%3E");
 
   /* Typography tokens */
-  --font-primary: 'Inter', sans-serif;
+  --font-primary: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto,
+    'Helvetica Neue', Arial, sans-serif;
   --font-monospace: monospace;
   --font-size-xs: 12px;
   --font-size-sm: 14px;
@@ -209,6 +234,7 @@ body {
   justify-content: center;
   align-items: center;
   font-family: var(--font-primary);
+  font-variant-ligatures: no-contextual;
 background-color: var(--surface-muted);
   padding: env(safe-area-inset-top, 0px) env(safe-area-inset-right, 0px) env(safe-area-inset-bottom, 0px)
     env(safe-area-inset-left, 0px);
@@ -355,7 +381,7 @@ body {
   display: flex;
   flex-direction: column;
   position: relative;
-  overflow: hidden;
+  overflow: clip;
   /* for firefox */
   scrollbar-width: thin;
   scrollbar-color: var(--scrollbar-thumb) var(--scrollbar-track);
@@ -491,11 +517,11 @@ body {
   justify-content: flex-start;
   align-items: center;
   padding: 2rem;
-  padding-bottom: calc(2rem + env(safe-area-inset-bottom, 0px) + 100px);
+  padding-bottom: calc(2rem + env(safe-area-inset-bottom, 0px));
   overflow-y: auto;
   overflow-x: hidden;
   -webkit-overflow-scrolling: touch;
-  min-height: 100vh;
+  min-height: 0;
 }
 
 .welcome-screen .welcome-buttons {
@@ -537,6 +563,15 @@ body {
   opacity: 0.9;
 }
 
+.welcome-version {
+  flex: none;
+  margin-top: auto;
+  padding-top: 28px;
+  color: var(--muted-text-color);
+  font-size: 0.8rem;
+  text-align: center;
+}
+
 .header {
   display: none;
   align-items: center;
@@ -549,6 +584,13 @@ body {
   top: env(safe-area-inset-top, 0);
   /* z-index: 1000; */
   margin-top: env(safe-area-inset-top, 0);
+  /* On desktop the frame has a fixed height, so a shorter window scrolls the
+     page. Keep the header in its place in the frame there, like the footer and
+     the modal headers, instead of sliding over the active screen. */
+  @media (min-width: 769px) {
+    position: relative;
+    top: auto;
+  }
 }
 
 #logo {
@@ -640,6 +682,10 @@ body {
   padding: 5px; /* Prevent `::before` icons (e.g. settings/menu) from being clipped */
 }
 
+.header-icons .icon-button[hidden] {
+  display: none;
+}
+
 .icon-button {
   background: none;
   border: none;
@@ -708,11 +754,24 @@ body {
   margin: 1px;
 }
 
-.icon-button#upcomingCallsBtn.upcoming-calls-glow {
-  animation: callsGlow 1.5s ease-in-out infinite;
+.icon-button#daoNotificationsBtn::before {
+  content: '';
+  width: 19px;
+  height: 19px;
+  display: block;
+  background-position: center;
+  background-repeat: no-repeat;
+  background-size: 19px 19px;
+  background-image: var(--icon-dao);
+  margin: 1px;
 }
 
-@keyframes callsGlow {
+.icon-button#upcomingCallsBtn.upcoming-calls-glow,
+.icon-button#daoNotificationsBtn.dao-notification-glow {
+  animation: headerIconGlow 1.5s ease-in-out infinite;
+}
+
+@keyframes headerIconGlow {
   0%, 100% {
     filter: drop-shadow(0 0 2px var(--primary-color)) drop-shadow(0 0 4px var(--primary-color));
   }
@@ -1010,6 +1069,22 @@ body {
   overflow: hidden;
   text-overflow: ellipsis;
   text-align: left;
+}
+
+.chat-failed-indicator {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  margin-right: 6px;
+  border-radius: 50%;
+  background-color: var(--danger-color);
+  color: var(--background-color);
+  font-size: 11px;
+  font-weight: var(--font-weight-bold);
+  line-height: 1;
+  vertical-align: text-bottom;
 }
 
 .chat-unread {
@@ -1391,7 +1466,8 @@ button:disabled {
   background-image: var(--icon-contacts);
 }
 
-.nav-button#switchToWallet::before {
+.nav-button#switchToWallet::before,
+.context-menu-option[data-icon="wallet"] .context-menu-icon {
   /* Simple billfold */
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='2' y='6' width='20' height='12' rx='2'/%3E%3Cpath d='M2 12h20'/%3E%3C/svg%3E");
 }
@@ -1591,7 +1667,7 @@ button:disabled {
   min-height: var(--icon-button-height);
 }
 
-.sign-out-header-button.active {
+.modal.active.is-transition-complete .sign-out-header-button {
   pointer-events: auto;
   opacity: 1;
 }
@@ -1709,6 +1785,280 @@ button:disabled {
   touch-action: pan-y; /* re-enable vertical panning only within this element */
 }
 
+.full-image-modal {
+  background: #0d0f13;
+  color: #fff;
+}
+
+.full-image-modal-content {
+  position: absolute;
+  inset: 0;
+  min-height: 0;
+  overflow: hidden;
+  background: inherit;
+  touch-action: none;
+}
+
+.full-image-modal .modal-header {
+  position: absolute;
+  inset: 0 0 auto;
+  z-index: 2;
+  height: calc(104px + env(safe-area-inset-top, 0px));
+  margin: 0;
+  background: linear-gradient(to bottom, rgba(0, 0, 0, 0.8), transparent);
+  pointer-events: none;
+}
+
+.full-image-modal .back-button,
+.full-image-rotate-button {
+  top: calc(12px + env(safe-area-inset-top, 0px));
+  width: 44px;
+  height: 44px;
+  padding: 10px;
+  border-radius: 50%;
+  color: #fff;
+  pointer-events: auto;
+}
+
+.full-image-modal .back-button {
+  left: calc(12px + env(safe-area-inset-left, 0px));
+}
+
+.full-image-rotate-button {
+  position: absolute;
+  right: calc(12px + env(safe-area-inset-right, 0px));
+  border: 0;
+  background: none;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+
+.full-image-rotate-button svg {
+  display: block;
+}
+
+.full-image-modal .back-button::before {
+  filter: brightness(0) invert(1);
+}
+
+.full-image-modal .back-button:focus-visible,
+.full-image-rotate-button:focus-visible {
+  outline: 2px solid #fff;
+  outline-offset: 2px;
+}
+
+.full-image-modal .modal-title {
+  position: absolute;
+  top: calc(24px + env(safe-area-inset-top, 0px));
+  left: calc(64px + env(safe-area-inset-left, 0px));
+  right: calc(64px + env(safe-area-inset-right, 0px));
+  max-width: none;
+  margin: 0;
+  color: #fff;
+  font-size: var(--font-size-sm);
+  line-height: 20px;
+  pointer-events: auto;
+}
+
+.full-image-viewer {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  container-type: size;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+}
+
+.full-image-viewer-image {
+  display: block;
+  max-width: 100%;
+  max-height: 100%;
+  width: auto;
+  height: auto;
+  object-fit: contain;
+  rotate: var(--media-rotation, 0deg);
+  transform-origin: center;
+  user-select: none;
+  -webkit-user-drag: none;
+  -webkit-touch-callout: none;
+  will-change: transform;
+}
+
+.full-image-viewer.is-sideways .full-image-viewer-image {
+  flex-shrink: 0;
+  max-width: 100cqh;
+  max-height: 100cqw;
+}
+
+.full-image-modal.is-video,
+.full-image-modal.is-video .full-image-modal-content {
+  touch-action: auto;
+}
+
+.full-image-viewer-video {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  background: #000;
+}
+
+.full-image-viewer.is-rotated .full-image-viewer-video:not(:fullscreen) {
+  /* Leave room at both ends so the overlay header can't cover rotated video controls. */
+  --rotated-video-height: calc(100cqh - 2 * (64px + env(safe-area-inset-top, 0px)));
+  height: var(--rotated-video-height);
+  rotate: var(--media-rotation);
+}
+
+.full-image-viewer.is-sideways .full-image-viewer-video:not(:fullscreen) {
+  flex-shrink: 0;
+  width: var(--rotated-video-height);
+  height: 100cqw;
+}
+
+.full-image-modal.is-video .full-image-loading {
+  position: absolute;
+  z-index: 1;
+  padding: 16px;
+  border-radius: 12px;
+  background: rgba(13, 15, 19, 0.92);
+  pointer-events: none;
+}
+
+.full-image-error {
+  max-width: 32em;
+  padding: 16px;
+  text-align: center;
+}
+
+.full-image-viewer.is-zoomed .full-image-viewer-image {
+  cursor: grab;
+}
+
+.full-image-viewer.is-dragging .full-image-viewer-image {
+  cursor: grabbing;
+}
+
+.full-image-zoom-controls {
+  position: absolute;
+  z-index: 2;
+  right: calc(20px + env(safe-area-inset-right, 0px));
+  bottom: calc(20px + env(safe-area-inset-bottom, 0px));
+  display: flex;
+  gap: 4px;
+  padding: 4px;
+  border: 1px solid rgba(28, 28, 33, 0.1);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.92);
+  box-shadow: 0 6px 20px rgba(28, 28, 33, 0.14);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+}
+
+.full-image-modal .modal-header,
+.full-image-zoom-controls {
+  opacity: 1;
+  transition: opacity 220ms ease;
+}
+
+.full-image-modal.is-chrome-hidden .modal-header,
+.full-image-modal.is-chrome-hidden .full-image-zoom-controls {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.full-image-modal.is-chrome-hidden .modal-header * {
+  pointer-events: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .full-image-modal .modal-header,
+  .full-image-zoom-controls {
+    transition: none;
+  }
+}
+
+.full-image-zoom-controls[hidden] {
+  display: none;
+}
+
+.full-image-zoom-button {
+  position: relative;
+  flex: 0 0 40px;
+  width: 40px;
+  height: 40px;
+  min-width: 40px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--text-color);
+  font-size: 0;
+  cursor: pointer;
+  touch-action: manipulation;
+  transition: background-color 0.15s ease, transform 0.15s ease, opacity 0.15s ease;
+}
+
+.full-image-zoom-button::before,
+.full-image-zoom-button::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 16px;
+  height: 2px;
+  border-radius: 2px;
+  background: currentColor;
+  transform: translate(-50%, -50%);
+}
+
+#fullImageZoomIn::after {
+  transform: translate(-50%, -50%) rotate(90deg);
+}
+
+#fullImageZoomOut::after {
+  display: none;
+}
+
+.full-image-zoom-button:hover:not(:disabled) {
+  background: var(--surface-muted);
+}
+
+.full-image-zoom-button:active:not(:disabled) {
+  transform: scale(0.92);
+}
+
+.full-image-zoom-button:focus-visible {
+  outline: 2px solid var(--primary-color);
+  outline-offset: 1px;
+}
+
+.full-image-zoom-button:disabled {
+  opacity: 0.32;
+  cursor: default;
+}
+
+.full-image-viewer-image[hidden],
+.full-image-viewer-video[hidden],
+.full-image-error[hidden] {
+  display: none;
+}
+
+.full-image-loading {
+  color: inherit;
+  text-align: center;
+}
+
+.full-image-loading[hidden] {
+  display: none;
+}
+
+.full-image-loading .spinner {
+  border-color: rgba(255, 255, 255, 0.2);
+  border-left-color: #fff;
+}
+
 .form-group {
   margin-bottom: 1.5rem;
   width: 100%;
@@ -1750,6 +2100,70 @@ button:disabled {
   box-shadow: var(--focus-ring-primary);
 }
 
+.contact-autocomplete-field {
+  position: relative;
+}
+
+.contact-autocomplete-list {
+  position: absolute;
+  top: 100%;
+  inset-inline: 0;
+  z-index: 1;
+  margin-top: 4px;
+  max-height: min(14rem, 40dvh);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  border: 1px solid var(--border-color);
+  border-radius: 12px;
+  padding: 4px;
+  background: var(--background-color);
+  box-shadow: var(--elev-2);
+  color: var(--text-color);
+  text-align: left;
+  touch-action: pan-y;
+}
+
+.contact-autocomplete-option {
+  display: grid;
+  grid-template-columns: 32px minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+  min-height: 44px;
+  padding: 6px 10px;
+  border-radius: 8px;
+  cursor: pointer;
+  overflow-wrap: anywhere;
+}
+
+.contact-autocomplete-option:hover,
+.contact-autocomplete-option[aria-selected='true'] {
+  background: var(--hover-background-purple);
+}
+
+.contact-autocomplete-option[aria-selected='true'] {
+  outline: 2px solid var(--primary-color);
+  outline-offset: -2px;
+}
+
+.contact-autocomplete-avatar {
+  display: flex;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  overflow: hidden;
+}
+
+.contact-autocomplete-text {
+  display: grid;
+  min-width: 0;
+}
+
+.contact-autocomplete-username {
+  color: var(--secondary-text-color);
+  font-size: var(--font-size-sm);
+}
+
 select.form-control {
   appearance: none;
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='%23333' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E");
@@ -1762,6 +2176,140 @@ select.form-control {
 select.form-control.is-private {
   color: var(--danger-color);
   border-color: var(--danger-color);
+}
+
+.popup-select__trigger {
+  align-items: center;
+  background: var(--background-color);
+  color: var(--text-color);
+  display: grid;
+  gap: 8px;
+  grid-template-columns: minmax(0, 1fr) 16px;
+  text-align: left;
+}
+
+.popup-select__value,
+.popup-select__option-label {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.popup-select__chevron {
+  background-color: currentColor;
+  height: 16px;
+  -webkit-mask: url("data:image/svg+xml,%3Csvg viewBox='0 0 24 24' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='m6.7 8.7 5.3 5.3 5.3-5.3 1.4 1.4-6.7 6.7-6.7-6.7z'/%3E%3C/svg%3E") center / contain no-repeat;
+  mask: url("data:image/svg+xml,%3Csvg viewBox='0 0 24 24' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='m6.7 8.7 5.3 5.3 5.3-5.3 1.4 1.4-6.7 6.7-6.7-6.7z'/%3E%3C/svg%3E") center / contain no-repeat;
+  transition: transform 0.15s ease;
+  width: 16px;
+}
+
+.popup-select__trigger[aria-expanded='true'] .popup-select__chevron {
+  transform: rotate(180deg);
+}
+
+.popup-select__menu {
+  background: var(--background-color);
+  border: 1px solid var(--border-color);
+  border-radius: 14px;
+  box-shadow: var(--overlay-shadow-large);
+  color: var(--text-color);
+  max-height: 458px; /* Ten 44px rows plus menu chrome. */
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 8px;
+  position: fixed;
+  scrollbar-width: thin;
+  touch-action: pan-y;
+  z-index: var(--overlay-z-index-high);
+  -webkit-overflow-scrolling: touch;
+}
+
+.popup-select__menu:focus {
+  outline: none;
+}
+
+.popup-select__menu::-webkit-scrollbar {
+  width: 6px;
+}
+
+.popup-select__menu::-webkit-scrollbar-track {
+  margin: 8px 0;
+}
+
+.popup-select__menu::-webkit-scrollbar-thumb {
+  background-color: var(--scrollbar-thumb);
+  background-clip: padding-box;
+  border: 1px solid transparent;
+  border-radius: 10px;
+}
+
+.popup-select__scroll-indicator {
+  background: var(--primary-tint-12);
+  border-radius: 10px;
+  pointer-events: none;
+  position: fixed;
+  width: 4px;
+  z-index: var(--overlay-z-index-high);
+}
+
+.popup-select__scroll-thumb {
+  background: var(--primary-color);
+  border-radius: inherit;
+  left: 0;
+  position: absolute;
+  width: 100%;
+}
+
+@media (hover: none) and (pointer: coarse) {
+  .popup-select__menu {
+    scrollbar-width: none;
+  }
+
+  .popup-select__menu::-webkit-scrollbar {
+    display: none;
+  }
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .popup-select__scroll-indicator {
+    display: none;
+  }
+}
+
+.popup-select__option {
+  align-items: center;
+  border-radius: 8px;
+  cursor: pointer;
+  display: grid;
+  font-size: var(--font-size-sm);
+  gap: 8px;
+  grid-template-columns: 20px minmax(0, 1fr);
+  line-height: 1.3;
+  min-height: 44px;
+  padding: 8px 10px;
+}
+
+.popup-select__option::before {
+  content: '';
+  height: 18px;
+  width: 18px;
+}
+
+.popup-select__option[aria-selected='true']::before {
+  background-color: var(--primary-color);
+  -webkit-mask: url("data:image/svg+xml,%3Csvg viewBox='0 0 24 24' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='m9.2 16.6-4.8-4.8 1.4-1.4 3.4 3.4 9-9 1.4 1.4z'/%3E%3C/svg%3E") center / contain no-repeat;
+  mask: url("data:image/svg+xml,%3Csvg viewBox='0 0 24 24' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='m9.2 16.6-4.8-4.8 1.4-1.4 3.4 3.4 9-9 1.4 1.4z'/%3E%3C/svg%3E") center / contain no-repeat;
+}
+
+.popup-select__option.is-active,
+.popup-select__option:hover {
+  background: var(--hover-background-purple);
+}
+
+.popup-select__option[aria-disabled='true'] {
+  cursor: not-allowed;
+  opacity: 0.55;
 }
 
 textarea.form-control {
@@ -1816,6 +2364,204 @@ input[type='file'].form-control::file-selector-button {
   gap: 12px;
 }
 
+.create-account-form {
+  padding: 0;
+  text-align: left;
+}
+
+.create-account-status {
+  color: var(--success-color);
+  display: none;
+}
+
+.create-account-help,
+.create-account-option-help {
+  color: var(--secondary-text-color);
+  font-size: var(--font-size-sm);
+  line-height: 1.4;
+}
+
+.create-account-help {
+  margin: 8px 0 0;
+}
+
+.create-account-advanced {
+  margin-top: 28px;
+}
+
+.create-account-advanced > summary {
+  align-items: center;
+  border-top: 1px solid var(--border-color);
+  color: var(--text-color);
+  cursor: pointer;
+  display: flex;
+  font-size: var(--font-size-base);
+  font-weight: var(--font-weight-medium);
+  justify-content: space-between;
+  list-style: none;
+  padding: 16px 2px;
+}
+
+.create-account-advanced > summary::-webkit-details-marker {
+  display: none;
+}
+
+.create-account-advanced > summary:hover {
+  background: var(--hover-background-purple);
+}
+
+.create-account-advanced > summary:focus-visible {
+  border-radius: 8px;
+  box-shadow: var(--focus-ring-primary);
+  outline: none;
+}
+
+.create-account-advanced.is-disabled > summary {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.create-account-chevron {
+  border-bottom: 2px solid var(--primary-color);
+  border-right: 2px solid var(--primary-color);
+  height: 8px;
+  margin-right: 4px;
+  transform: rotate(45deg);
+  transition: transform 0.2s ease;
+  width: 8px;
+}
+
+.create-account-advanced[open] .create-account-chevron {
+  transform: rotate(225deg);
+}
+
+.create-account-advanced-body {
+  padding: 4px 2px 0;
+}
+
+.create-account-option {
+  align-items: center;
+  display: flex;
+  gap: 12px;
+  min-height: 68px;
+  padding: 8px 0;
+}
+
+.create-account-option-copy {
+  flex: 1;
+  min-width: 0;
+}
+
+.create-account-option-heading {
+  align-items: center;
+  display: flex;
+  gap: 4px;
+}
+
+.create-account-option-title,
+.create-account-option-heading > label {
+  color: var(--text-color);
+  cursor: pointer;
+  font-size: var(--font-size-base);
+  font-weight: var(--font-weight-semibold);
+}
+
+.create-account-option-heading .toll-info-icon {
+  background: none;
+  border: 0;
+  height: 20px;
+  margin: 0;
+  min-height: 0;
+  min-width: 0;
+  padding: 0;
+  width: 20px;
+}
+
+.create-account-option-help {
+  cursor: pointer;
+  display: block;
+  margin-top: 2px;
+}
+
+.create-account-option-toggle {
+  align-items: center;
+  cursor: pointer;
+  display: flex;
+  flex: none;
+  height: 44px;
+  justify-content: flex-end;
+  width: 44px;
+}
+
+.create-account-option-toggle input {
+  height: 1px;
+  opacity: 0;
+  position: absolute;
+  width: 1px;
+}
+
+.create-account-check {
+  align-items: center;
+  background: var(--background-color);
+  border: 1.5px solid var(--border-color);
+  border-radius: 6px;
+  display: flex;
+  height: 22px;
+  justify-content: center;
+  width: 22px;
+}
+
+.create-account-check::after {
+  border-bottom: 2px solid #fff;
+  border-right: 2px solid #fff;
+  content: '';
+  height: 10px;
+  opacity: 0;
+  transform: translateY(-1px) rotate(45deg);
+  width: 5px;
+}
+
+.create-account-option-toggle input:checked + .create-account-check {
+  background: var(--primary-color);
+  border-color: var(--primary-color);
+}
+
+.create-account-option-toggle input:checked + .create-account-check::after {
+  opacity: 1;
+}
+
+.create-account-option-toggle input:focus-visible + .create-account-check {
+  border-color: var(--primary-color);
+  box-shadow: var(--focus-ring-primary);
+}
+
+.create-account-option-toggle input:disabled + .create-account-check {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.create-account-private-key-label {
+  color: var(--text-color);
+  display: block;
+  font-size: var(--font-size-base);
+  font-weight: var(--font-weight-semibold);
+  margin-top: 8px;
+}
+
+.create-account-error {
+  color: var(--danger-color);
+  display: none;
+}
+
+.create-account-private-key {
+  margin-top: 8px;
+  position: relative;
+}
+
+.create-account-actions {
+  margin-top: 24px;
+}
+
 @media (min-width: 480px) {
   .form-actions.form-actions--inline {
     flex-direction: row;
@@ -1836,6 +2582,2214 @@ input[type='file'].form-control::file-selector-button {
   margin: 0 0 1rem 0;
   color: var(--secondary-text-color);
   font-size: var(--font-size-sm);
+}
+
+#addProposalModal .dao-proposal-form {
+  display: grid;
+  gap: 10px;
+}
+
+#addProposalModal .form-group {
+  display: grid;
+  gap: 5px;
+  margin-bottom: 0;
+}
+
+#addProposalModal .form-group label,
+#addProposalModal .dao-form-section-header label,
+#addProposalModal .dao-form-row-title label,
+#addProposalModal .dao-form-change-line label {
+  color: var(--secondary-text-color);
+  font-size: 12px;
+  font-weight: var(--font-weight-medium);
+  line-height: 1.25;
+  margin: 0;
+}
+
+#addProposalModal .dao-form-required {
+  color: var(--danger-color);
+  font-weight: var(--font-weight-semibold);
+  margin-left: 2px;
+}
+
+#addProposalModal .dao-form-label-with-help {
+  align-items: center;
+  display: flex;
+  gap: 4px;
+}
+
+#addProposalModal .dao-form-label-with-help label {
+  width: auto;
+}
+
+#addProposalModal button.dao-form-tooltip {
+  background: transparent;
+  border: 0;
+  flex: 0 0 auto;
+  margin-left: 0;
+  padding: 0;
+  transform: none;
+}
+
+#addProposalModal .form-control {
+  border-radius: 8px;
+  font-size: 14px;
+  height: auto;
+  min-height: 38px;
+  padding: 8px 10px;
+}
+
+#addProposalModal textarea.form-control {
+  min-height: 92px;
+}
+
+#addProposalModal .dao-form-section,
+#addProposalModal .dao-form-list,
+#addProposalModal .dao-form-row,
+#addProposalModal .dao-form-option {
+  display: grid;
+  gap: 8px;
+}
+
+#addProposalModal .dao-form-option {
+  background: var(--input-background);
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+  padding: 10px;
+}
+
+#addProposalModal .dao-form-option--no-change {
+  border-style: dashed;
+}
+
+#addProposalModal .dao-form-option--no-change .dao-form-help {
+  margin: 0;
+}
+
+#addProposalModal .dao-form-section-header,
+#addProposalModal .dao-form-row-title {
+  align-items: center;
+  display: flex;
+  gap: 10px;
+  justify-content: space-between;
+}
+
+#addProposalModal .dao-form-add-button {
+  align-items: center;
+  background: transparent;
+  border: 1px dashed var(--border-color);
+  border-radius: 8px;
+  color: var(--primary-color);
+  display: inline-flex;
+  flex: 0 0 auto;
+  font-size: 13px;
+  font-weight: var(--font-weight-semibold);
+  gap: 8px;
+  justify-content: center;
+  min-height: 38px;
+  padding: 8px 10px;
+  width: 100%;
+}
+
+.plus-glyph {
+  background-color: currentColor;
+  display: inline-block;
+  flex: 0 0 auto;
+  height: 0.68em;
+  line-height: 1;
+  -webkit-mask: url("data:image/svg+xml,%3Csvg viewBox='0 0 16 16' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M7 2.5h2V7h4.5v2H9v4.5H7V9H2.5V7H7z'/%3E%3C/svg%3E") center / contain no-repeat;
+  mask: url("data:image/svg+xml,%3Csvg viewBox='0 0 16 16' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M7 2.5h2V7h4.5v2H9v4.5H7V9H2.5V7H7z'/%3E%3C/svg%3E") center / contain no-repeat;
+  overflow: hidden;
+  text-indent: 100%;
+  transform: none;
+  white-space: nowrap;
+  width: 0.68em;
+}
+
+#addProposalModal .dao-form-add-icon {
+  align-items: center;
+  background-color: var(--primary-tint-60);
+  border-radius: 999px;
+  border: none;
+  box-sizing: border-box;
+  box-shadow: var(--shadow-primary);
+  color: var(--text-color);
+  display: inline-flex;
+  flex: 0 0 22px;
+  font-size: 16px;
+  font-weight: 400;
+  height: 22px;
+  justify-content: center;
+  -webkit-box-align: center;
+  -webkit-box-pack: center;
+  line-height: 1;
+  padding: 0;
+  text-align: center;
+  width: 22px;
+}
+
+.message-context-reaction-button-more .plus-glyph {
+  position: relative;
+  z-index: 1;
+}
+
+#addProposalModal .dao-form-remove-button {
+  align-items: center;
+  background: #f6dddd;
+  border: 1px solid #e8bbbb;
+  border-radius: 8px;
+  color: #8f3d3d;
+  display: inline-flex;
+  flex: 0 0 auto;
+  height: 38px;
+  min-height: 38px;
+  justify-content: center;
+  padding: 0;
+  width: 32px;
+}
+
+#addProposalModal .dao-form-remove-button:not(:disabled):hover {
+  background: #efcccc;
+  color: #7a3030;
+  opacity: 1;
+}
+
+#addProposalModal .dao-form-remove-button:disabled {
+  background: #f3e1e1;
+  border-color: #ead0d0;
+  color: #a66a6a;
+}
+
+#addProposalModal .dao-form-change-box {
+  background: var(--input-background);
+  border: 1px solid transparent;
+  border-radius: 8px;
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+}
+
+#addProposalModal .dao-form-change-line {
+  align-items: center;
+  display: grid;
+  gap: 8px;
+  grid-template-columns: 82px minmax(0, 1fr);
+}
+
+.dao-committee-address-list {
+  display: grid;
+  font-family: var(--font-monospace);
+  gap: 6px;
+  overflow-wrap: anywhere;
+  text-align: center;
+}
+
+.dao-committee-address {
+  background: none;
+  color: inherit;
+  font: inherit;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  padding: 0;
+}
+
+.dao-committee-address:focus-visible {
+  outline: 2px solid var(--primary-color);
+  outline-offset: 2px;
+}
+
+#addProposalModal .dao-form-change-line--committee {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+#addProposalModal .dao-proposal-form:has(.dao-committee-address-editor) {
+  padding-inline: 0;
+}
+
+#addProposalModal .dao-form-change-box:has(.dao-committee-address-editor) {
+  padding-inline: 0;
+}
+
+#addProposalModal .dao-committee-address-list {
+  font-size: clamp(9px, 2.8vw, 11px);
+}
+
+#addProposalModal .dao-committee-address-editor {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+
+#addProposalModal .dao-committee-address-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+#addProposalModal .dao-committee-address-row input {
+  flex: 1;
+  font-family: var(--font-monospace);
+  font-size: clamp(8px, 2.5vw, 10px);
+  min-width: 0;
+  padding-inline: 6px;
+}
+
+#addProposalModal .dao-committee-address-error {
+  color: var(--danger-color);
+  font-size: 12px;
+  line-height: 1.35;
+  margin: 0;
+}
+
+#addProposalModal .dao-committee-address-editor .dao-form-help {
+  margin: 0;
+}
+
+#addProposalModal .dao-form-meta,
+#addProposalModal .dao-form-help {
+  color: var(--secondary-text-color);
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+#addProposalModal .dao-form-meta {
+  text-align: center;
+}
+
+#addProposalModal .dao-form-help {
+  text-align: left;
+}
+
+#addProposalModal .dao-form-limit {
+  color: var(--danger-color);
+}
+
+#addProposalModal .dao-form-grid {
+  display: grid;
+  align-items: start;
+  gap: 8px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+#addProposalModal .dao-form-grid > .form-group,
+#addProposalModal .dao-form-grid--timing .form-control {
+  min-width: 0;
+}
+
+#addProposalModal .dao-form-grid--timing .form-control {
+  box-sizing: border-box;
+  width: 100%;
+}
+
+#addProposalModal .dao-review-start-button {
+  color: var(--text-color);
+  cursor: pointer;
+  overflow: hidden;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+#addProposalModal .dao-form-current-value {
+  background: var(--hover-background);
+  color: var(--secondary-text-color);
+}
+
+#addProposalModal .dao-form-error {
+  border-color: var(--danger-color);
+  border-radius: 8px;
+  box-shadow: 0 0 0 3px rgba(220, 53, 69, 0.14);
+  outline: 1px solid var(--danger-color);
+  outline-offset: 2px;
+}
+
+#addProposalModal .dao-form-error .form-control,
+#addProposalModal .form-control[aria-invalid="true"] {
+  border-color: var(--danger-color);
+}
+
+#addProposalModal .dao-project-editor {
+  display: grid;
+  gap: 10px;
+}
+
+#addProposalModal .dao-project-editor.hidden {
+  display: none;
+}
+
+#addProposalModal .dao-form-section.hidden {
+  display: none;
+}
+
+#addProposalModal .proposal-info-row.dao-project-budget-item {
+  background: transparent;
+  border: 0;
+  box-shadow: none;
+}
+
+#addProposalModal .proposal-info-value.dao-project-budget-value {
+  align-items: baseline;
+  align-self: end;
+  display: flex;
+  flex-wrap: wrap;
+  font-size: 14px;
+  gap: 4px;
+  justify-content: center;
+  line-height: 1.35;
+}
+
+#addProposalModal .dao-project-budget-amount {
+  color: var(--text-color);
+  font-size: inherit;
+  font-weight: var(--font-weight-normal);
+  line-height: inherit;
+}
+
+#addProposalModal .dao-project-budget-value span {
+  color: var(--secondary-text-color);
+  font-size: inherit;
+  font-weight: var(--font-weight-normal);
+  line-height: inherit;
+}
+
+#addProposalModal .dao-project-milestone {
+  background: var(--input-background);
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+  padding: 10px;
+}
+
+#addProposalModal .dao-project-milestone-fields .form-group--full {
+  grid-column: 1 / -1;
+}
+
+#addProposalModal .dao-project-milestone > .dao-form-row-title {
+  flex-wrap: nowrap;
+}
+
+#addProposalModal .dao-project-milestone-actions {
+  align-items: center;
+  display: flex;
+  flex: 0 0 auto;
+  gap: 4px;
+}
+
+#addProposalModal .dao-project-milestone-actions .btn {
+  align-items: center;
+  box-sizing: border-box;
+  border-radius: 8px;
+  display: inline-flex;
+  height: 32px;
+  justify-content: center;
+  min-height: 32px;
+  padding: 0;
+  width: 32px;
+}
+
+#addProposalModal .dao-project-milestone-action-icon,
+#addProposalModal .dao-form-remove-icon {
+  fill: none;
+  height: 17px;
+  pointer-events: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 2;
+  width: 17px;
+}
+
+#addProposalModal .dao-project-editor input,
+#addProposalModal .dao-project-editor textarea {
+  box-sizing: border-box;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  width: 100%;
+}
+
+@media (max-width: 520px) {
+  #addProposalModal .dao-project-milestone-fields {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  #addProposalModal .dao-project-milestone-fields .form-group--full {
+    grid-column: auto;
+  }
+}
+
+#addProposalModal .form-actions {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+}
+
+#confirmProposalModal .form-container,
+#proposalInfoModal .form-container {
+  padding-left: 8px;
+  padding-right: 8px;
+}
+
+#confirmProposalModal .proposal-info,
+#proposalInfoModal .proposal-info,
+#proposalInfoModal .proposal-committee-actions,
+#proposalInfoModal .proposal-review-result-actions,
+#proposalInfoModal .proposal-lifecycle-actions,
+#proposalInfoModal .proposal-vote-actions {
+  display: grid;
+  gap: 14px;
+  margin: 0 auto;
+  max-width: 720px;
+  width: 100%;
+}
+
+#confirmProposalModal .proposal-info > *,
+#confirmProposalModal .proposal-info-heading,
+#confirmProposalModal .proposal-info-section,
+#confirmProposalModal .proposal-info-grid,
+#proposalInfoModal .proposal-info > *,
+#proposalInfoModal .proposal-info-heading,
+#proposalInfoModal .proposal-info-section,
+#proposalInfoModal .proposal-info-grid {
+  box-sizing: border-box;
+  max-width: 100%;
+  min-width: 0;
+}
+
+#confirmProposalModal .proposal-info-heading,
+#proposalInfoModal .proposal-info-heading {
+  display: grid;
+  gap: 4px;
+  text-align: center;
+}
+
+#confirmProposalModal .proposal-info-title,
+#proposalInfoModal .proposal-info-title {
+  margin-bottom: 0;
+}
+
+#confirmProposalModal .proposal-info-title,
+#confirmProposalModal .proposal-info-description {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+#confirmProposalModal .proposal-info-description,
+#proposalInfoModal .proposal-info-description {
+  color: var(--secondary-text-color);
+  font-size: 14px;
+  line-height: 1.35;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+#confirmProposalModal .proposal-type-indicator,
+#proposalInfoModal .proposal-type-indicator {
+  color: var(--secondary-text-color);
+  font-size: 13px;
+  font-weight: var(--font-weight-semibold);
+  justify-self: center;
+  line-height: 1.25;
+  margin: 0;
+}
+
+#confirmProposalModal .proposal-type-indicator--emergency,
+#proposalInfoModal .proposal-type-indicator--emergency {
+  background: rgba(196, 45, 45, 0.12);
+  border: 1px solid rgba(196, 45, 45, 0.3);
+  border-radius: 999px;
+  color: #8f1d16;
+  padding: 6px 12px;
+}
+
+#confirmProposalModal .proposal-info-section,
+#proposalInfoModal .proposal-info-section {
+  display: grid;
+  gap: 8px;
+}
+
+#confirmProposalModal .proposal-info-section h3,
+#proposalInfoModal .proposal-info-section h3,
+#proposalInfoModal .proposal-committee-actions h3,
+#proposalInfoModal .proposal-review-result-actions h3,
+#proposalInfoModal .proposal-lifecycle-actions h3,
+#proposalInfoModal .proposal-vote-actions h3 {
+  color: var(--text-color);
+  font-size: 16px;
+  font-weight: var(--font-weight-semibold);
+  line-height: 1.25;
+  margin: 0;
+  overflow-wrap: anywhere;
+  text-align: center;
+}
+
+#addProposalModal .proposal-info-grid,
+#confirmProposalModal .proposal-info-grid,
+#proposalInfoModal .proposal-info-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: center;
+}
+
+#addProposalModal .proposal-option-cards,
+#confirmProposalModal .proposal-option-cards,
+#proposalInfoModal .proposal-option-cards {
+  display: grid;
+  gap: 10px;
+  grid-auto-rows: 1fr;
+  grid-template-columns: minmax(0, 1fr);
+}
+
+#addProposalModal .proposal-option-section,
+#confirmProposalModal .proposal-option-section,
+#proposalInfoModal .proposal-option-section {
+  background: rgba(61, 61, 206, 0.055);
+  border: 0;
+  border-radius: var(--overlay-border-radius);
+  box-shadow: none;
+  display: grid;
+  gap: 2px;
+  grid-template-columns: minmax(0, 1fr);
+  min-width: 0;
+  padding: 8px 10px 10px;
+  text-align: left;
+}
+
+#addProposalModal .dao-project-ballot .proposal-option-section {
+  grid-template-rows: auto minmax(0, 1fr);
+}
+
+#confirmProposalModal .dao-project-ballot .proposal-option-section {
+  grid-template-rows: auto minmax(0, 1fr);
+}
+
+#confirmProposalModal .dao-project-review-milestone-list,
+#proposalInfoModal .dao-project-review-milestone-list {
+  display: grid;
+  gap: 10px;
+}
+
+#confirmProposalModal .dao-project-review-milestone,
+#proposalInfoModal .dao-project-review-milestone {
+  background: rgba(61, 61, 206, 0.055);
+  border-radius: var(--overlay-border-radius);
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+  padding: 10px;
+}
+
+#confirmProposalModal .dao-project-review-milestone h4,
+#proposalInfoModal .dao-project-review-milestone h4 {
+  display: grid;
+  gap: 2px;
+  margin: 0;
+  min-width: 0;
+}
+
+#confirmProposalModal .dao-project-review-milestone h4,
+#confirmProposalModal .dao-project-review-copy {
+  text-align: left;
+}
+
+#confirmProposalModal .dao-project-review-milestone h4 > span,
+#confirmProposalModal .dao-project-review-copy span,
+#proposalInfoModal .dao-project-review-milestone h4 > span,
+#proposalInfoModal .dao-project-review-copy span {
+  color: var(--secondary-text-color);
+  font-size: 12px;
+  font-weight: var(--font-weight-medium);
+  line-height: 1.35;
+}
+
+#confirmProposalModal .dao-project-review-milestone h4 > strong,
+#proposalInfoModal .dao-project-review-milestone h4 > strong {
+  color: var(--text-color);
+  font-size: 14px;
+  font-weight: var(--font-weight-semibold);
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+#confirmProposalModal .dao-project-review-copy,
+#confirmProposalModal .dao-project-review-copy > div,
+#proposalInfoModal .dao-project-review-copy,
+#proposalInfoModal .dao-project-review-copy > div {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+#confirmProposalModal .dao-project-review-copy,
+#proposalInfoModal .dao-project-review-copy {
+  gap: 8px;
+}
+
+#confirmProposalModal .dao-project-review-copy p,
+#proposalInfoModal .dao-project-review-copy p {
+  color: var(--text-color);
+  font-size: 13px;
+  line-height: 1.35;
+  margin: 0;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+#confirmProposalModal .dao-project-review-milestone .proposal-info-row,
+#proposalInfoModal .dao-project-review-milestone .proposal-info-row {
+  flex-basis: calc((100% - 8px) / 2);
+}
+
+#proposalInfoModal .dao-project-info-milestone {
+  gap: 0;
+  padding: 0;
+}
+
+#proposalInfoModal .dao-project-info-milestone > summary {
+  align-items: center;
+  cursor: pointer;
+  display: grid;
+  gap: 8px;
+  grid-template-columns: minmax(0, 1fr) auto 18px;
+  list-style: none;
+  padding: 10px;
+  text-align: left;
+}
+
+#proposalInfoModal .dao-project-info-milestone > summary::-webkit-details-marker {
+  display: none;
+}
+
+#proposalInfoModal .dao-project-info-milestone > summary::after {
+  border-bottom: 2px solid var(--secondary-text-color);
+  border-right: 2px solid var(--secondary-text-color);
+  content: '';
+  height: 8px;
+  justify-self: center;
+  transform: rotate(45deg);
+  width: 8px;
+}
+
+#proposalInfoModal .dao-project-info-milestone[open] > summary {
+  border-bottom: 1px solid var(--border-color);
+}
+
+#proposalInfoModal .dao-project-info-milestone[open] > summary::after {
+  transform: rotate(225deg);
+}
+
+#proposalInfoModal .dao-project-info-milestone > summary:focus-visible {
+  outline: 2px solid var(--primary-color);
+  outline-offset: -2px;
+}
+
+#proposalInfoModal .dao-project-info-milestone-heading {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  text-align: left;
+}
+
+#proposalInfoModal .dao-project-info-milestone .dao-project-review-copy {
+  text-align: left;
+}
+
+#proposalInfoModal .dao-project-info-milestone-heading > span {
+  color: var(--secondary-text-color);
+  font-size: 12px;
+  font-weight: var(--font-weight-medium);
+  line-height: 1.35;
+}
+
+#proposalInfoModal .dao-project-info-milestone-heading > strong {
+  color: var(--text-color);
+  font-size: 14px;
+  font-weight: var(--font-weight-semibold);
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+#proposalInfoModal .dao-project-info-milestone-status {
+  background: var(--input-background);
+  border-radius: 999px;
+  color: var(--secondary-text-color);
+  font-size: 12px;
+  font-weight: var(--font-weight-semibold);
+  padding: 3px 7px;
+}
+
+#proposalInfoModal .dao-project-info-milestone-content {
+  display: grid;
+  gap: 10px;
+  padding: 10px;
+}
+
+#proposalInfoModal .dao-project-info-notice {
+  background: rgba(61, 61, 206, 0.08);
+  border: 1px solid var(--primary-tint-60);
+  border-radius: 10px;
+  color: var(--text-color);
+  display: grid;
+  font-size: 13px;
+  gap: 3px;
+  line-height: 1.35;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  padding: 10px;
+}
+
+#proposalInfoModal .dao-project-info-notice--partial {
+  background: rgba(239, 108, 0, 0.1);
+  border-color: rgba(239, 108, 0, 0.28);
+}
+
+#proposalInfoModal .dao-project-info-notice--unavailable {
+  background: var(--input-background);
+  border-color: var(--border-color);
+}
+
+#proposalInfoModal .dao-project-info-notice span {
+  color: var(--secondary-text-color);
+}
+
+#proposalInfoModal .dao-project-info-funding .proposal-info-grid,
+#proposalInfoModal .dao-project-info-recipient-change .proposal-info-grid {
+  display: grid;
+  gap: 0;
+  grid-template-columns: minmax(0, 1fr);
+}
+
+#proposalInfoModal .dao-project-info-funding .proposal-info-row,
+#proposalInfoModal .dao-project-info-recipient-change .proposal-info-row {
+  align-items: baseline;
+  background: transparent;
+  border-bottom: 1px solid var(--border-color);
+  border-radius: 0;
+  box-shadow: none;
+  display: grid;
+  gap: 8px;
+  grid-template-columns: minmax(120px, auto) minmax(0, 1fr);
+  grid-template-rows: none;
+  min-height: 0;
+  padding: 5px 0;
+  text-align: left;
+}
+
+#proposalInfoModal .dao-project-info-funding .proposal-info-row:last-child,
+#proposalInfoModal .dao-project-info-recipient-change .proposal-info-row:last-child {
+  border-bottom: 0;
+  padding-bottom: 0;
+}
+
+#proposalInfoModal .dao-project-info-funding .proposal-info-row:first-child,
+#proposalInfoModal .dao-project-info-recipient-change .proposal-info-row:first-child {
+  grid-template-columns: auto minmax(0, 1fr);
+}
+
+#proposalInfoModal .dao-project-info-funding .proposal-info-row > span:not(.proposal-info-value),
+#proposalInfoModal .dao-project-info-recipient-change .proposal-info-row > span:not(.proposal-info-value) {
+  align-self: baseline;
+  justify-self: start;
+  text-align: left;
+}
+
+#proposalInfoModal .dao-project-info-funding .proposal-info-value,
+#proposalInfoModal .dao-project-info-recipient-change .proposal-info-value {
+  justify-self: end;
+  text-align: right;
+}
+
+#proposalInfoModal .dao-project-info-funding .proposal-info-row:first-child .proposal-info-value {
+  display: block;
+  max-width: 100%;
+  overflow-x: auto;
+  overflow-wrap: normal;
+  scrollbar-width: thin;
+  white-space: nowrap;
+  width: 100%;
+  word-break: normal;
+}
+
+#proposalInfoModal .dao-project-info-recipient-change > h3 {
+  text-align: center;
+}
+
+#proposalInfoModal .dao-project-info-recipient-change .proposal-info-row {
+  border-bottom: 0;
+}
+
+#proposalInfoModal .dao-project-info-recipient-change .proposal-info-row:first-child {
+  gap: 4px;
+  grid-template-columns: minmax(0, 1fr);
+  text-align: center;
+}
+
+#proposalInfoModal .dao-project-info-recipient-change .proposal-info-row:first-child > span {
+  justify-self: center;
+  text-align: center;
+}
+
+#proposalInfoModal .dao-project-info-recipient-change .proposal-info-row:first-child .proposal-info-value {
+  font-family: monospace;
+  font-size: clamp(8px, 2.8vw, 12px);
+  letter-spacing: -0.025em;
+  max-width: 100%;
+  overflow-wrap: normal;
+  text-align: center;
+  white-space: nowrap;
+  width: 100%;
+  word-break: normal;
+}
+
+#proposalInfoModal .dao-project-info-runtime {
+  border-top: 1px solid var(--border-color);
+  padding-top: 10px;
+}
+
+#confirmProposalModal .dao-project-review-funding .proposal-info-row {
+  align-items: center;
+  flex-basis: 100%;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  grid-template-rows: none;
+  min-height: 0;
+  width: 100%;
+}
+
+#confirmProposalModal .dao-project-review-funding .proposal-info-row:first-child {
+  grid-template-columns: auto minmax(0, 1fr);
+}
+
+#confirmProposalModal .dao-project-review-funding .proposal-info-row > span:not(.proposal-info-value) {
+  align-self: center;
+  justify-self: start;
+  text-align: left;
+}
+
+#confirmProposalModal .dao-project-review-funding .proposal-info-value {
+  justify-self: end;
+  max-width: 100%;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  text-align: right;
+  word-break: break-word;
+}
+
+#addProposalModal .proposal-option-label,
+#confirmProposalModal .proposal-option-label,
+#proposalInfoModal .proposal-option-label {
+  align-items: center;
+  color: var(--text-color);
+  display: flex;
+  font-size: 13px;
+  font-weight: var(--font-weight-semibold);
+  gap: 10px;
+  line-height: 1.35;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+#addProposalModal .proposal-option-label::after,
+#confirmProposalModal .proposal-option-label::after,
+#proposalInfoModal .proposal-option-label::after {
+  border-top: 1px solid var(--border-color);
+  content: '';
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+#addProposalModal .proposal-option-changes,
+#confirmProposalModal .proposal-option-changes,
+#proposalInfoModal .proposal-option-changes {
+  display: grid;
+  gap: 0;
+}
+
+#addProposalModal .proposal-info-row,
+#confirmProposalModal .proposal-info-row,
+#proposalInfoModal .proposal-info-row {
+  background: var(--input-background);
+  border-radius: 8px;
+  display: grid;
+  flex: 0 1 calc((100% - 16px) / 3);
+  gap: 8px;
+  grid-template-rows: auto minmax(0, 1fr);
+  min-width: 0;
+  min-height: 68px;
+  padding: 8px;
+  text-align: center;
+}
+
+#addProposalModal .proposal-info-row,
+#confirmProposalModal .proposal-info-row,
+#proposalInfoModal .proposal-info-row {
+  background: rgba(255, 255, 255, 0.92);
+  box-shadow: 0 1px 2px rgba(28, 28, 33, 0.05);
+}
+
+#proposalInfoModal .proposal-info-row--accept {
+  background: rgba(30, 126, 52, 0.16);
+  border: 1px solid rgba(30, 126, 52, 0.34);
+}
+
+#proposalInfoModal .proposal-info-row--rejected {
+  background: rgba(196, 45, 45, 0.12);
+  border: 1px solid rgba(196, 45, 45, 0.3);
+}
+
+#addProposalModal .proposal-info-row > span:not(.proposal-info-value),
+#confirmProposalModal .proposal-info-row > span:not(.proposal-info-value),
+#confirmProposalModal .proposal-change-row span,
+#proposalInfoModal .proposal-info-row > span:not(.proposal-info-value),
+#proposalInfoModal .proposal-change-row span {
+  color: var(--secondary-text-color);
+  font-size: 12px;
+  font-weight: var(--font-weight-medium);
+  line-height: 1.35;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  text-align: center;
+}
+
+#proposalInfoModal .proposal-info-row--accept span {
+  color: #1e7e34;
+}
+
+#proposalInfoModal .proposal-info-row--rejected span {
+  color: #8f1d16;
+}
+
+#confirmProposalModal .proposal-change-row strong,
+#proposalInfoModal .proposal-change-row strong {
+  color: var(--text-color);
+  font-size: 13px;
+  font-weight: var(--font-weight-semibold);
+  line-height: 1.35;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  text-align: center;
+  white-space: pre-wrap;
+}
+
+#addProposalModal .proposal-info-value,
+#confirmProposalModal .proposal-info-value,
+#proposalInfoModal .proposal-info-value {
+  color: var(--text-color);
+  font-size: 13px;
+  font-weight: var(--font-weight-normal);
+  line-height: 1.35;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  text-align: center;
+  white-space: pre-wrap;
+}
+
+#proposalInfoModal .proposal-info-row--accept .proposal-info-value {
+  color: #0f5f27;
+}
+
+#proposalInfoModal .proposal-info-row--rejected .proposal-info-value {
+  color: #7a1711;
+}
+
+#addProposalModal .proposal-info-row > span:not(.proposal-info-value),
+#confirmProposalModal .proposal-info-row > span:not(.proposal-info-value),
+#proposalInfoModal .proposal-info-row > span:not(.proposal-info-value) {
+  align-self: start;
+  justify-self: center;
+}
+
+#addProposalModal .proposal-info-value,
+#confirmProposalModal .proposal-info-value,
+#proposalInfoModal .proposal-info-value {
+  align-self: center;
+  justify-self: center;
+}
+
+#proposalInfoModal .proposal-result-card span,
+#proposalInfoModal .proposal-result-meter-label small {
+  color: var(--secondary-text-color);
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+#proposalInfoModal .proposal-result-overview {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+#proposalInfoModal .proposal-result-card {
+  background: rgba(255, 255, 255, 0.92);
+  border-radius: 0 0 8px 8px;
+  box-shadow: 0 2px 2px rgba(28, 28, 33, 0.04);
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+  padding: 10px;
+  text-align: center;
+}
+
+#proposalInfoModal .proposal-result-value {
+  color: var(--text-color);
+  font-size: 13px;
+  font-weight: var(--font-weight-normal);
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+#proposalInfoModal .proposal-result-meter {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+
+#proposalInfoModal .proposal-result-meter-labels,
+#proposalInfoModal .proposal-result-meter-track {
+  align-items: center;
+  display: flex;
+  min-width: 0;
+  width: 100%;
+}
+
+#proposalInfoModal .proposal-result-meter-label {
+  display: grid;
+  /* Labels share the available width; only the bar segments reflect vote totals. */
+  flex: 1 1 0;
+  gap: 2px;
+  min-width: 0;
+  padding: 0 4px;
+}
+
+#proposalInfoModal .proposal-result-meter-label--start {
+  justify-items: start;
+  text-align: left;
+}
+
+#proposalInfoModal .proposal-result-meter-label--center {
+  justify-items: center;
+  text-align: center;
+}
+
+#proposalInfoModal .proposal-result-meter-label--end {
+  justify-items: end;
+  text-align: right;
+}
+
+#proposalInfoModal .proposal-result-meter-label > span {
+  color: var(--secondary-text-color);
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+#proposalInfoModal .proposal-result-meter-label > span,
+#proposalInfoModal .proposal-result-meter-label > small {
+  font-weight: var(--font-weight-bold);
+  max-width: 100%;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+#proposalInfoModal .proposal-result-meter-label--winner > span {
+  color: var(--text-color);
+}
+
+#proposalInfoModal .proposal-result-meter-label--palette-0 > span {
+  color: #c42d2d;
+}
+
+#proposalInfoModal .proposal-result-meter-label--palette-1 > span {
+  color: #3d3dce;
+}
+
+#proposalInfoModal .proposal-result-meter-label--palette-2 > span {
+  color: #1e7e34;
+}
+
+#proposalInfoModal .proposal-result-meter-label--palette-3 > span {
+  color: #b36d00;
+}
+
+#proposalInfoModal .proposal-result-meter-label--palette-4 > span {
+  color: #147a7e;
+}
+
+#proposalInfoModal .proposal-result-meter-label--palette-5 > span {
+  color: #7c3dbd;
+}
+
+#proposalInfoModal .proposal-result-meter-track {
+  background: var(--input-background);
+  border: 1px solid var(--border-color);
+  border-radius: 999px;
+  height: 16px;
+  overflow: hidden;
+}
+
+#proposalInfoModal .proposal-result-meter-segment {
+  align-self: stretch;
+  background: rgba(101, 103, 107, 0.34);
+  border-left: 1px solid rgba(255, 255, 255, 0.72);
+  flex: var(--result-segment-units) 1 0;
+  min-width: 0;
+}
+
+#proposalInfoModal .proposal-result-meter-segment:first-child {
+  border-left: 0;
+}
+
+#proposalInfoModal .proposal-result-meter-segment--palette-0 {
+  background: #c42d2d;
+}
+
+#proposalInfoModal .proposal-result-meter-segment--palette-1 {
+  background: #3d3dce;
+}
+
+#proposalInfoModal .proposal-result-meter-segment--palette-2 {
+  background: #1e7e34;
+}
+
+#proposalInfoModal .proposal-result-meter-segment--palette-3 {
+  background: #b36d00;
+}
+
+#proposalInfoModal .proposal-result-meter-segment--palette-4 {
+  background: #147a7e;
+}
+
+#proposalInfoModal .proposal-result-meter-segment--palette-5 {
+  background: #7c3dbd;
+}
+
+#proposalInfoModal .proposal-committee-votes {
+  border-top: 1px solid var(--border-color);
+  display: grid;
+  gap: 8px;
+  padding-top: 10px;
+}
+
+#proposalInfoModal .proposal-committee-votes h4 {
+  color: var(--text-color);
+  font-size: 13px;
+  font-weight: var(--font-weight-semibold);
+  line-height: 1.35;
+  margin: 0;
+}
+
+#proposalInfoModal .proposal-committee-vote-list {
+  display: grid;
+  gap: 6px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+#proposalInfoModal .proposal-committee-vote-row {
+  align-items: center;
+  background: var(--input-background);
+  border-radius: 8px;
+  display: grid;
+  gap: 8px;
+  grid-template-columns: auto minmax(0, 1fr);
+  padding: 6px 10px;
+}
+
+#proposalInfoModal .proposal-committee-vote-address {
+  align-self: stretch;
+  color: var(--text-color);
+  display: flex;
+  flex-direction: column;
+  font-size: 13px;
+  gap: 2px;
+  justify-content: flex-start;
+  line-height: 1.2;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  padding: 4px 0 2px;
+}
+
+#proposalInfoModal .proposal-committee-vote-address > strong {
+  font-weight: var(--font-weight-medium);
+}
+
+#proposalInfoModal .proposal-committee-vote-address > small {
+  color: var(--secondary-text-color);
+  font-size: 11px;
+  line-height: 1.1;
+  margin: 0;
+  padding: 0;
+}
+
+#proposalInfoModal .proposal-committee-vote-choice {
+  color: var(--secondary-text-color);
+  font-size: 12px;
+  font-weight: var(--font-weight-medium);
+  line-height: 1.35;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  text-align: right;
+}
+
+#proposalInfoModal .proposal-result-meter-label--accept > span,
+#proposalInfoModal .proposal-committee-vote-choice--accept {
+  color: #0f5f27;
+}
+
+#proposalInfoModal .proposal-result-meter-label--withhold > span,
+#proposalInfoModal .proposal-committee-vote-choice--withhold {
+  color: #8f1d16;
+}
+
+#confirmProposalModal .proposal-change-row,
+#proposalInfoModal .proposal-change-row {
+  background: transparent;
+  border-radius: 0;
+  display: grid;
+  gap: 8px;
+  grid-template-columns: minmax(0, 0.85fr) minmax(0, 1.15fr);
+  justify-items: stretch;
+  min-inline-size: 0;
+  padding: 4px 0;
+  width: 100%;
+}
+
+#confirmProposalModal .proposal-change-row > span,
+#proposalInfoModal .proposal-change-row > span {
+  align-self: center;
+  text-align: left;
+}
+
+#confirmProposalModal .proposal-change-values,
+#proposalInfoModal .proposal-change-values {
+  align-items: center;
+  display: grid;
+  column-gap: 6px;
+  grid-template-columns: minmax(0, 1fr) 16px minmax(0, 1fr);
+  min-width: 0;
+  width: 100%;
+}
+
+#confirmProposalModal .proposal-change-values small,
+#confirmProposalModal .proposal-change-values strong,
+#proposalInfoModal .proposal-change-values small,
+#proposalInfoModal .proposal-change-values strong {
+  color: var(--text-color);
+  font-size: 13px;
+  font-weight: var(--font-weight-semibold);
+  line-height: 1.2;
+}
+
+#confirmProposalModal .proposal-change-values small,
+#confirmProposalModal .proposal-change-values strong,
+#proposalInfoModal .proposal-change-values small,
+#proposalInfoModal .proposal-change-values strong {
+  display: grid;
+  gap: 0;
+  justify-items: center;
+  min-width: 0;
+  text-align: center;
+}
+
+#confirmProposalModal .proposal-change-values small > span,
+#confirmProposalModal .proposal-change-values small > strong,
+#confirmProposalModal .proposal-change-values strong > span,
+#proposalInfoModal .proposal-change-values small > span,
+#proposalInfoModal .proposal-change-values small > strong,
+#proposalInfoModal .proposal-change-values strong > span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+#confirmProposalModal .proposal-change-values small > span,
+#confirmProposalModal .proposal-change-values strong > span:first-child,
+#proposalInfoModal .proposal-change-values small > span,
+#proposalInfoModal .proposal-change-values strong > span:first-child {
+  color: var(--secondary-text-color);
+  font-size: 12px;
+}
+
+#confirmProposalModal .proposal-change-values small > strong,
+#confirmProposalModal .proposal-change-values strong > span:last-child,
+#proposalInfoModal .proposal-change-values small > strong,
+#proposalInfoModal .proposal-change-values strong > span:last-child {
+  color: var(--text-color);
+  font-size: 11px;
+  letter-spacing: -0.01em;
+}
+
+#addProposalModal .proposal-change-arrow,
+#confirmProposalModal .proposal-change-arrow,
+#proposalInfoModal .proposal-change-arrow {
+  color: var(--secondary-text-color);
+  font-size: 15px;
+  font-weight: var(--font-weight-semibold);
+  line-height: 1.35;
+  text-align: center;
+}
+
+#addProposalModal .proposal-info-muted,
+#confirmProposalModal .proposal-info-muted,
+#confirmProposalModal .proposal-change-row small,
+#proposalInfoModal .proposal-info-muted,
+#proposalInfoModal .proposal-committee-actions p,
+#proposalInfoModal .proposal-review-result-actions p,
+#proposalInfoModal .proposal-lifecycle-actions p,
+#proposalInfoModal .proposal-vote-actions p,
+#proposalInfoModal .proposal-change-row small {
+  color: var(--secondary-text-color);
+  font-size: 12px;
+  line-height: 1.35;
+  margin: 0;
+}
+
+#addProposalModal .proposal-option-section--no-change .proposal-info-muted,
+#confirmProposalModal .proposal-option-section--no-change .proposal-info-muted,
+#proposalInfoModal .proposal-option-section--no-change .proposal-info-muted {
+  align-self: center;
+  align-items: center;
+  color: var(--text-color);
+  display: flex;
+  font-size: 12px;
+  font-weight: var(--font-weight-semibold);
+  gap: 6px;
+  justify-self: end;
+  padding: 4px 0;
+  text-align: right;
+}
+
+#addProposalModal .proposal-option-section--no-change,
+#confirmProposalModal .proposal-option-section--no-change,
+#proposalInfoModal .proposal-option-section--no-change {
+  grid-template-rows: auto minmax(0, 1fr);
+  min-height: 110px;
+}
+
+#addProposalModal .proposal-option-section--no-change .proposal-change-arrow,
+#confirmProposalModal .proposal-option-section--no-change .proposal-change-arrow,
+#proposalInfoModal .proposal-option-section--no-change .proposal-change-arrow {
+  align-self: baseline;
+  font-size: 12px;
+  line-height: 1.2;
+}
+
+#confirmProposalModal .proposal-change-values .proposal-change-arrow,
+#proposalInfoModal .proposal-change-values .proposal-change-arrow {
+  align-self: end;
+  font-size: 12px;
+  line-height: 1.2;
+  transform: translateY(-9px);
+}
+
+#confirmProposalModal .proposal-option-cards:has(.dao-committee-address-list),
+#proposalInfoModal .proposal-option-cards:has(.dao-committee-address-list) {
+  grid-auto-rows: auto;
+}
+
+#confirmProposalModal .proposal-change-row--committee,
+#proposalInfoModal .proposal-change-row--committee,
+#confirmProposalModal .proposal-change-row--committee .proposal-change-values,
+#proposalInfoModal .proposal-change-row--committee .proposal-change-values {
+  grid-template-columns: minmax(0, 1fr);
+  gap: 10px;
+}
+
+#confirmProposalModal .proposal-change-row--committee .proposal-change-arrow,
+#proposalInfoModal .proposal-change-row--committee .proposal-change-arrow {
+  display: none;
+}
+
+#confirmProposalModal .proposal-change-row--committee small,
+#confirmProposalModal .proposal-change-row--committee strong,
+#proposalInfoModal .proposal-change-row--committee small,
+#proposalInfoModal .proposal-change-row--committee strong {
+  justify-items: stretch;
+  gap: 4px;
+}
+
+#confirmProposalModal .proposal-change-row--committee > span,
+#proposalInfoModal .proposal-change-row--committee > span {
+  text-align: center;
+}
+
+#confirmProposalModal .proposal-change-row--committee small > span,
+#proposalInfoModal .proposal-change-row--committee small > span {
+  text-align: left;
+}
+
+#confirmProposalModal .proposal-change-values small,
+#confirmProposalModal .proposal-change-values strong,
+#proposalInfoModal .proposal-change-values small,
+#proposalInfoModal .proposal-change-values strong {
+  line-height: 1.2;
+}
+
+@media (max-width: 420px) {
+  #confirmProposalModal .proposal-change-values small > strong,
+  #proposalInfoModal .proposal-change-values small > strong {
+    font-size: 10px;
+  }
+}
+
+/* Keep proposal details scannable without giving every parameter its own card. */
+#proposalInfoModal .proposal-info-heading,
+#proposalInfoModal .proposal-info-section h3 {
+  text-align: left;
+}
+
+#proposalInfoModal .proposal-type-indicator {
+  justify-self: start;
+}
+
+#confirmProposalModal .dao-confirm-actions {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  margin: 12px auto 0;
+  max-width: 720px;
+  width: 100%;
+}
+
+@media (max-width: 420px) {
+  #addProposalModal .proposal-info-row,
+  #confirmProposalModal .proposal-info-row,
+  #proposalInfoModal .proposal-info-row {
+    flex-basis: calc((100% - 8px) / 2);
+  }
+
+  #proposalInfoModal .dao-project-review-milestone .proposal-info-row {
+    flex-basis: 100%;
+  }
+
+  #proposalInfoModal .dao-project-info-funding .proposal-info-row,
+  #proposalInfoModal .dao-project-info-recipient-change .proposal-info-row {
+    grid-template-columns: minmax(100px, auto) minmax(0, 1fr);
+  }
+
+  #proposalInfoModal .dao-project-info-funding .proposal-info-row:first-child {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+}
+
+#proposalInfoModal .proposal-info + .proposal-committee-actions,
+#proposalInfoModal .proposal-committee-actions + .proposal-review-result-actions,
+#proposalInfoModal .proposal-review-result-actions + .proposal-lifecycle-actions,
+#proposalInfoModal .proposal-lifecycle-actions + .proposal-vote-actions {
+  margin-top: 10px;
+}
+
+#proposalInfoModal .proposal-committee-actions,
+#proposalInfoModal .proposal-review-result-actions,
+#proposalInfoModal .proposal-lifecycle-actions,
+#proposalInfoModal .proposal-vote-actions {
+  display: grid;
+  gap: 8px;
+}
+
+#proposalInfoModal .proposal-committee-actions,
+#proposalInfoModal .proposal-review-result-actions {
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  padding: 10px;
+}
+
+#proposalInfoModal .proposal-review-result-actions {
+  border: 0;
+}
+
+#proposalInfoModal .proposal-vote-actions {
+  border-top: 1px solid var(--border-color);
+  padding: 10px 0 0;
+}
+
+#proposalInfoModal .proposal-lifecycle-action {
+  background: transparent;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  display: grid;
+  overflow: hidden;
+}
+
+#proposalInfoModal .proposal-lifecycle-action--claim {
+  background: var(--input-background);
+}
+
+#proposalInfoModal .proposal-lifecycle-action-group {
+  display: grid;
+  gap: 8px;
+}
+
+#proposalInfoModal .proposal-lifecycle-action--static {
+  gap: 8px;
+  padding: 10px;
+}
+
+#proposalInfoModal .proposal-lifecycle-action--static .proposal-committee-actions-header {
+  display: grid;
+  gap: 2px;
+}
+
+#proposalInfoModal .proposal-lifecycle-action > summary {
+  align-items: center;
+  cursor: pointer;
+  display: grid;
+  gap: 8px;
+  grid-template-columns: minmax(0, 1fr) 18px;
+  list-style: none;
+  padding: 10px;
+}
+
+#proposalInfoModal .proposal-lifecycle-action > summary::-webkit-details-marker {
+  display: none;
+}
+
+#proposalInfoModal .proposal-lifecycle-action > summary:focus-visible {
+  outline: 2px solid var(--primary-color);
+  outline-offset: -2px;
+}
+
+#proposalInfoModal .proposal-lifecycle-action > summary::after {
+  border-bottom: 2px solid var(--secondary-text-color);
+  border-right: 2px solid var(--secondary-text-color);
+  content: '';
+  height: 7px;
+  justify-self: center;
+  transform: rotate(45deg);
+  transition: transform 0.2s ease;
+  width: 7px;
+}
+
+#proposalInfoModal .proposal-lifecycle-action[open] > summary {
+  border-bottom: 1px solid var(--border-color);
+}
+
+#proposalInfoModal .proposal-lifecycle-action[open] > summary::after {
+  transform: rotate(225deg);
+}
+
+#proposalInfoModal .proposal-lifecycle-action > summary > span {
+  color: var(--text-color);
+  font-size: 14px;
+  font-weight: var(--font-weight-semibold);
+  line-height: 1.3;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+#proposalInfoModal .proposal-lifecycle-action-content {
+  display: grid;
+  gap: 10px;
+  padding: 10px;
+}
+
+#proposalInfoModal .dao-project-info-milestone-group {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+
+#proposalInfoModal .dao-project-milestone-actions {
+  display: grid;
+  gap: 8px;
+  padding: 0 8px 2px;
+}
+
+#proposalInfoModal .dao-project-milestone-actions h5 {
+  color: var(--secondary-text-color);
+  font-size: 12px;
+  font-weight: var(--font-weight-semibold);
+  line-height: 1.35;
+  margin: 0;
+  text-align: left;
+}
+
+#proposalInfoModal .proposal-lifecycle-action-content > p {
+  color: var(--secondary-text-color);
+  font-size: 12px;
+  line-height: 1.35;
+  margin: 0;
+}
+
+#proposalInfoModal .proposal-vote-actions .proposal-committee-actions-header {
+  display: grid;
+  gap: 2px;
+}
+
+#proposalInfoModal .proposal-details {
+  display: grid;
+  margin: 10px auto 0;
+  max-width: 720px;
+  width: 100%;
+}
+
+#proposalInfoModal .proposal-details:empty {
+  display: none;
+}
+
+#proposalInfoModal .proposal-more {
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  display: grid;
+  overflow: hidden;
+}
+
+#proposalInfoModal .proposal-more summary {
+  align-items: center;
+  cursor: pointer;
+  display: grid;
+  gap: 4px;
+  grid-template-columns: minmax(0, 1fr) 18px;
+  list-style: none;
+  padding: 10px;
+}
+
+#proposalInfoModal .proposal-more summary::-webkit-details-marker {
+  display: none;
+}
+
+#proposalInfoModal .proposal-more summary::after {
+  align-self: center;
+  border-bottom: 2px solid var(--secondary-text-color);
+  border-right: 2px solid var(--secondary-text-color);
+  content: "";
+  grid-column: 2;
+  grid-row: 1 / span 2;
+  height: 8px;
+  justify-self: center;
+  transform: rotate(45deg);
+  transition: transform 0.2s ease;
+  width: 8px;
+}
+
+#proposalInfoModal .proposal-more[open] summary {
+  border-bottom: 1px solid var(--border-color);
+}
+
+#proposalInfoModal .proposal-more[open] summary::after {
+  transform: rotate(225deg);
+}
+
+#proposalInfoModal .proposal-more-title {
+  color: var(--text-color);
+  font-size: 14px;
+  font-weight: var(--font-weight-semibold);
+  grid-column: 1;
+  line-height: 1.25;
+}
+
+#proposalInfoModal .proposal-more-note {
+  color: var(--secondary-text-color);
+  font-size: 12px;
+  grid-column: 1;
+  line-height: 1.35;
+}
+
+#proposalInfoModal .proposal-more-content {
+  display: grid;
+  gap: 14px;
+  padding: 10px;
+}
+
+#proposalInfoModal .proposal-decision-field {
+  display: grid;
+  gap: 8px;
+}
+
+#proposalInfoModal .proposal-decision-label {
+  color: var(--secondary-text-color);
+  font-size: 12px;
+  font-weight: var(--font-weight-medium);
+  line-height: 1.35;
+}
+
+#proposalInfoModal .proposal-action-toggle {
+  background: var(--input-background);
+  border: 1px solid var(--border-color);
+  border-radius: 999px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  padding: 4px;
+}
+
+#proposalInfoModal .proposal-decision-option {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  border-radius: 999px;
+  color: var(--secondary-text-color);
+  cursor: pointer;
+  display: flex;
+  font-family: var(--font-primary);
+  font-size: 14px;
+  font-weight: var(--font-weight-semibold);
+  height: 36px;
+  justify-content: center;
+  line-height: 1;
+  transition: background-color 0.2s, box-shadow 0.2s, color 0.2s;
+}
+
+#proposalInfoModal .proposal-decision-option--selected {
+  background: var(--primary-color);
+  box-shadow: 0 2px 8px rgba(68, 60, 221, 0.22);
+  color: var(--background-color);
+}
+
+#proposalInfoModal .proposal-committee-actions .btn,
+#proposalInfoModal .proposal-review-result-actions .btn,
+#proposalInfoModal .proposal-lifecycle-action .btn,
+#proposalInfoModal .proposal-vote-actions .btn {
+  font-size: 14px;
+  height: 40px;
+  padding: 8px 14px;
+}
+
+#proposalInfoModal .proposal-committee-actions .btn--pill.btn--full,
+#proposalInfoModal .proposal-review-result-actions .btn--pill.btn--full,
+#proposalInfoModal .proposal-lifecycle-action .btn--pill.btn--full,
+#proposalInfoModal .proposal-vote-actions .btn--pill.btn--full {
+  margin: 0;
+  width: 100%;
+}
+
+#proposalInfoModal .proposal-committee-actions .form-group,
+#proposalInfoModal .proposal-lifecycle-action .form-group,
+#proposalInfoModal .proposal-vote-actions .form-group {
+  margin-bottom: 0;
+}
+
+#proposalInfoModal .proposal-committee-actions .form-control,
+#proposalInfoModal .proposal-lifecycle-action .form-control,
+#proposalInfoModal .proposal-vote-actions .form-control {
+  border-radius: 8px;
+  font-size: 14px;
+  height: 44px;
+  padding: 10px 12px;
+}
+
+#proposalInfoModal .proposal-lifecycle-action textarea.form-control {
+  min-height: 76px;
+  resize: vertical;
+}
+
+#proposalInfoModal .proposal-vote-actions .form-control {
+  height: 40px;
+}
+
+#proposalInfoModal .proposal-committee-actions select.form-control {
+  background-position: right 12px center;
+  padding-right: 36px;
+}
+
+#proposalInfoModal .proposal-committee-actions textarea.form-control {
+  min-height: 84px;
+}
+
+#proposalInfoModal .proposal-withhold-fields {
+  display: grid;
+  gap: 10px;
+}
+
+#proposalInfoModal .proposal-vote-current-heading {
+  align-items: baseline;
+  display: flex;
+  gap: 8px;
+  justify-content: space-between;
+}
+
+#proposalInfoModal .proposal-vote-current-heading > span {
+  color: var(--secondary-text-color);
+  flex: 0 1 auto;
+  font-size: 12px;
+  font-weight: var(--font-weight-medium);
+  line-height: 1.35;
+  text-align: right;
+}
+
+#proposalInfoModal .proposal-vote-current-heading > .proposal-vote-current-deadline--ended {
+  font-weight: var(--font-weight-bold);
+}
+
+#proposalInfoModal .proposal-result-meter-segment--accept {
+  background: #1e7e34;
+}
+
+#proposalInfoModal .proposal-result-meter-segment--withhold {
+  background: #c42d2d;
+}
+
+#proposalInfoModal .proposal-result-meter-segment--empty {
+  background: rgba(101, 103, 107, 0.18);
+}
+
+#proposalInfoModal .proposal-vote-preview {
+  background: var(--input-background);
+  border-radius: 8px;
+  display: grid;
+  gap: 4px;
+  padding: 8px 10px;
+}
+
+#proposalInfoModal .proposal-vote-preview--message {
+  background: transparent;
+  padding: 0;
+}
+
+#proposalInfoModal .proposal-vote-option span,
+#proposalInfoModal .proposal-vote-preview-total > span:first-child,
+#proposalInfoModal .proposal-vote-preview-row span {
+  color: var(--secondary-text-color);
+  font-size: 12px;
+  font-weight: var(--font-weight-medium);
+  line-height: 1.35;
+}
+
+#proposalInfoModal .proposal-vote-preview-total strong,
+#proposalInfoModal .proposal-vote-preview-row strong {
+  color: var(--text-color);
+  font-size: 13px;
+  font-weight: var(--font-weight-semibold);
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+#proposalInfoModal .proposal-vote-options {
+  display: grid;
+  gap: 8px;
+}
+
+#proposalInfoModal .proposal-vote-options-header {
+  color: var(--secondary-text-color);
+  display: grid;
+  font-size: 12px;
+  font-weight: var(--font-weight-semibold);
+  gap: 8px;
+  grid-template-columns: minmax(0, 1fr) 52px 92px;
+  line-height: 1.35;
+}
+
+#proposalInfoModal .proposal-vote-options-header > span:not(:first-child) {
+  text-align: center;
+}
+
+#proposalInfoModal .proposal-vote-weight-label,
+#proposalInfoModal .proposal-vote-requirement-label {
+  align-items: center;
+  display: inline-flex;
+  gap: 4px;
+}
+
+#proposalInfoModal .proposal-vote-weight-label {
+  justify-content: center;
+  justify-self: center;
+}
+
+#proposalInfoModal .proposal-vote-help {
+  flex: 0 0 auto;
+  margin-left: 0;
+  transform: none;
+}
+
+#proposalInfoModal button.proposal-vote-help {
+  background: transparent;
+  border: 0;
+  color: inherit;
+  padding: 0;
+}
+
+#proposalInfoModal .proposal-vote-requirements {
+  align-items: baseline;
+  color: var(--secondary-text-color);
+  column-gap: 8px;
+  display: grid;
+  font-size: 12px;
+  grid-template-columns: auto auto;
+  justify-content: end;
+  line-height: 1.35;
+  row-gap: 6px;
+}
+
+#proposalInfoModal .proposal-vote-requirement-label {
+  min-width: 0;
+}
+
+#proposalInfoModal .proposal-vote-requirement-value {
+  color: var(--text-color);
+  text-align: right;
+  white-space: nowrap;
+}
+
+#proposalInfoModal .proposal-vote-option {
+  align-items: center;
+  display: grid;
+  gap: 8px;
+  grid-template-columns: minmax(0, 1fr) 52px 92px;
+}
+
+#proposalInfoModal .proposal-vote-weight-percent {
+  font-variant-numeric: tabular-nums;
+  justify-self: center;
+  text-align: center;
+  white-space: nowrap;
+}
+
+#proposalInfoModal .proposal-vote-spend-multiple-row {
+  align-items: center;
+  display: grid;
+  gap: 8px;
+  grid-template-columns: auto minmax(72px, 1fr) auto;
+}
+
+#proposalInfoModal .proposal-vote-spend-multiple-row label,
+#proposalInfoModal .proposal-vote-spend-multiple-row > span {
+  color: var(--secondary-text-color);
+  font-size: 12px;
+  font-weight: var(--font-weight-semibold);
+  white-space: nowrap;
+}
+
+#proposalInfoModal .proposal-vote-preview-total,
+#proposalInfoModal .proposal-vote-preview-row {
+  align-items: start;
+  display: grid;
+  gap: 8px;
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
+#proposalInfoModal .proposal-vote-preview-row {
+  grid-template-columns: 52px minmax(72px, 1fr) minmax(96px, auto);
+}
+
+#proposalInfoModal .proposal-vote-preview-row > span:nth-child(2) {
+  justify-self: center;
+  text-align: center;
+}
+
+#proposalInfoModal .proposal-vote-preview-row > strong {
+  justify-self: end;
+  text-align: right;
+}
+
+#proposalInfoModal .proposal-vote-preview-options {
+  display: grid;
+  gap: 4px;
+  padding-top: 2px;
+}
+
+#proposalInfoModal .proposal-vote-preview-message {
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: var(--font-weight-medium);
+  line-height: 1.35;
+  padding: 8px 10px;
+  text-align: center;
+}
+
+#proposalInfoModal .proposal-vote-preview--idle {
+  visibility: hidden;
+}
+
+#proposalInfoModal .proposal-user-vote-slot:empty {
+  display: none;
+}
+
+#proposalInfoModal .proposal-user-vote-section {
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  display: block;
+  text-align: left;
+}
+
+#proposalInfoModal .proposal-user-vote-heading {
+  align-items: center;
+  cursor: pointer;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: space-between;
+  list-style: none;
+  min-height: 44px;
+  padding: 6px 10px;
+}
+
+#proposalInfoModal .proposal-user-vote-heading::-webkit-details-marker {
+  display: none;
+}
+
+#proposalInfoModal .proposal-user-vote-heading > span:first-child {
+  align-items: center;
+  display: inline-flex;
+  font-weight: var(--font-weight-semibold);
+  gap: 8px;
+}
+
+#proposalInfoModal .proposal-user-vote-heading > span:first-child::before {
+  border-bottom: 1.5px solid var(--secondary-text-color);
+  border-right: 1.5px solid var(--secondary-text-color);
+  content: '';
+  height: 6px;
+  transform: rotate(-45deg);
+  width: 6px;
+}
+
+#proposalInfoModal .proposal-user-vote-section[open] > summary > span:first-child::before {
+  transform: translateY(-1px) rotate(45deg);
+}
+
+#proposalInfoModal .proposal-user-vote-heading:focus-visible {
+  outline: 2px solid var(--primary-color);
+  outline-offset: -2px;
+}
+
+#proposalInfoModal .proposal-user-vote-spend {
+  color: var(--secondary-text-color);
+  font-size: 12px;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+#proposalInfoModal .proposal-user-vote-spend strong {
+  color: var(--text-color);
+  font-weight: var(--font-weight-medium);
+}
+
+#proposalInfoModal .proposal-user-vote-body {
+  display: grid;
+  gap: 6px;
+  padding: 0 8px 8px;
+}
+
+#proposalInfoModal .proposal-user-vote-card {
+  background: var(--input-background);
+  border-radius: 8px;
+  display: grid;
+  gap: 4px;
+  padding: 7px 10px;
+}
+
+#proposalInfoModal .proposal-user-vote-card-heading,
+#proposalInfoModal .proposal-user-vote-card-meta {
+  align-items: baseline;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px 7px;
+}
+
+#proposalInfoModal .proposal-user-vote-card-heading {
+  justify-content: space-between;
+}
+
+#proposalInfoModal .proposal-user-vote-card-meta {
+  color: var(--text-color);
+  font-size: 12px;
+  font-weight: var(--font-weight-medium);
+  line-height: 1.35;
+}
+
+#proposalInfoModal .proposal-user-vote-status {
+  background: var(--background-color);
+  border-radius: 4px;
+  color: var(--secondary-text-color);
+  font-size: 11px;
+  padding: 1px 5px;
+}
+
+#proposalInfoModal .proposal-user-vote-row,
+#proposalInfoModal .proposal-user-vote-total {
+  align-items: start;
+  display: grid;
+  gap: 8px;
+}
+
+#proposalInfoModal .proposal-user-vote-row {
+  grid-template-columns: minmax(0, 1fr) minmax(7ch, min(30%, 12ch));
+}
+
+#proposalInfoModal .proposal-user-vote-card[data-has-power] .proposal-user-vote-row {
+  grid-template-columns: minmax(0, 1fr) max-content minmax(7ch, min(30%, 12ch));
+}
+
+#proposalInfoModal .proposal-user-vote-total {
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
+#proposalInfoModal .proposal-user-vote-row > span,
+#proposalInfoModal .proposal-user-vote-total > span {
+  color: var(--secondary-text-color);
+  font-size: 13px;
+  line-height: 1.35;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+#proposalInfoModal .proposal-user-vote-row > span:first-child {
+  color: var(--text-color);
+}
+
+#proposalInfoModal .proposal-user-vote-row.proposal-user-vote-columns > span {
+  color: var(--secondary-text-color);
+  font-size: 11px;
+}
+
+#proposalInfoModal .proposal-user-vote-columns > span:last-child {
+  text-align: right;
+}
+
+#proposalInfoModal .proposal-user-vote-row > span:nth-child(2),
+#proposalInfoModal .proposal-user-vote-row > strong {
+  font-variant-numeric: tabular-nums;
+}
+
+#proposalInfoModal .proposal-user-vote-row > strong,
+#proposalInfoModal .proposal-user-vote-total > strong {
+  color: var(--text-color);
+  font-size: 13px;
+  font-weight: var(--font-weight-medium);
+  justify-self: end;
+  line-height: 1.35;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  text-align: right;
+}
+
+#proposalInfoModal .proposal-user-vote-totals {
+  border-top: 1px solid var(--border-color);
+  display: grid;
+  gap: 4px;
+  padding-top: 6px;
+}
+
+#proposalInfoModal .proposal-user-vote-note {
+  color: var(--secondary-text-color);
+  font-size: 12px;
+  line-height: 1.35;
+  margin: 0;
+}
+
+#proposalInfoModal .proposal-user-vote-message {
+  background: var(--input-background);
+  border-radius: 8px;
+  color: var(--text-color);
+  font-size: 13px;
+  font-weight: var(--font-weight-medium);
+  line-height: 1.35;
+  padding: 8px 10px;
+}
+
+#proposalInfoModal .proposal-vote-preview-message--warning {
+  background: rgba(196, 45, 45, 0.12);
+  color: #8f1d16;
+}
+
+#proposalInfoModal .proposal-vote-preview-message--muted {
+  background: var(--input-background);
+  color: var(--secondary-text-color);
+}
+
+#proposalInfoModal .hidden {
+  display: none !important;
 }
 
 /* Developer Options Styling */
@@ -2201,8 +5155,9 @@ input[type='file'].form-control::file-selector-button {
   font-family: var(--font-primary);
   resize: none;
   height: 48px;
-  min-height: unset;
-  line-height: 24px;
+  line-height: 1.5;
+  min-height: calc(1lh + 24px); /* One line plus vertical padding */
+  max-height: max(120px, calc(3lh + 24px)); /* Fit three lines at larger font sizes */
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;
   scrollbar-width: none;
@@ -2328,10 +5283,6 @@ input[type='file'].form-control::file-selector-button {
   transition: filter 0.2s ease;
 }
 
-.message.has-reactions {
-  margin-bottom: 0.75rem;
-}
-
 .message:hover {
   filter: brightness(95%);
 }
@@ -2374,14 +5325,21 @@ input[type='file'].form-control::file-selector-button {
   text-align: left;
 }
 
+:is(.messages-list, .chat-settings-preview-list) > .message:has(> .message-reactions) {
+  --message-reaction-overhang: 0.75rem;
+  padding-bottom: 0;
+  margin-bottom: var(--message-reaction-overhang);
+}
+
 .message-reactions {
   display: flex;
-  flex-wrap: nowrap;
+  flex-wrap: wrap;
   align-items: center;
-  justify-content: flex-start;
-  position: absolute;
-  left: 10px;
-  bottom: -14px;
+  gap: 4px;
+  margin-top: 6px;
+  /* Let the last row cross the bubble edge while keeping all rows in flow. */
+  margin-bottom: calc(-1 * var(--message-reaction-overhang, 0px));
+  position: relative;
   z-index: 2;
 }
 
@@ -2390,28 +5348,23 @@ input[type='file'].form-control::file-selector-button {
   align-items: center;
   justify-content: center;
   min-width: 26px;
-  min-height: 24px;
+  max-width: 100%;
+  min-height: max(24px, 1.45em);
   padding: 2px 8px;
   border-radius: 999px;
   background: var(--surface-muted);
   color: #1f2430;
-  font-size: 15px;
+  font-size: max(15px, calc(var(--chat-message-font-size, var(--font-size-base)) * 15 / 16));
   line-height: 1;
+  overflow-wrap: anywhere;
   box-shadow:
     0 2px 6px rgba(31, 36, 48, 0.12),
     inset 0 0 0 1px rgba(31, 36, 48, 0.08);
-  position: relative;
-  z-index: 1;
-}
-
-.message-reaction-chip + .message-reaction-chip {
-  margin-left: -8px;
 }
 
 .message-reaction-chip.my-reaction {
   background: var(--primary-color);
   color: var(--background-color);
-  z-index: 1;
   box-shadow:
     0 2px 6px rgba(31, 36, 48, 0.16),
     inset 0 0 0 1px rgba(255, 255, 255, 0.14);
@@ -2478,8 +5431,6 @@ input[type='file'].form-control::file-selector-button {
 }
 
 .chat-settings-preview {
-  --chat-settings-preview-message-font-size: 16px;
-  --chat-settings-preview-message-meta-font-size: 12px;
   background: var(--hover-background);
   border: 1px solid var(--border-color);
   border-radius: 8px;
@@ -2511,12 +5462,7 @@ input[type='file'].form-control::file-selector-button {
 }
 
 .chat-settings-preview .message-content {
-  font-size: var(--chat-settings-preview-message-font-size);
   line-height: 1.35;
-}
-
-.chat-settings-preview .message-time {
-  font-size: var(--chat-settings-preview-message-meta-font-size);
 }
 
 .chat-settings-font-slider-row {
@@ -2701,6 +5647,223 @@ input[type='file'].form-control::file-selector-button {
   display: block;
 }
 /* Wallet Styles */
+.container:has(#walletScreen.active) #offlineIndicator {
+  display: none;
+}
+
+#walletScreen {
+  padding: 8px 20px 80px;
+}
+
+#walletScreen .wallet-heading {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-rows: 44px auto;
+  column-gap: 12px;
+  margin: 4px 0 8px;
+  text-align: left;
+}
+
+#walletScreen .wallet-heading h2 {
+  align-self: center;
+  margin: 0;
+  color: var(--text-color);
+  font-size: 26px;
+  font-weight: var(--font-weight-medium);
+  letter-spacing: -0.6px;
+  line-height: 1.2;
+}
+
+#walletScreen .wallet-balance-status {
+  grid-column: 2;
+  grid-row: 1 / span 2;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+}
+
+#walletScreen #refreshBalance {
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  color: var(--secondary-text-color);
+  font-size: var(--font-size-xl);
+}
+
+#walletScreen #refreshBalance:hover:not(:disabled) {
+  background: var(--light-color);
+}
+
+#walletScreen #refreshBalance::before {
+  content: none;
+}
+
+#walletScreen #walletBalanceUpdated {
+  color: var(--secondary-text-color);
+  font-size: 11px;
+  line-height: 1.2;
+  text-align: right;
+}
+
+#walletScreen .wallet-native-balance {
+  margin: 0;
+  padding: 0;
+}
+
+#walletScreen .wallet-native-balance .asset-item {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 11px;
+  padding: 16px;
+  border: 1px solid color-mix(in srgb, var(--primary-color) 18%, var(--border-color));
+  border-radius: 18px;
+  background: var(--hover-background-purple);
+}
+
+#walletScreen .wallet-native-balance .asset-info {
+  flex: 1 1 0;
+  min-width: min-content;
+  text-align: left;
+}
+
+#walletScreen .wallet-native-balance .asset-logo {
+  flex-shrink: 0;
+  margin-right: 0;
+}
+
+#walletScreen .wallet-native-balance .asset-name {
+  margin-bottom: 3px;
+  font-size: 15px;
+  font-weight: var(--font-weight-medium);
+}
+
+#walletScreen .wallet-native-balance .asset-symbol {
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+#walletScreen .wallet-native-balance .asset-balance {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 3px;
+  min-width: 0;
+  max-width: 100%;
+  margin-left: auto;
+  font-variant-numeric: tabular-nums;
+  font-weight: var(--font-weight-normal);
+  line-height: 1.3;
+}
+
+#walletScreen .wallet-native-quantity,
+#walletScreen .wallet-native-usd {
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
+
+#walletScreen .wallet-native-quantity {
+  font-size: var(--font-size-sm);
+}
+
+#walletScreen .wallet-native-usd {
+  font-size: 22px;
+  font-weight: var(--font-weight-medium);
+  letter-spacing: -0.5px;
+}
+
+.wallet-value-stack {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
+  min-width: 0;
+  text-align: right;
+}
+
+.wallet-price-status {
+  display: block;
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-normal);
+  line-height: 1.4;
+  color: var(--secondary-text-color);
+  white-space: normal;
+}
+
+.wallet-price-status:empty {
+  display: none;
+}
+
+.wallet-price-warning {
+  color: color-mix(in srgb, var(--warning-color) 65%, var(--text-color));
+}
+
+.wallet-price-unavailable,
+.multichain-row-usd.wallet-price-unavailable,
+.asset-symbol.wallet-price-unavailable {
+  color: var(--danger-color);
+}
+
+.multichain-row-values .wallet-price-status,
+.connected-asset-item .wallet-price-status {
+  max-width: 130px;
+}
+
+#walletScreen .wallet-native-balance .wallet-price-status {
+  max-width: 150px;
+}
+
+#multichainPriceStatus {
+  margin-top: 6px;
+  text-align: center;
+}
+
+#assetsPriceStatus {
+  text-align: center;
+}
+
+#assetsModal .balance-amount::before {
+  content: none;
+}
+
+#walletScreen .wallet-assets {
+  margin-top: 18px;
+  padding: 0;
+}
+
+#walletScreen .section-title {
+  margin: 0 0 7px;
+  padding: 0;
+  border: 0;
+  color: var(--secondary-text-color);
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-medium);
+  text-align: left;
+}
+
+@media (max-width: 420px) {
+  #walletScreen {
+    padding-right: 15px;
+    padding-left: 15px;
+  }
+
+  #walletScreen .wallet-native-balance .asset-item {
+    padding: 14px;
+  }
+}
+
+@media (max-width: 360px) {
+  #walletScreen .wallet-native-balance .asset-item {
+    gap: 7px;
+  }
+
+  #walletScreen .wallet-native-balance .asset-logo {
+    width: 28px;
+    height: 28px;
+  }
+}
+
 .wallet-balance {
   padding: 2rem;
   text-align: center;
@@ -2711,6 +5874,63 @@ input[type='file'].form-control::file-selector-button {
   display: flex;
   flex-direction: column;
   gap: 1rem;
+}
+
+.wallet-network-panel {
+  margin: 0 1rem 0.25rem;
+  padding: 1rem;
+  border: 1px solid var(--border-color);
+  border-radius: 12px;
+  background: var(--background-color);
+}
+
+.wallet-network-heading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+
+.wallet-network-heading label {
+  margin: 0;
+  color: var(--text-color);
+  font-family: var(--font-primary);
+  font-weight: var(--font-weight-semibold);
+}
+
+.wallet-connection-summary,
+.wallet-network-hint {
+  color: var(--secondary-text-color);
+  font-family: var(--font-primary);
+  font-size: var(--font-size-xs);
+  line-height: 1.4;
+}
+
+.wallet-connection-summary[data-status='connected'],
+.wallet-network-hint[data-status='connected'] {
+  color: var(--success-color);
+}
+
+.wallet-connection-summary[data-status='unavailable'] {
+  color: var(--danger-color);
+}
+
+.wallet-network-hint {
+  margin-top: 8px;
+}
+
+.wallet-network-select {
+  font-weight: var(--font-weight-medium);
+}
+
+.assets-modal-content {
+  overflow-y: auto;
+  padding-bottom: 2rem;
+}
+
+.connected-wallet-only[hidden] {
+  display: none !important;
 }
 
 .balance-label {
@@ -2799,6 +6019,11 @@ input[type='file'].form-control::file-selector-button {
   position: relative; /* Added for notification dot */
 }
 
+.wallet-action-button[hidden],
+.wallet-actions-break[hidden] {
+  display: none !important;
+}
+
 /* Notification indicator for wallet action buttons */
 .wallet-action-button::after {
   content: '';
@@ -2827,45 +6052,68 @@ input[type='file'].form-control::file-selector-button {
   width: var(--icon-size-24);
   height: var(--icon-size-24);
   display: inline-block;
+  background-image: var(--wallet-action-icon, none);
   background-position: center;
   background-repeat: no-repeat;
   background-size: contain;
   opacity: 0.9;
 }
 
-/* Send icon (up chevron) */
-#openSendAssetFormModal .action-icon {
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='18 15 12 9 6 15'%3E%3C/polyline%3E%3C/svg%3E");
+.action-label {
+  font-weight: 500;
+}
+
+/* Wallet artwork is shared by action buttons and matching Activity rows. */
+[data-wallet-icon='sent'] {
+  --wallet-action-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='18 15 12 9 6 15'%3E%3C/polyline%3E%3C/svg%3E");
 }
 
 /* Receive icon (down chevron) */
-#openReceiveModal .action-icon {
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E");
+[data-wallet-icon='receive'] {
+  --wallet-action-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E");
+}
+
+/* NEAR Receive uses a lighter stroke on the asset detail screen. */
+[data-wallet-icon='received'] {
+  --wallet-action-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E");
+}
+
+/* Use thinner strokes on the denser arrow shapes to match the chevrons visually. */
+[data-wallet-icon='deposit'] {
+  --wallet-action-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cline x1='17' y1='7' x2='7' y2='17'/%3E%3Cpolyline points='17 17 7 17 7 7'/%3E%3C/svg%3E");
+}
+
+[data-wallet-icon='withdraw'] {
+  --wallet-action-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cline x1='7' y1='17' x2='17' y2='7'/%3E%3Cpolyline points='7 7 17 7 17 17'/%3E%3C/svg%3E");
+}
+
+[data-wallet-icon='swap'] {
+  --wallet-action-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='1.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='16 3 21 8 16 13'/%3E%3Cpath d='M21 8H8'/%3E%3Cpolyline points='8 21 3 16 8 11'/%3E%3Cpath d='M3 16h13'/%3E%3C/svg%3E");
 }
 
 /* History icon (clock) */
-#openHistoryModal .action-icon {
-  background-image: var(--icon-clock);
+[data-wallet-icon='history'] {
+  --wallet-action-icon: var(--icon-clock);
 }
 
 /* Buy icon (shopping cart) */
-#openBuyButton .action-icon {
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='9' cy='21' r='1'%3E%3C/circle%3E%3Ccircle cx='20' cy='21' r='1'%3E%3C/circle%3E%3Cpath d='M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6'%3E%3C/path%3E%3C/svg%3E");
+[data-wallet-icon='buy'] {
+  --wallet-action-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='9' cy='21' r='1'%3E%3C/circle%3E%3Ccircle cx='20' cy='21' r='1'%3E%3C/circle%3E%3Cpath d='M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6'%3E%3C/path%3E%3C/svg%3E");
 }
 
 /* Sell icon (dollar sign) */
-#openSellButton .action-icon {
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cline x1='12' y1='1' x2='12' y2='23'%3E%3C/line%3E%3Cpath d='M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6'%3E%3C/path%3E%3C/svg%3E");
+[data-wallet-icon='sell'] {
+  --wallet-action-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cline x1='12' y1='1' x2='12' y2='23'%3E%3C/line%3E%3Cpath d='M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6'%3E%3C/path%3E%3C/svg%3E");
 }
 
 /* Faucet/Bridge icon - default to water drop (faucet) */
-#openFaucetBridgeButton .action-icon {
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 2.69l5.66 5.66a8 8 0 1 1-11.31 0z'%3E%3C/path%3E%3C/svg%3E");
+[data-wallet-icon='faucet'] {
+  --wallet-action-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 2.69l5.66 5.66a8 8 0 1 1-11.31 0z'%3E%3C/path%3E%3C/svg%3E");
 }
 
 /* Bridge icon when on mainnet (same as menu bridge icon) */
-#openFaucetBridgeButton.bridge-mode .action-icon {
-  background-image: var(--icon-bridge);
+.bridge-mode [data-wallet-icon='faucet'] {
+  --wallet-action-icon: var(--icon-bridge);
 }
 
 /* Profile Sharing Note */
@@ -2875,10 +6123,6 @@ input[type='file'].form-control::file-selector-button {
   font-size: 14px;
   margin-bottom: 16px;
   font-family: var(--font-primary);
-}
-
-.action-label {
-  font-weight: 500;
 }
 
 .section-title {
@@ -2893,6 +6137,252 @@ input[type='file'].form-control::file-selector-button {
 
 .wallet-assets {
   padding: 1rem;
+}
+
+.assets-portfolio {
+  padding: 0;
+}
+
+.assets-portfolio .wallet-network-panel {
+  margin-bottom: 1rem;
+}
+
+.assets-list-controls {
+  display: flex;
+  justify-content: flex-end;
+  margin: 0 1rem 8px;
+}
+
+.assets-portfolio #connectedAssetsList {
+  padding: 0 1rem;
+}
+
+.wallet-network-assets {
+  overflow: hidden;
+  margin-bottom: 14px;
+  border: 1px solid var(--border-color);
+  border-radius: 12px;
+  background: var(--background-color);
+}
+
+.wallet-network-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border-color);
+  background: var(--light-color);
+}
+
+.wallet-network-name {
+  color: var(--text-color);
+  font-family: var(--font-primary);
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-semibold);
+}
+
+.wallet-network-chain {
+  margin-top: 2px;
+  color: var(--secondary-text-color);
+  font-family: var(--font-primary);
+  font-size: var(--font-size-xs);
+}
+
+.wallet-network-status {
+  padding: 5px 9px;
+  border-radius: 999px;
+  font-family: var(--font-primary);
+  font-size: 11px;
+  font-weight: var(--font-weight-semibold);
+}
+
+.wallet-network-status.connected {
+  color: var(--success-color);
+  background: rgba(40, 167, 69, 0.12);
+}
+
+.wallet-network-status.available {
+  color: var(--primary-color);
+  background: var(--primary-tint-12);
+}
+
+.wallet-network-assets .connected-asset-item + .connected-asset-item {
+  border-top: 1px solid var(--border-color);
+}
+
+.connected-asset-logo {
+  flex: 0 0 40px;
+  overflow: hidden;
+}
+
+.connected-asset-logo-image {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.evm-asset-logo-fallback {
+  display: grid;
+  place-items: center;
+  width: 100%;
+  height: 100%;
+  background-color: hsl(var(--asset-logo-hue) 62% 88%);
+  color: var(--dark-color);
+  font-size: 20px;
+  font-weight: var(--font-weight-bold);
+}
+
+.connected-asset-logo-fallback {
+  color: var(--primary-color);
+  font-family: var(--font-primary);
+  font-size: 11px;
+  font-weight: var(--font-weight-semibold);
+}
+
+.connected-asset-item .asset-balance {
+  max-width: 46%;
+  overflow-wrap: anywhere;
+}
+
+.connected-asset-button {
+  width: 100%;
+  border: 0;
+  background: var(--background-color);
+  color: inherit;
+  cursor: pointer;
+  font-family: var(--font-primary);
+  text-align: left;
+  transition: background-color 0.2s ease;
+}
+
+.connected-asset-button:hover,
+.connected-asset-button:focus-visible {
+  background: var(--hover-background-purple);
+}
+
+.connected-asset-button:focus-visible {
+  outline: 2px solid var(--primary-color);
+  outline-offset: -2px;
+}
+
+.asset-details-content {
+  padding: 0 1rem 2rem;
+  text-align: left;
+}
+
+.asset-detail-header {
+  height: auto;
+  min-height: 56px;
+  padding-block: 8px;
+}
+
+.asset-detail-header .modal-title {
+  margin-inline: 56px;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  text-wrap: balance;
+}
+
+.asset-detail-hero {
+  padding: 48px 16px 0;
+  text-align: center;
+}
+
+.asset-detail-logo {
+  display: inline-grid;
+  width: 64px;
+  height: 64px;
+  border-radius: 50%;
+  overflow: hidden;
+  vertical-align: middle;
+}
+
+.asset-detail-logo .evm-asset-logo-fallback {
+  font-size: 32px;
+}
+
+.asset-detail-amount {
+  margin-top: 16px;
+  font-size: 32px;
+  font-weight: var(--font-weight-bold);
+  line-height: 1.1;
+  color: var(--text-color);
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+
+.asset-detail-value {
+  margin-top: 8px;
+  font-size: var(--font-size-sm);
+  color: var(--secondary-text-color);
+}
+
+.asset-details-content > .asset-detail-actions {
+  flex-wrap: nowrap;
+  margin-top: 32px;
+  padding: 0 0 1.25rem;
+}
+
+.asset-detail-actions .wallet-action-button {
+  min-width: 0;
+}
+
+.asset-detail-section {
+  border-top: 1px solid var(--border-color);
+  padding: 1.25rem 0;
+}
+
+.asset-detail-section h2 {
+  color: var(--text-color);
+  font-size: var(--font-size-lg);
+  margin-bottom: 1rem;
+}
+
+.asset-detail-list > div {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.asset-detail-list dt {
+  color: var(--secondary-text-color);
+  flex: 0 0 auto;
+}
+
+.asset-detail-list dd {
+  color: var(--text-color);
+  font-weight: var(--font-weight-medium);
+  max-width: 62%;
+  text-align: right;
+  overflow-wrap: anywhere;
+}
+
+.toggle-balance:disabled {
+  cursor: default;
+  opacity: 0.65;
+}
+
+@media (max-width: 520px) {
+  .wallet-network-heading {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .connected-asset-item {
+    padding: 12px;
+  }
+
+  .connected-asset-item .asset-logo {
+    margin-right: 10px;
+  }
+
+  .connected-asset-item .asset-name,
+  .connected-asset-item .asset-balance {
+    font-size: var(--font-size-sm);
+  }
 }
 
 .asset-item {
@@ -3041,7 +6531,7 @@ input[type='file'].form-control {
   align-items: center;
 }
 
-#receiveModal .form-group .address-container {
+:is(#receiveModal, #evmReceiveModal) .form-group .address-container {
   display: flex !important;
   align-items: center !important;
   gap: 8px !important;
@@ -3064,7 +6554,7 @@ input[type='file'].form-control {
 }
 
 /* Reduce bottom margin for the form-group containing the address */
-#receiveModal .form-group:has(.address-container) {
+:is(#receiveModal, #evmReceiveModal) .form-group:has(.address-container) {
   margin-bottom: 0.5rem;
 }
 
@@ -3091,7 +6581,8 @@ input[type='file'].form-control {
 }
 
 .address-copy-button::before,
-#copySecretButton::before {
+#copySecretButton::before,
+.multichain-address-copy:empty::before {
   content: '';
   width: 20px;
   height: 20px;
@@ -3104,7 +6595,8 @@ input[type='file'].form-control {
 /* Shared copy icon styling - used by both context menu copy icon and copy address button */
 .context-menu-option[data-icon="copy"] .context-menu-icon,
 .address-copy-button::before,
-#copySecretButton::before {
+#copySecretButton::before,
+.multichain-address-copy:empty::before {
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='9' y='9' width='13' height='13' rx='2' ry='2'%3E%3C/rect%3E%3Cpath d='M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1'%3E%3C/path%3E%3C/svg%3E");
 }
 
@@ -3195,7 +6687,7 @@ input[type='file'].form-control {
 }
 
 /* QR code container */
-#qrcode,
+:is(#qrcode, #evmReceiveQRCode),
 #secretQRCode {
   margin: 0.75rem auto !important;
   padding: 0.75rem;
@@ -3207,7 +6699,11 @@ input[type='file'].form-control {
   align-items: center;
 }
 
-#qrcode img,
+#qrcode:not(:empty) {
+  width: min(100%, calc(300px + 1.5rem));
+  aspect-ratio: 1;
+}
+
 #qrcode canvas,
 #secretQRCode img,
 #secretQRCode canvas {
@@ -3215,6 +6711,13 @@ input[type='file'].form-control {
   width: 200px;
   height: 200px;
   max-width: 100%;
+}
+
+:is(#qrcode, #evmReceiveQRCode) img {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  image-rendering: pixelated;
 }
 
 #availableBalance {
@@ -3247,7 +6750,8 @@ input[type='file'].form-control {
   display: none;
 }
 
-#sendToAddressError {
+#sendToAddressError,
+#evmSendRecipientStatus {
   font-family: var(--font-primary);
   font-size: var(--font-size-sm);
 }
@@ -3293,6 +6797,27 @@ input[type='number'].form-control::-webkit-inner-spin-button {
   width: 16px;
   height: 16px;
   cursor: pointer;
+}
+
+.backup-submit-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+}
+
+.backup-submit-spinner {
+  display: none;
+  width: 1rem;
+  height: 1rem;
+  border: 2px solid rgba(255, 255, 255, 0.45);
+  border-top-color: currentColor;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+.backup-submit-button.is-preparing .backup-submit-spinner {
+  display: inline-block;
 }
 
 #removeAccountModal p {
@@ -3546,11 +7071,43 @@ input[type='number'].form-control::-webkit-inner-spin-button {
   transform: scale(0.99);
 }
 
+#signInModal .sign-in-account-item:focus-visible {
+  outline: none;
+}
+
+#signInModal .sign-in-account-item:focus-visible .sign-in-account-card {
+  outline: 2px solid var(--primary-color);
+  outline-offset: 2px;
+}
+
+#signInModal .sign-in-account-avatar {
+  display: inline-flex;
+  flex: 0 0 40px;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  overflow: hidden;
+  background-color: var(--light-color);
+  line-height: 0;
+}
+
+#signInModal .sign-in-account-avatar:empty {
+  display: none;
+}
+
+#signInModal .sign-in-account-avatar svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
 #signInModal .sign-in-account-name {
+  flex: 1;
   font-family: var(--font-primary);
   font-size: var(--font-size-base);
   font-weight: 600;
   color: var(--text-color);
+  text-align: left;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -4916,8 +8473,8 @@ mark {
   color: var(--info-color);
 }
 
-#newChatScanQRButton::before,
-#newChatUploadQRButton::before {
+.qr-scan-icon::before,
+.qr-upload-icon::before {
   content: '';
   width: 24px;
   height: 24px;
@@ -4927,20 +8484,20 @@ mark {
 
 /* Adjust media query styles */
 @media (max-width: 400px), (max-height: 700px) {
-  #receiveModal .qr-data-preview {
+  :is(#receiveModal, #evmReceiveModal) .qr-data-preview {
     font-size: 0.8rem;
     padding: 8px 12px;
     min-height: auto;
     height: auto;
   }
 
-  #receiveModal .address-display {
+  :is(#receiveModal, #evmReceiveModal) .address-display {
     font-size: 0.75rem !important;
     padding: 5px 8px !important;
     line-height: 1.25 !important;
   }
 
-  #receiveModal .form-group .address-container {
+  :is(#receiveModal, #evmReceiveModal) .form-group .address-container {
     gap: 6px !important;
   }
 }
@@ -5162,12 +8719,12 @@ mark {
   padding-right: 0.5rem;
 }
 
-#newChatScanQRButton::before {
+.qr-scan-icon::before {
   -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='%23000'%3E%3Cpath d='M3,3 L10,3 L10,10 L3,10 Z M5,5 L5,8 L8,8 L8,5 Z M14,3 L21,3 L21,10 L14,10 Z M16,5 L16,8 L19,8 L19,5 Z M3,14 L10,14 L10,21 L3,21 Z M5,16 L5,19 L8,19 L8,16 Z M14,14 L21,14 L21,21 L14,21 Z M16,16 L16,19 L19,19 L19,16 Z M11,3 L13,3 L13,10 L11,10 Z M11,14 L13,14 L13,21 L11,21 Z M3,11 L10,11 L10,13 L3,13 Z M14,11 L21,11 L21,13 L14,13 Z'/%3E%3C/svg%3E") no-repeat center / contain;
           mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='%23000'%3E%3Cpath d='M3,3 L10,3 L10,10 L3,10 Z M5,5 L5,8 L8,8 L8,5 Z M14,3 L21,3 L21,10 L14,10 Z M16,5 L16,8 L19,8 L19,5 Z M3,14 L10,14 L10,21 L3,21 Z M5,16 L5,19 L8,19 L8,16 Z M14,14 L21,14 L21,21 L14,21 Z M16,16 L16,19 L19,19 L19,16 Z M11,3 L13,3 L13,10 L11,10 Z M11,14 L13,14 L13,21 L11,21 Z M3,11 L10,11 L10,13 L3,13 Z M14,11 L21,11 L21,13 L14,13 Z'/%3E%3C/svg%3E") no-repeat center / contain;
 }
 
-#newChatUploadQRButton::before {
+.qr-upload-icon::before {
   -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='%23000'%3E%3Cpath d='M19 7v2.99s-1.99.01-2 0V7h-3s.01-1.99 0-2h3V2h2v3h3v2h-3zm-3 4V8h-3V5H5c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2v-8h-3zM5 19l3-4 2 3 3-4 4 5H5z'/%3E%3C/svg%3E") no-repeat center / contain;
           mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='%23000'%3E%3Cpath d='M19 7v2.99s-1.99.01-2 0V7h-3s.01-1.99 0-2h3V2h2v3h3v2h-3zm-3 4V8h-3V5H5c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2v-8h-3zM5 19l3-4 2 3 3-4 4 5H5z'/%3E%3C/svg%3E") no-repeat center / contain;
 }
@@ -5182,14 +8739,14 @@ small {
   margin-top: 8px;
 }
 
-#sendAssetConfirmModal .confirmation-details {
+:is(#sendAssetConfirmModal, #evmSendConfirmModal) .confirmation-details {
   margin-bottom: 24px;
   background-color: var(--hover-background-purple);
   border-radius: 12px;
   padding: 16px;
 }
 
-#sendAssetConfirmModal label {
+:is(#sendAssetConfirmModal, #evmSendConfirmModal) label {
   display: block;
   font-size: var(--font-size-sm);
   color: var(--secondary-text-color);
@@ -5197,7 +8754,7 @@ small {
   font-weight: var(--font-weight-medium);
 }
 
-#sendAssetConfirmModal .confirm-value {
+:is(#sendAssetConfirmModal, #evmSendConfirmModal) .confirm-value {
   font-size: var(--font-size-base);
   color: var(--text-color);
   padding: 12px 16px;
@@ -5208,8 +8765,8 @@ small {
   border: 1px solid var(--border-color);
 }
 
-#sendAssetConfirmModal .btn,
-#sendAssetConfirmModal .btn.btn--secondary {
+:is(#sendAssetConfirmModal, #evmSendConfirmModal) .btn,
+:is(#sendAssetConfirmModal, #evmSendConfirmModal) .btn.btn--secondary {
   width: calc(100% - 32px);
   height: 48px;
   border-radius: 24px;
@@ -5220,49 +8777,46 @@ small {
   transition: all 0.2s ease;
 }
 
-#sendAssetConfirmModal .btn.btn--primary {
+:is(#sendAssetConfirmModal, #evmSendConfirmModal) .btn.btn--primary {
   background-color: var(--primary-color);
   color: var(--background-color);
   border: none;
 }
 
-#sendAssetConfirmModal #confirmAmount {
-  font-size: var(--font-size-lg);
+:is(#confirmAmount, #evmConfirmAmount).confirm-value,
+.multichain-confirm-amount {
   font-weight: var(--font-weight-bold);
   color: var(--text-color);
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
 }
 
-#sendAssetConfirmModal #confirmMemoGroup {
+:is(#confirmAmount, #evmConfirmAmount).confirm-value {
+  font-size: var(--font-size-lg);
+}
+
+:is(#confirmMemoGroup, #evmConfirmMemoGroup) {
   opacity: 0.8;
 }
 
-#sendAssetConfirmModal #confirmMemo {
+:is(#confirmMemo, #evmConfirmMemo).confirm-value {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
   font-style: italic;
   background-color: var(--primary-tint-04);
 }
 
-#sendAssetConfirmModal .usd-equivalent {
-  font-size: 0.92em;
+:is(#sendAssetConfirmModal, #evmSendConfirmModal) .usd-equivalent,
+.multichain-confirm-sub {
+  font-size: var(--font-size-sm);
   color: var(--secondary-text-color);
-  opacity: 0.7;
-  margin-top: 2px;
-  margin-left: 2px;
-  font-weight: var(--font-weight-medium);
 }
 
-#sendAssetConfirmModal .usd-equivalent {
-  position: absolute;
-  right: 16px;           /* Align to the right edge */
-  left: auto;            /* Ensure left is not set */
-  top: calc(100% - 0px); /* Just below the amount box */
-  font-size: 0.92em;
-  color: var(--secondary-text-color);
+:is(#sendAssetConfirmModal, #evmSendConfirmModal) .usd-equivalent {
   opacity: 0.7;
   font-weight: var(--font-weight-medium);
-  margin: 0;
-  pointer-events: none;
-  text-align: right;     /* Align text to the right */
-  width: calc(100% - 32px); /* Ensure it doesn't overflow the input */
+  margin: 4px 16px 0;
+  text-align: right;
 }
 
 .icon-button.edit-icon {
@@ -5341,26 +8895,6 @@ small {
   background-size: 20px;
   opacity: 0.7;
   background-image: var(--icon-menu);
-  width: var(--icon-button-width);
-  height: var(--icon-button-height);
-  padding: 5px;
-  min-width: var(--icon-button-width);
-  min-height: var(--icon-button-height);
-}
-
-/* Filter icon button (funnel) */
-.icon-button.filter-icon {
-  border: none;
-  cursor: pointer;
-  color: var(--primary-color);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background-position: center;
-  background-repeat: no-repeat;
-  background-size: 20px;
-  opacity: 0.7;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M22 3H2l8 9v7l4 2v-9l8-9z'/%3E%3C/svg%3E");
   width: var(--icon-button-width);
   height: var(--icon-button-height);
   padding: 5px;
@@ -5760,92 +9294,128 @@ small {
 
 /* Styles for Payment Messages in Chat */
 
-/* Base styles for payment header (center, monospace, gap) */
-.payment-header {
+/* Native LIB receipts use the same hierarchy as the other payment cards. */
+.message.payment-info {
+  width: 316px;
+  min-width: 0;
+  box-sizing: border-box;
+  padding: 16px 18px 12px;
+  border-radius: 20px;
+}
+.message.sent.payment-info { border-bottom-right-radius: 4px; }
+.message.received.payment-info { border-bottom-left-radius: 4px; }
+.lib-payment-message {
+  --lib-payment-divider: var(--border-color);
+  --lib-payment-secondary: var(--secondary-text-color);
+  --lib-payment-note-background: var(--background-color);
+  min-width: 0;
+}
+.message.sent .lib-payment-message {
+  --lib-payment-divider: rgba(255, 255, 255, 0.22);
+  --lib-payment-secondary: rgba(255, 255, 255, 0.8);
+  --lib-payment-note-background: rgba(255, 255, 255, 0.1);
+}
+.lib-payment-heading,
+.payment-receipt-heading {
   display: flex;
-  justify-content: center;
+  align-items: center;
+  gap: 8px;
+}
+.lib-payment-logo,
+.payment-receipt-logo { width: 20px; height: 20px; flex-shrink: 0; }
+.lib-payment-label {
+  color: var(--lib-payment-secondary);
+  font-size: var(--chat-message-meta-font-size, var(--font-size-xs));
+  font-weight: var(--font-weight-medium);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.message.payment-info .payment-header {
+  display: flex;
   align-items: baseline;
-  gap: 10px;
-  margin-bottom: 8px;
-  padding: 30px 0; /* User adjusted */
-  font-family: Georgia, serif; /* Changed font family */
-  font-size: var(--font-size-sm); /* Base size for header */
-  text-align: center;
-}
-
-/* Styles for the direction/amount spans within the header */
-.payment-amount,
-.payment-direction {
-  font-weight: var(--font-weight-bold); /* Keep bold */
-  font-size: var(--font-size-base); /* Keep large */
-  /* Font family inherited from .payment-header */
-}
-
-/* Base styles for payment memo (italic, top border) */
-.payment-memo {
-  font-size: var(--font-size-sm);
-  font-style: italic;
-  opacity: 0.9;
-  margin-top: 4px;
-  border-top: 1px solid rgba(0, 0, 0, 0.1); /* User changed to solid */
-  padding-top: 4px;
-  white-space: normal;
-  overflow: hidden;
-  word-wrap: break-word;
-  word-break: break-all;
-}
-
-/* Make direction and amount stand out */
-.payment-amount,
-.payment-direction {
+  gap: 2px;
+  margin-top: 5px;
+  font-size: calc(var(--chat-message-font-size, var(--font-size-base)) * 1.5);
   font-weight: var(--font-weight-bold);
-  font-size: var(--font-size-base);
+  line-height: 1.2;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.025em;
 }
-
-/* Common bubble padding */
-.message.sent.payment-info,
-.message.received.payment-info {
-  padding: 0.75rem 1rem;
-  /* Bubble background/color/border inherited from .message.sent/.received */
-  max-width: 85%; /* Set maximum width (adjust percentage if needed) */
-  width: 85%; /* Force width to max */
-  box-sizing: border-box; /* Include padding/border in width */
+.message.payment-info .payment-direction,
+.message.payment-info .payment-amount {
+  font-size: inherit;
 }
-
-/* --- Styling for elements INSIDE SENT payments --- */
-.message.sent.payment-info .payment-header {
-  color: white;
-  /* No bottom border needed */
+.payment-amount { min-width: 0; overflow-wrap: anywhere; }
+.lib-payment-unit { font-size: var(--chat-message-font-size, var(--font-size-base)); font-weight: var(--font-weight-medium); letter-spacing: normal; }
+.lib-payment-network {
+  margin-top: 5px;
+  color: var(--lib-payment-secondary);
+  font-size: var(--chat-message-meta-font-size, var(--font-size-xs));
 }
-.message.sent.payment-info .payment-memo {
-  color: rgba(255, 255, 255, 0.9);
-  border-top-color: rgba(255, 255, 255, 0.2);
+.lib-payment-note {
+  margin-top: 16px;
+  padding: 12px;
+  border-radius: 10px;
+  background: var(--lib-payment-note-background);
 }
-.message.sent.payment-info .payment-memo a {
-  color: white;
-  text-decoration: underline;
+.message.payment-info .payment-memo {
+  margin-top: 5px;
+  font-size: var(--chat-message-font-size, var(--font-size-base));
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
 }
-.message.sent.payment-info .message-time {
-  color: rgba(255, 255, 255, 0.7);
+.lib-payment-meta {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  border-top: 1px solid var(--lib-payment-divider);
+  margin-top: 16px;
+  padding-top: 12px;
+  color: var(--lib-payment-secondary);
 }
-
-/* --- Styling for elements INSIDE RECEIVED payments --- */
-.message.received.payment-info .payment-header {
-  color: var(--text-color);
-  width: 100%; /* Keep full width */
-  /* No bottom border needed (user removed) */
+.lib-payment-status {
+  margin-right: auto;
+  font-size: var(--chat-message-meta-font-size, var(--font-size-xs));
 }
-.message.received.payment-info .payment-memo {
-  color: var(--secondary-text-color);
-  border-top-color: rgba(0, 0, 0, 0.15);
+.lib-payment-meta .message-time { margin-top: 0; color: inherit; }
+.lib-payment-details { margin-top: 10px; cursor: default; user-select: text; }
+.lib-payment-details summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 32px;
+  list-style: none;
+  font-size: var(--chat-message-meta-font-size, var(--font-size-xs));
+  cursor: pointer;
 }
-.message.received.payment-info .payment-memo a {
-  color: var(--primary-color);
-  text-decoration: underline;
+.lib-payment-details summary::-webkit-details-marker { display: none; }
+.lib-payment-details summary::after {
+  content: '';
+  width: 6px;
+  height: 6px;
+  flex-shrink: 0;
+  border-right: 1px solid currentColor;
+  border-bottom: 1px solid currentColor;
+  transform: rotate(45deg);
+  margin-right: 2px;
 }
-.message.received.payment-info .message-time {
-  color: var(--secondary-text-color);
-  opacity: 0.7;
+.lib-payment-details[open] summary::after { transform: rotate(225deg); }
+.lib-payment-details dl {
+  display: grid;
+  gap: 10px;
+  margin: 6px 0 0;
+  font-size: var(--chat-message-meta-font-size, var(--font-size-xs));
+}
+.lib-payment-details dt { opacity: 0.75; }
+.lib-payment-details dd { margin: 3px 0 0; overflow-wrap: anywhere; }
+.lib-payment-details a { color: var(--primary-color); text-decoration: underline; text-underline-offset: 3px; }
+.lib-payment-details code { font-family: var(--font-monospace); font-size: inherit; }
+@media (pointer: coarse) {
+  .lib-payment-details summary { min-height: 44px; }
+  .lib-payment-details a { display: block; min-height: 44px; }
 }
 
 /* Styles for Payment Previews in Chat List */
@@ -5875,6 +9445,23 @@ small {
   color: var(--secondary-text-color);
   margin-bottom: 8px; /* Reduced space below main paragraph */
   font-size: var(--font-size-base);
+}
+
+.validator-pending-status {
+  display: none;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  min-height: 40px;
+  padding: 8px 12px;
+  box-sizing: border-box;
+  border: 1px solid var(--primary-tint-20);
+  border-radius: 8px;
+  background-color: var(--primary-tint-12);
+  color: var(--primary-color);
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-semibold);
+  text-align: center;
 }
 
 #validatorModal .action-item {
@@ -6138,7 +9725,7 @@ small {
 
 /* Dialog overlay - centered with backdrop */
 .modal.modal-dialog {
-  display: none; /* Hidden by default */
+  display: flex;
   position: fixed; /* Fixed position to overlay everything */
   top: 0;
   left: 0; /* Start from left, no slide-in */
@@ -6148,15 +9735,17 @@ small {
   justify-content: center; /* Center direct child (dialog-box-content) horizontally */
   align-items: center; /* Center direct child (dialog-box-content) vertically */
   z-index: var(--overlay-z-index-base); /* Ensure it's on top */
+  visibility: hidden;
   opacity: 0;
-  transition: var(--overlay-transition);
+  transition: var(--overlay-transition), visibility 0s linear 0.2s;
   /* Override general .modal transition if it interferes */
   transform: none !important; /* Prevent slide-in */
 }
 
 .modal.modal-dialog.active {
-  display: flex; /* Show and use flex for centering */
+  visibility: visible;
   opacity: 1;
+  transition-delay: 0s;
   transform: none !important; /* Ensure no slide-in even when active */
 }
 
@@ -6172,31 +9761,16 @@ small {
   overflow: hidden; /* Clip children to border-radius */
 }
 
+#payChoiceModal .dialog-box-content {
+  width: min(340px, calc(100% - 32px));
+  max-height: calc(100% - 32px);
+}
+
 .modal-dialog .modal-header {
   padding: 12px 16px;
   /* display: flex, align-items: center are inherited or default */
   /* Ensure its width is not 100% of screen if it was before */
   width: 100%;
-}
-
-/* Validator Modal Pending Transaction Skeleton */
-
-.skeleton-item {
-  background-color: var(--skeleton-bg); /* Light grey for skeleton */
-  border-radius: 4px; /* Optional: for rounded corners */
-  animation: pulse 1.5s infinite ease-in-out;
-}
-
-@keyframes pulse {
-  0% {
-    background-color: var(--skeleton-bg); /* Initial color */
-  }
-  50% {
-    background-color: var(--skeleton-pulse-bg); /* Slightly darker or different shade for pulse effect */
-  }
-  100% {
-    background-color: var(--skeleton-bg); /* Return to initial color */
-  }
 }
 
 .amount-container {
@@ -6335,6 +9909,14 @@ small {
 }
 
 /* Friend Modal Styles */
+.friend-status-refresh-message {
+  margin: 22px auto 0;
+  width: 95%;
+  color: var(--neutral-600);
+  font-size: 0.9em;
+  text-align: center;
+}
+
 .radio-group {
   display: flex;
   flex-direction: column;
@@ -6359,6 +9941,11 @@ small {
 
 .radio-option:hover {
   background-color: var(--hover-color);
+}
+
+.radio-option:has(input:disabled) {
+  cursor: not-allowed;
+  opacity: 0.65;
 }
 
 .radio-option input[type='radio'] {
@@ -6463,18 +10050,28 @@ small {
 .menu-item::before {
   content: '';
   display: inline-block;
+  flex: 0 0 20px;
   width: 20px;
   height: 20px;
   background-position: center;
   background-repeat: no-repeat;
   background-size: 20px;
   margin-right: 12px;
+  opacity: 0.75;
   transition: opacity 0.2s ease;
 }
 
 /* Individual icon definitions */
 .menu-item[data-icon="user"]::before {
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2'%3E%3C/path%3E%3Ccircle cx='12' cy='7' r='4'%3E%3C/circle%3E%3C/svg%3E");
+}
+
+.menu-item[data-icon="assets"]::before {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='2' y='5' width='20' height='14' rx='2'/%3E%3Cpath d='M2 10h20'/%3E%3C/svg%3E");
+}
+
+.menu-item[data-icon="multichain"]::before {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolygon points='12 2 2 7 12 12 22 7 12 2'/%3E%3Cpolyline points='2 17 12 22 22 17'/%3E%3Cpolyline points='2 12 12 17 22 12'/%3E%3C/svg%3E");
 }
 
 .menu-item[data-icon="dollar-sign"]::before {
@@ -6553,7 +10150,7 @@ small {
 
 /* launch modal icon for menu item */
 .menu-item[data-icon="launch"]::before {
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cline x1='7' y1='17' x2='17' y2='7'%3E%3C/line%3E%3Cpolyline points='7,7 17,7 17,17'%3E%3C/polyline%3E%3C/svg%3E");
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6'%3E%3C/path%3E%3Cpolyline points='15,3 21,3 21,9'%3E%3C/polyline%3E%3Cline x1='10' y1='14' x2='21' y2='3'%3E%3C/line%3E%3C/svg%3E");
 }
 
 /* stake modal icon for menu item */
@@ -6573,60 +10170,313 @@ small {
 
 /* DAO icon for menu item */
 .menu-item[data-icon="dao"]::before {
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 2l9 5-9 5-9-5 9-5z'/%3E%3Cpath d='M3 7v10l9 5 9-5V7'/%3E%3Cpath d='M12 12v10'/%3E%3C/svg%3E");
+  background-image: var(--icon-dao);
 }
 
-/* DAO modal: place the header menu button on the right */
-#daoModal #daoFilterButton {
-  position: absolute;
-  right: 16px;
-}
-
-/* DAO modal: ensure list has room for the + button */
+/* Keep the DAO header fixed above the shared toolbar and list scroll area. */
 #daoModal .modal-content {
-  padding-bottom: 120px;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+  padding-bottom: 0;
+  position: relative;
 }
 
-/* DAO modal: Active/Archived toggle */
+/* The toolbar moves with the results inside .dao-list-pane. */
 #daoModal .dao-toolbar {
-  padding: 0px 16px 10px;
-  position: sticky;
-  top: 0;
-  z-index: 2;
   background: var(--background-color);
+  display: flex;
+  flex-direction: column;
+  padding: 4px 8px;
+  border-bottom: 1px solid var(--border-color);
 }
 
-#daoModal .dao-group-toggle {
+#daoModal .dao-list-pane {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  padding-bottom: calc(160px + env(safe-area-inset-bottom, 0px));
+}
+
+#daoModal .dao-filter-bar {
+  box-sizing: border-box;
   display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 6px;
-  padding: 6px;
-  border: 1px solid var(--border-color, rgba(0,0,0,0.12));
-  border-radius: 14px;
-  background: var(--hover-background-purple);
+  gap: 4px;
+  padding: 4px;
+  width: 100%;
 }
 
-#daoModal .dao-group-toggle-button {
-  appearance: none;
-  border: 0;
+#daoModal .dao-filter-row,
+#daoModal .dao-context-switch {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+}
+
+#daoModal .dao-context-switch {
+  background: var(--hover-background);
   border-radius: 10px;
-  padding: 10px 10px;
+  padding: 2px;
+}
+
+#daoModal .dao-filter-label {
+  color: var(--secondary-text-color);
+  font-size: var(--font-size-xs);
+  margin-top: 2px;
+  text-align: left;
+}
+
+/* Inactive panels still size this cell, including at larger text sizes. */
+#daoModal .dao-filter-slot { display: grid; }
+#daoModal .dao-filter-slot > * { grid-area: 1 / 1; min-width: 0; }
+#daoModal .dao-context-filters { display: grid; gap: 4px; align-content: start; }
+#daoModal .dao-filter-inactive { visibility: hidden; pointer-events: none; }
+#daoModal .dao-filter-placeholder {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 8px 12px;
+  text-align: center;
+  color: var(--secondary-text-color);
+  font-size: var(--font-size-sm);
+}
+
+#daoModal .dao-filter-row--outcomes { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 4px; }
+#daoModal .dao-filter-row--projects { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+
+#daoModal .dao-filter-chip,
+#daoModal .dao-context-switch button {
+  appearance: none;
+  background: var(--hover-background);
+  border: 0;
+  border-radius: 8px;
+  color: var(--text-color);
+  cursor: pointer;
   font-family: var(--font-primary);
   font-size: var(--font-size-sm);
   font-weight: var(--font-weight-medium);
-  background: transparent;
-  color: var(--text-color);
-  cursor: pointer;
-  transition: background-color 0.15s ease;
+  line-height: 1.35;
+  min-height: 44px;
+  min-width: 0;
+  padding: 4px;
+  position: relative;
+  overflow-wrap: anywhere;
 }
 
-#daoModal .dao-group-toggle-button:hover {
+#daoModal .dao-context-switch button { background: transparent; }
+#daoModal .dao-filter-chip { display: flex; align-items: center; justify-content: center; gap: 6px; }
+#daoModal .dao-filter-row--outcomes .dao-filter-chip,
+#daoModal .dao-filter-row--projects .dao-filter-chip { flex-direction: column; gap: 2px; padding-inline: 2px; }
+#daoModal .dao-filter-chip-label { min-width: 0; }
+
+#daoModal .dao-filter-chip.has-notification::after {
+  background: var(--primary-color);
+  border-radius: 50%;
+  content: '';
+  height: 7px;
+  position: absolute;
+  right: 4px;
+  top: 4px;
+  width: 7px;
+}
+
+#daoModal .dao-filter-chip:hover,
+#daoModal .dao-context-switch button:hover {
   background: var(--hover-background-dark);
 }
 
-#daoModal .dao-group-toggle-button.active {
-  background: var(--button-background);
-  color: var(--button-text);
+#daoModal .dao-filter-bar button[aria-pressed="true"] {
+  background: var(--primary-color);
+  color: var(--background-color);
+}
+
+#daoModal .dao-filter-chip.active.has-notification::after { background: currentColor; }
+#daoModal .dao-filter-bar button:focus-visible { outline: 2px solid var(--primary-color); outline-offset: 2px; }
+
+#daoModal .dao-filter-chip-count {
+  align-items: center;
+  background: var(--hover-background);
+  border-radius: 999px;
+  color: var(--secondary-text-color);
+  display: inline-flex;
+  font-size: var(--font-size-xs);
+  font-variant-numeric: tabular-nums;
+  justify-content: center;
+  min-height: 20px;
+  min-width: 20px;
+  padding: 0 4px;
+  max-width: 100%;
+  box-sizing: border-box;
+}
+
+#daoModal .dao-filter-chip.active .dao-filter-chip-count {
+  background: rgba(255, 255, 255, 0.18);
+  color: var(--background-color);
+}
+
+#daoModal [hidden] { display: none !important; }
+
+#daoModal #daoProposalList {
+  min-height: 0;
+  overflow: visible;
+  padding-bottom: 0;
+}
+
+#daoModal .dao-load-more {
+  margin: 12px auto 0;
+}
+
+#daoModal .dao-load-more[hidden] {
+  display: none;
+}
+
+#daoModal #daoAddProposalButton {
+  background-color: var(--primary-tint-60);
+  border: none;
+  bottom: calc(72px + env(safe-area-inset-bottom, 0px) + 16px);
+  box-shadow: var(--shadow-primary);
+  color: var(--text-color);
+  flex: 0 0 auto;
+  font-size: 24px;
+  font-weight: 400;
+  height: 56px;
+  line-height: 1;
+  min-height: 56px;
+  min-width: 56px;
+  padding: 0;
+  position: absolute;
+  right: 16px;
+  width: 56px;
+  z-index: 3;
+}
+
+@media (min-width: 769px) {
+  #daoModal .dao-list-pane {
+    padding-bottom: 176px;
+  }
+
+  #daoModal #daoAddProposalButton {
+    bottom: 120px;
+  }
+}
+
+#daoModal .dao-proposal-row {
+  align-items: center;
+  border-bottom: 1px solid var(--border-color, rgba(0,0,0,0.08));
+  box-sizing: border-box;
+  height: auto;
+  min-height: 68px;
+  overflow: visible;
+  padding: 10px 16px;
+}
+
+#daoModal .dao-row-content {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  justify-content: center;
+  min-width: 0;
+  overflow: visible;
+  width: 100%;
+}
+
+#daoModal .dao-row-title {
+  display: block;
+  font-size: var(--font-size-base);
+  font-weight: var(--font-weight-semibold);
+  line-height: 1.2;
+  min-width: 0;
+  overflow: visible;
+  overflow-wrap: anywhere;
+  text-align: left;
+  text-overflow: clip;
+  white-space: normal;
+}
+
+#daoModal .dao-proposal-row.has-notification .dao-row-title::after {
+  background: var(--primary-color);
+  border-radius: 50%;
+  content: '';
+  display: inline-block;
+  height: 7px;
+  margin-left: 7px;
+  vertical-align: 2px;
+  width: 7px;
+}
+
+#daoModal .dao-row-meta {
+  align-items: center;
+  color: var(--secondary-text-color);
+  display: flex;
+  gap: 10px;
+  min-width: 0;
+  width: 100%;
+}
+
+#daoModal .dao-row-meta-item {
+  align-items: baseline;
+  display: flex;
+  gap: 4px;
+  min-width: 0;
+}
+
+#daoModal .dao-row-meta-item--type {
+  flex: 0 0 auto;
+  font-size: 12px;
+  font-weight: var(--font-weight-medium);
+  line-height: 1.2;
+  max-width: 34%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+#daoModal .dao-row-previews {
+  display: flex;
+  flex: 1 1 auto;
+  flex-wrap: wrap;
+  gap: 4px;
+  justify-content: flex-end;
+  margin-left: auto;
+  min-width: 0;
+  overflow: visible;
+}
+
+#daoModal .dao-row-preview {
+  align-items: center;
+  background: var(--input-background);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  color: var(--text-color);
+  display: inline-flex;
+  flex: 0 0 auto;
+  font-size: 12px;
+  font-weight: var(--font-weight-medium);
+  line-height: 1.2;
+  max-width: 100%;
+  min-width: 0;
+  overflow: hidden;
+  padding: 4px 6px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+#daoModal .dao-row-preview--accepted,
+#daoModal .dao-row-preview--accept {
+  background: rgba(30, 126, 52, 0.12);
+  border-color: rgba(30, 126, 52, 0.3);
+}
+
+#daoModal .dao-row-preview--rejected {
+  background: rgba(196, 45, 45, 0.1);
+  border-color: rgba(196, 45, 45, 0.28);
+}
+
+#daoModal .dao-row-preview--emergency {
+  background: rgba(239, 108, 0, 0.12);
+  border-color: rgba(239, 108, 0, 0.32);
 }
 
 #lockModal p {
@@ -6661,14 +10511,7 @@ small {
 
 /* Thumbnail image in attachment rows */
 .attachment-thumbnail {
-  width: 100%;
-  max-width: 300px;
-  height: auto;
   object-fit: contain;
-  border-radius: 8px;
-  background: #f0f0f0;
-  display: block;
-  margin: 0 auto;
   /* Disable long press context menus on iOS and Android */
   -webkit-touch-callout: none;
   -webkit-user-select: none;
@@ -6683,12 +10526,92 @@ small {
   max-height: 400px;
 }
 
+.attachment-row {
+  display: flex;
+  margin-bottom: 6px;
+}
+
+.message.has-media-attachment {
+  width: 300px;
+}
+
+.attachment-row--media {
+  flex-direction: column;
+  margin: 0 -1rem 8px;
+  overflow: hidden;
+}
+
+.message > .attachment-row--media:first-child {
+  margin-top: -0.75rem;
+  border-radius: 1rem 1rem 0 0;
+}
+
+.attachment-row--media .attachment-icon-container {
+  width: 100%;
+  flex-direction: column;
+}
+
+.attachment-row--media .attachment-thumbnail {
+  display: block;
+  width: 100%;
+  max-width: none;
+  height: auto;
+  margin: 0;
+  border-radius: 0;
+}
+
+.attachment-row--media .attachment-icon {
+  width: 100%;
+  height: 96px;
+  background-size: 48px;
+}
+
+.message.sent .attachment-row--media .attachment-icon {
+  filter: brightness(0) invert(1);
+}
+
+.attachment-row--file {
+  align-items: center;
+  gap: 10px;
+  padding: 9px 11px;
+  border-radius: 10px;
+}
+
+.message.sent .attachment-row--file {
+  background: rgba(255, 255, 255, 0.18);
+}
+
+.message.received .attachment-row--file {
+  background: rgba(0, 0, 0, 0.055);
+}
+
+.attachment-details {
+  min-width: 0;
+  flex: 1;
+}
+
+.attachment-label {
+  display: block;
+  overflow: hidden;
+  font-weight: var(--font-weight-medium);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.attachment-meta {
+  display: block;
+  font-size: var(--font-size-xs);
+  opacity: 0.72;
+}
+
 .attachment-preview-hint {
   font-size: 0.75em;
-  color: #000000;
+  padding-bottom: 8px;
+  color: currentColor;
   text-align: center;
   font-style: italic;
-  font-weight: 600;
+  font-weight: var(--font-weight-semibold);
+  line-height: 1.2;
   opacity: 0.8;
 }
 
@@ -6711,14 +10634,6 @@ small {
 /* File type specific icons */
 .attachment-icon[data-file-type="image"] {
   background-image: var(--icon-file-image);
-}
-
-/* Image and video icons in message display (not preview) */
-.attachment-row .attachment-icon[data-file-type="image"],
-.attachment-row .attachment-icon[data-file-type="video"] {
-  width: 144px;
-  height: 144px;
-  background-size: 144px;
 }
 
 .attachment-icon[data-file-type="audio"] {
@@ -7895,6 +11810,7 @@ small {
   color: rgba(255, 255, 255, 0.9);
 }
 
+.chat-settings-preview .message-content,
 .messages-list .message-content,
 .messages-list .payment-header,
 .messages-list .payment-direction,
@@ -7918,6 +11834,7 @@ small {
   font-size: var(--chat-message-detail-font-size, var(--font-size-sm));
 }
 
+.chat-settings-preview .message-time,
 .messages-list .message-time,
 .messages-list .reply-quote-label,
 .messages-list .attachment-preview-hint,
@@ -7937,24 +11854,71 @@ small {
   display: none;
 }
 
-/* Call Schedule Form Styles */
-.call-schedule-form-row {
+/* Shared Date and Time Picker */
+#dateTimePickerModal .modal-title {
+  box-sizing: border-box;
+  padding: 0 100px;
+}
+
+#dateTimePickerForm,
+#durationPickerForm {
+  max-width: none;
+  min-width: 0;
+  padding-inline: 0;
+}
+
+#confirmDateTimePicker {
+  font-size: var(--font-size-sm);
+  padding-inline: 12px;
+}
+
+@media (max-width: 420px) {
+  #dateTimePickerModal .modal-title {
+    padding: 0 48px;
+  }
+
+  #dateTimePickerModal .current-time {
+    display: none;
+  }
+}
+
+.picker-row {
   display: flex;
   gap: 8px;
   align-items: center;
 }
 
-.call-schedule-form-row:not(:first-child) {
+.picker-row:not(:first-child) {
   margin-top: 8px;
 }
 
-.call-schedule-date-input {
+.date-time-picker-date-input {
   flex: 1;
+  min-width: 0;
   width: 100%;
 }
 
-.call-schedule-time-select {
-  width: 90px;
+.picker-select {
+  flex: 1 1 0;
+  min-width: 0;
+}
+
+.picker-field {
+  flex: 1 1 0;
+  min-width: 0;
+}
+
+.picker-field label {
+  display: block;
+}
+
+.picker-preview {
+  color: var(--text-color);
+  line-height: 1.4;
+  overflow: visible;
+  overflow-wrap: anywhere;
+  text-overflow: clip;
+  white-space: normal;
 }
 
 /* Drop overlay for drag and drop image attachments */
@@ -7991,4 +11955,1618 @@ small {
 
 .drop-text {
   font-size: 1.5rem;
+}
+
+
+/* ---------------------------------------------------------------------------
+   Multichain
+
+   Balances the verifier holds for the account rather than on each asset's own
+   chain. Follows DESIGN.md: tokens only, the 8/16/32/48 spacing scale, and no
+   tinted rectangle around the balance -- that is the wallet's boxed-balance
+   mistake, and this screen is not the place to repeat it.
+
+   `.container` sets `text-align: center`, which cascades into everything here,
+   so every block that holds a sentence or a value states its own alignment.
+   --------------------------------------------------------------------------- */
+
+#walletScreen .wallet-asset-groups {
+  padding: 3px 6px;
+  border: 1px solid var(--border-color);
+  border-radius: 18px;
+  background: var(--background-color);
+}
+
+#walletScreen .wallet-asset-summary {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 68px;
+  padding: 12px 9px;
+  border: 0;
+  border-radius: 13px;
+  background: transparent;
+  font-family: var(--font-primary);
+  text-align: left;
+  cursor: pointer;
+}
+
+#walletScreen .wallet-asset-summary-divider {
+  height: 1px;
+  margin: 0 10px 0 59px;
+  background: var(--border-color);
+}
+
+#walletScreen .wallet-asset-summary:hover {
+  background: var(--light-color);
+}
+
+#walletScreen .wallet-asset-group-icon {
+  display: grid;
+  place-items: center;
+  flex: 0 0 40px;
+  height: 40px;
+  border-radius: 12px;
+  background: var(--light-color);
+  color: var(--secondary-text-color);
+}
+
+#walletScreen .wallet-asset-group-icon::before {
+  content: '';
+  width: var(--icon-size-20);
+  height: var(--icon-size-20);
+  background: currentColor;
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cellipse cx='12' cy='5' rx='8' ry='3'/%3E%3Cpath d='M4 5v4c0 1.66 3.58 3 8 3s8-1.34 8-3V5M4 9v4c0 1.66 3.58 3 8 3s8-1.34 8-3V9M4 13v4c0 1.66 3.58 3 8 3s8-1.34 8-3v-4'/%3E%3C/svg%3E") center / contain no-repeat;
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cellipse cx='12' cy='5' rx='8' ry='3'/%3E%3Cpath d='M4 5v4c0 1.66 3.58 3 8 3s8-1.34 8-3V5M4 9v4c0 1.66 3.58 3 8 3s8-1.34 8-3V9M4 13v4c0 1.66 3.58 3 8 3s8-1.34 8-3v-4'/%3E%3C/svg%3E") center / contain no-repeat;
+}
+
+#walletScreen .wallet-asset-summary-label {
+  min-width: 0;
+  flex: 1 0 auto;
+  font-size: 15px;
+  font-weight: var(--font-weight-medium);
+  color: var(--text-color);
+}
+
+#walletScreen .wallet-asset-summary-value {
+  flex-shrink: 0;
+  font-size: 15px;
+  font-weight: var(--font-weight-medium);
+  font-variant-numeric: tabular-nums;
+  color: var(--text-color);
+}
+
+#walletScreen .wallet-asset-summary-chevron {
+  flex: 0 0 6px;
+  height: 6px;
+  border-top: 1.5px solid var(--secondary-text-color);
+  border-right: 1.5px solid var(--secondary-text-color);
+  transform: rotate(45deg);
+}
+
+@media (max-width: 420px) {
+  #walletScreen .wallet-asset-summary {
+    gap: 8px;
+    padding-right: 7px;
+    padding-left: 7px;
+  }
+
+  #walletScreen .wallet-asset-group-icon {
+    flex-basis: 35px;
+    height: 35px;
+  }
+
+  #walletScreen .wallet-asset-summary-value {
+    font-size: 13px;
+  }
+}
+
+/* --- asset marks ---------------------------------------------------------- */
+
+/* Filled discs in the asset's brand colour, drawn locally -- see
+   asset-icons.js for why they are not fetched. */
+.asset-mark {
+  flex: 0 0 var(--mark-size, 40px);
+  width: var(--mark-size, 40px);
+  height: var(--mark-size, 40px);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: var(--mark-bg, var(--primary-color));
+  color: #fff;
+}
+
+.asset-mark {
+  position: relative;
+  overflow: hidden;
+}
+
+.asset-mark svg {
+  width: 62%;
+  height: 62%;
+}
+
+/* Laid over the drawn disc rather than replacing it: a logo that 404s simply
+   never covers what is already there, so no error handling is needed. */
+.asset-mark-image {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border-radius: 50%;
+}
+
+/* A logo that loaded brings its own background; the disc and letters were
+   only ever its fallback (installLogoFallback). */
+.asset-mark.has-logo {
+  background: transparent;
+}
+
+.asset-mark.has-logo > :not(.asset-mark-image) {
+  visibility: hidden;
+}
+
+.asset-mark-label {
+  font-family: var(--font-primary);
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  /* Four letters in a 40px disc need to be smaller than two. */
+  font-size: calc(var(--mark-size, 40px) * 0.3);
+}
+
+.asset-mark[data-len='3'] .asset-mark-label { font-size: calc(var(--mark-size, 40px) * 0.26); }
+.asset-mark[data-len='4'] .asset-mark-label { font-size: calc(var(--mark-size, 40px) * 0.21); }
+
+/* --- list screen ---------------------------------------------------------- */
+
+/* Keep the overview controls visible; only its asset rows scroll. */
+#multichainModal .modal-content {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+}
+
+#multichainModal .modal-content > :not(.multichain-assets, .multichain-empty) {
+  flex-shrink: 0;
+}
+
+#multichainAssetsList,
+#multichainEmpty {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+}
+
+/* Mirrors the back button, which is positioned out of the flow. In the flow,
+   this took 40px from the title's box and pulled "Multichain" 20px left of
+   the balance centred beneath it. */
+.modal-header > .refresh-button {
+  position: absolute;
+  right: 16px;
+}
+
+.multichain-hero {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 32px 16px 0;
+  text-align: center;
+}
+
+/* A label above the figure, so the number reads as a stated value rather
+   than one floating under the title. */
+.multichain-hero-label {
+  font-size: var(--font-size-xs);
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--secondary-text-color);
+}
+
+.multichain-hero-total {
+  /* Held open while it loads, so the screen does not jump when it lands. */
+  min-height: 48px;
+  font-size: 44px;
+  font-weight: 700;
+  line-height: 1.1;
+  letter-spacing: -0.02em;
+  color: var(--text-color);
+  font-variant-numeric: tabular-nums;
+}
+
+.multichain-hero-caption {
+  font-size: var(--font-size-sm);
+  color: var(--secondary-text-color);
+}
+
+.multichain-hero-caption:empty,
+.multichain-hero-warning:empty {
+  display: none;
+}
+
+.multichain-hero-warning {
+  font-size: var(--font-size-sm);
+  color: var(--warning-color);
+}
+
+/* The list's own heading, holding the one setting that shapes it. */
+.multichain-list-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin: 32px 16px 8px;
+  text-align: left;
+}
+
+.multichain-list-head[hidden] {
+  display: none;
+}
+
+.multichain-list-head .multichain-section-title {
+  margin: 0;
+}
+
+/* The heading takes the gap the list would otherwise open with. */
+.multichain-list-head:not([hidden]) ~ .multichain-assets {
+  margin-top: 0;
+}
+
+/* A switch drawn over a real checkbox: the input stays for state, keyboard
+   and screen readers, and is only made invisible. */
+.wallet-asset-switch {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: var(--font-size-xs);
+  color: var(--secondary-text-color);
+  cursor: pointer;
+}
+
+.wallet-asset-switch input {
+  position: absolute;
+  opacity: 0;
+  width: 1px;
+  height: 1px;
+  margin: 0;
+}
+
+.wallet-asset-switch-track {
+  position: relative;
+  width: 32px;
+  height: 20px;
+  border-radius: 999px;
+  background: var(--input-background);
+  transition: background-color 0.15s ease;
+}
+
+.wallet-asset-switch-track::after {
+  content: '';
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--background-color);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
+  transition: transform 0.15s ease;
+}
+
+.wallet-asset-switch input:checked + .wallet-asset-switch-track {
+  background: var(--primary-color);
+}
+
+.wallet-asset-switch input:checked + .wallet-asset-switch-track::after {
+  transform: translateX(12px);
+}
+
+.wallet-asset-switch input:focus-visible + .wallet-asset-switch-track {
+  outline: 2px solid var(--primary-color);
+  outline-offset: 2px;
+}
+
+.assets-list-empty,
+.multichain-empty {
+  margin: 24px 16px;
+  text-align: center;
+  font-size: var(--font-size-sm);
+  color: var(--secondary-text-color);
+}
+
+.multichain-empty[hidden] {
+  display: none;
+}
+
+.multichain-other-assets {
+  margin: 16px 16px 0;
+}
+
+/* Custody is a standing fact about every row above it, so it sits under the
+   list as a footnote rather than in the hero on every visit. */
+.multichain-footnote {
+  margin: 16px 16px 32px;
+  font-size: var(--font-size-xs);
+  color: var(--muted-text-color);
+  text-align: center;
+}
+
+/* Leave room for asset rows when the phone's available height is short. */
+@media (max-width: 768px) and (max-height: 700px) {
+  #multichainModal .multichain-hero {
+    gap: 4px;
+    padding-top: 8px;
+  }
+
+  #multichainModal .multichain-list-head {
+    margin-top: 16px;
+  }
+
+  #multichainModal .multichain-other-assets {
+    margin-top: 8px;
+  }
+
+  #multichainModal .multichain-footnote {
+    margin-top: 8px;
+    margin-bottom: 8px;
+  }
+}
+
+/* --- activity ------------------------------------------------------------- */
+
+.multichain-activity {
+  margin: 32px 16px 32px;
+  text-align: left;
+}
+
+/* A row you read, not one you tap: no pointer, no hover. */
+.multichain-row.is-static {
+  cursor: default;
+}
+
+.multichain-row.is-static:hover {
+  background: var(--background-color);
+}
+
+.multichain-activity-icon {
+  position: relative;
+  flex: 0 0 40px;
+  width: 40px;
+  height: 40px;
+  border-radius: 8px;
+  background: var(--light-color);
+}
+
+.multichain-activity-icon::after {
+  content: '';
+  position: absolute;
+  inset: 8px;
+  background-color: var(--text-color);
+  -webkit-mask: var(--wallet-action-icon) center / contain no-repeat;
+  mask: var(--wallet-action-icon) center / contain no-repeat;
+}
+
+.multichain-activity-status {
+  font-size: var(--font-size-xs);
+  color: var(--secondary-text-color);
+}
+
+.multichain-activity-status:empty {
+  display: none;
+}
+
+/* Money that did not move: a failed or refunded order, a claim that did not
+   check out. The amount is struck so it cannot be read as a balance change. */
+.multichain-row[data-status='failed'] .multichain-row-amount,
+.multichain-row[data-status='refunded'] .multichain-row-amount,
+.multichain-row[data-status='unconfirmed'] .multichain-row-amount {
+  color: var(--secondary-text-color);
+  text-decoration: line-through;
+}
+
+.multichain-row[data-status='failed'] .multichain-activity-status,
+.multichain-row[data-status='unconfirmed'] .multichain-activity-status {
+  color: var(--danger-color);
+}
+
+.multichain-row[data-status='failed'] .multichain-activity-icon::after,
+.multichain-row[data-status='refunded'] .multichain-activity-icon::after,
+.multichain-row[data-status='unconfirmed'] .multichain-activity-icon::after {
+  background-color: var(--muted-text-color);
+}
+
+.multichain-activity-note {
+  margin: 0;
+  padding: 16px 0;
+  font-size: var(--font-size-sm);
+  color: var(--secondary-text-color);
+  text-align: center;
+}
+
+.multichain-list + .multichain-activity-note {
+  padding-bottom: 0;
+}
+
+/* --- loading -------------------------------------------------------------- */
+
+.multichain-skeleton {
+  display: inline-block;
+  border-radius: 6px;
+  background: linear-gradient(90deg,
+    var(--input-background) 25%, var(--light-color) 45%, var(--input-background) 65%);
+  background-size: 400% 100%;
+  animation: multichain-shimmer 1.4s ease-in-out infinite;
+}
+
+.multichain-skeleton.is-figure {
+  width: 144px;
+  height: 44px;
+  border-radius: 10px;
+  vertical-align: middle;
+}
+
+.multichain-skeleton.is-caption {
+  width: 112px;
+  height: 14px;
+}
+
+.multichain-skeleton.is-mark {
+  flex: 0 0 40px;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+}
+
+.multichain-skeleton.is-name {
+  width: 64px;
+  height: 14px;
+}
+
+.multichain-skeleton.is-sub {
+  width: 44px;
+  height: 10px;
+}
+
+.multichain-row-values .multichain-skeleton {
+  align-self: flex-end;
+}
+
+.multichain-row.is-skeleton {
+  cursor: default;
+}
+
+.multichain-row.is-skeleton:hover {
+  background: var(--background-color);
+}
+
+@keyframes multichain-shimmer {
+  from { background-position: 100% 0; }
+  to { background-position: 0 0; }
+}
+
+/* A refresh with balances already on screen: they stay, the icon turns.
+   The button turns, not its ::before -- the glyph is what shows, and giving
+   ::before a box would draw its artwork as a second icon beside it. */
+.refresh-button.is-loading {
+  animation: multichain-turn 0.9s linear infinite;
+}
+
+@keyframes multichain-turn {
+  to { transform: rotate(360deg); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .multichain-skeleton,
+  .refresh-button.is-loading {
+    animation: none;
+  }
+}
+
+.multichain-assets {
+  margin: 32px 16px 0;
+}
+
+
+
+/* The bordered list, shared by the balance screen and the token picker. */
+:is(.multichain-assets, .multichain-list) {
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+  overflow: hidden;
+}
+
+.multichain-row {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  width: 100%;
+  padding: 14px 16px;
+  border: 0;
+  border-bottom: 1px solid var(--border-color);
+  background: var(--background-color);
+  text-align: left;
+  cursor: pointer;
+}
+
+.multichain-row:last-child {
+  border-bottom: 0;
+}
+
+.multichain-row:hover {
+  background: var(--hover-background-purple);
+}
+
+.multichain-row-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.multichain-row-name {
+  font-size: var(--font-size-base);
+  font-weight: 600;
+  color: var(--text-color);
+}
+
+/* Every row is one line (DESIGN.md §4.3): a long name or detail ends in an
+   ellipsis rather than wrapping the row taller than its neighbours, and the
+   figures on the right never give up their room to it. */
+.multichain-row-name,
+.multichain-row-chain {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.multichain-row-values {
+  flex: 0 0 auto;
+}
+
+.multichain-row-chain {
+  font-size: var(--font-size-xs);
+  color: var(--secondary-text-color);
+}
+
+.multichain-row-values {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.multichain-row-amount {
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+  color: var(--text-color);
+}
+
+.multichain-row-usd {
+  font-size: var(--font-size-xs);
+  color: var(--secondary-text-color);
+}
+
+/* Separate external wallet transfers from actions on the Intents balance. */
+#multichainAssetModal .multichain-action-groups {
+  display: grid;
+  gap: 24px;
+  margin: 32px 16px 0;
+  text-align: left;
+}
+
+#multichainAssetModal .multichain-action-group-title {
+  margin: 0;
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+  color: var(--text-color);
+}
+
+#multichainAssetModal .multichain-action-group-description {
+  margin: 4px 0 0;
+  font-size: var(--font-size-xs);
+  color: var(--secondary-text-color);
+}
+
+#multichainAssetModal .asset-detail-actions {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(0, 1fr);
+  gap: 12px;
+  margin: 12px 0 0;
+  padding: 0;
+}
+
+#multichainAssetModal .wallet-action-button {
+  padding: 16px 8px;
+  border-radius: 12px;
+}
+
+#multichainAssetModal .wallet-action-button:disabled {
+  background-color: var(--light-color);
+  opacity: 0.4;
+  cursor: default;
+}
+
+/* --- task screens (receive, withdraw, swap) ------------------------------- */
+
+.multichain-screen {
+  padding: 32px 16px 24px;
+  text-align: left;
+}
+
+/* A disabled action is not an action, so it is not blue (DESIGN.md §5). The
+   app-wide rule only fades the accent, which still reads as a button to press. */
+.multichain-screen .btn.btn--primary:disabled {
+  background: var(--input-background);
+  border-color: transparent;
+  color: var(--muted-text-color);
+  opacity: 1;
+}
+
+/* The global pill insets itself 16px each side for screens with no padding of
+   their own. This one has padding, so the inset doubled and the button came
+   out 32px narrower than the fields above it. */
+.multichain-screen .btn--pill.btn--full {
+  width: 100%;
+  margin: 16px 0 0;
+}
+
+.multichain-qr {
+  display: flex;
+  justify-content: center;
+  margin-bottom: 16px;
+}
+
+/* Left at its natural size: forcing a width puts module edges on fractional
+   pixels, and the module count changes with the payload. */
+.multichain-qr img {
+  image-rendering: pixelated;
+}
+
+/* A value you read and copy, never type into: the search field's filled pill,
+   not an input's clothes. */
+.multichain-address {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 12px 16px;
+  border: 0;
+  border-radius: 12px;
+  background: var(--input-background);
+  text-align: left;
+  cursor: pointer;
+}
+
+.multichain-address:hover {
+  filter: brightness(0.97);
+}
+
+.multichain-address-value {
+  flex: 1;
+  min-width: 0;
+  font-family: var(--font-monospace);
+  font-size: var(--font-size-sm);
+  color: var(--text-color);
+  /* One line, cut in the middle by the renderer (DESIGN.md §4.3); the
+     ellipsis only guards a pill narrower than any phone. */
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.multichain-address-copy {
+  display: flex;
+  flex: 0 0 auto;
+  color: var(--primary-color);
+  font-family: var(--font-primary);
+  font-size: var(--font-size-xs);
+  font-weight: 600;
+}
+
+#multichainRequestModal .form-group:has(.address-container) {
+  margin-bottom: 12px;
+}
+
+#multichainRequestModal .address-display {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+#multichainRequestAddress {
+  white-space: nowrap;
+  padding-inline: 8px;
+  font-size: clamp(9px, 2.8vw, 11px);
+}
+
+#multichainRequestModal .address-copy-button {
+  flex-shrink: 0;
+}
+
+#multichainRequestQr {
+  margin-top: 16px;
+  overflow: hidden;
+}
+
+#multichainRequestQr img {
+  max-width: 100%;
+  height: auto;
+}
+
+#multichainRequestStatus {
+  margin-bottom: 16px;
+}
+
+#multichainRequestSymbol {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: default;
+}
+
+/* --- confirmation --------------------------------------------------------- */
+
+.multichain-confirm-hero {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding-bottom: 32px;
+  text-align: center;
+}
+
+.multichain-confirm-amount {
+  font-size: 28px;
+  line-height: 1.1;
+}
+
+.multichain-deposit-headline {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 16px;
+  text-align: center;
+}
+
+.multichain-deposit-minimum {
+  font-size: var(--font-size-lg);
+  font-weight: 700;
+  line-height: 1.25;
+  color: var(--text-color);
+  overflow-wrap: anywhere;
+}
+
+.multichain-deposit-sub {
+  font-size: var(--font-size-sm);
+  color: var(--secondary-text-color);
+}
+
+.multichain-address + .multichain-address {
+  margin-top: 8px;
+}
+
+.multichain-address-label {
+  flex: 0 0 auto;
+  font-size: var(--font-size-xs);
+  color: var(--secondary-text-color);
+}
+
+/* The rules that lose the money if broken. Amber, because they need a decision
+   before sending -- not red, because nothing has gone wrong yet. */
+.multichain-rules {
+  margin: 32px 0 0;
+  padding: 12px 16px;
+  list-style: none;
+  border-left: 2px solid var(--warning-color);
+  background: var(--light-color);
+  border-radius: 0 10px 10px 0;
+}
+
+.multichain-rules li {
+  font-size: var(--font-size-sm);
+  color: var(--text-color);
+  margin-bottom: 8px;
+}
+
+.multichain-rules li:last-child {
+  margin-bottom: 0;
+}
+
+.multichain-arrived {
+  margin-bottom: 16px;
+  padding: 12px 16px;
+  border-radius: 10px;
+  /* Neutral ground: the accent tint would make "it worked" look like a
+     control (DESIGN.md §3). The green carries the meaning. */
+  background: var(--light-color);
+  color: var(--success-color);
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+  text-align: center;
+}
+
+/* Max sits beside the balance it fills in. */
+.multichain-max {
+  padding: 4px 12px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--hover-background-purple);
+  color: var(--primary-color);
+  font-family: var(--font-primary);
+  font-size: var(--font-size-xs);
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.multichain-max:hover {
+  filter: brightness(0.96);
+}
+
+/* --- swap ----------------------------------------------------------------- */
+
+/* Two stacked panels, pay and get, each reading as one line: the amount on
+   the left, the token on the right, the dollar value and detail beneath. */
+.multichain-swap {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+/* An author display beats the hidden attribute; restate it. */
+.multichain-swap[hidden] {
+  display: none;
+}
+
+/* Flex children do not collapse margins, so the shared 16px would stack on
+   top of the gap. */
+.multichain-swap .btn--pill.btn--full {
+  margin: 8px 0 0;
+}
+
+.multichain-swap .multichain-status {
+  margin-top: 8px;
+}
+
+.multichain-swap-leg {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 16px;
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+  text-align: left;
+}
+
+.multichain-swap-leg:focus-within {
+  border-color: var(--primary-color);
+}
+
+.multichain-swap-label {
+  display: block;
+  font-size: var(--font-size-xs);
+  color: var(--secondary-text-color);
+}
+
+.multichain-swap-line {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 32px;
+}
+
+.multichain-swap-amount {
+  flex: 1;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  font-family: var(--font-primary);
+  font-size: var(--font-size-xl);
+  font-weight: 600;
+  line-height: 1.2;
+  color: var(--text-color);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.multichain-swap-amount:focus {
+  outline: none;
+}
+
+.multichain-swap-amount::placeholder,
+.multichain-swap-amount.is-empty {
+  color: var(--muted-text-color);
+}
+
+.multichain-token-chip {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 12px 4px 4px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--input-background);
+  color: var(--text-color);
+  font-family: var(--font-primary);
+  font-size: var(--font-size-base);
+  font-weight: 600;
+}
+
+.multichain-token-chip[hidden] {
+  display: none;
+}
+
+button.multichain-token-chip {
+  cursor: pointer;
+}
+
+button.multichain-token-chip:hover {
+  filter: brightness(0.97);
+}
+
+/* Nothing chosen yet: the next thing to do, so it carries the accent -- as
+   text on a tint, since choosing is not yet the consequential step. */
+.multichain-token-chip.is-empty {
+  padding-left: 12px;
+  background: var(--hover-background-purple);
+  color: var(--primary-color);
+}
+
+.multichain-chip-caret {
+  width: 16px;
+  height: 16px;
+  margin-left: -4px;
+}
+
+.multichain-swap-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 24px;
+  font-size: var(--font-size-xs);
+  color: var(--secondary-text-color);
+  font-variant-numeric: tabular-nums;
+}
+
+.multichain-swap-balance {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+}
+
+.multichain-swap-floor {
+  padding: 0 4px;
+  font-size: var(--font-size-xs);
+  color: var(--secondary-text-color);
+  text-align: left;
+}
+
+.multichain-swap-floor:empty {
+  display: none;
+}
+
+/* --- withdraw ------------------------------------------------------------- */
+
+/* Which chain the payout lands on. Wraps rather than scrolls: every option
+   has to be seen to be chosen, and there are rarely more than a handful. */
+.multichain-network-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.multichain-network-chips[hidden] {
+  display: none;
+}
+
+.multichain-network-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 12px 4px 4px;
+  border: 1px solid var(--border-color);
+  border-radius: 999px;
+  background: var(--background-color);
+  color: var(--text-color);
+  font-family: var(--font-primary);
+  font-size: var(--font-size-sm);
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.multichain-network-chip:hover {
+  background: var(--hover-background-purple);
+}
+
+/* Chosen is a selection, which is what the accent is for. */
+.multichain-network-chip[aria-checked='true'] {
+  border-color: var(--primary-color);
+  background: var(--hover-background-purple);
+  color: var(--primary-color);
+  font-weight: 600;
+}
+
+/* An address is a machine value (DESIGN.md §3), typed or pasted into the
+   panel itself rather than a box inside the box. */
+.multichain-address-input {
+  display: block;
+  width: 100%;
+  min-height: 32px;
+  padding: 4px 0;
+  border: 0;
+  background: transparent;
+  font-family: var(--font-monospace);
+  font-size: var(--font-size-sm);
+  line-height: 1.5;
+  color: var(--text-color);
+  resize: none;
+  overflow: hidden;
+  word-break: break-all;
+}
+
+.multichain-address-input:focus {
+  outline: none;
+}
+
+.multichain-address-input::placeholder {
+  font-family: var(--font-primary);
+  font-size: var(--font-size-base);
+  color: var(--muted-text-color);
+}
+
+.multichain-address-input:disabled {
+  background: transparent;
+  cursor: not-allowed;
+}
+
+/* Where this account has withdrawn to on the chosen network before. Shown
+   only while the address is empty: it is a way to fill the field, not a
+   second answer beside it. */
+.multichain-recent {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.multichain-recent:empty {
+  display: none;
+}
+
+.multichain-recent-title {
+  margin-bottom: 4px;
+  font-size: var(--font-size-xs);
+  color: var(--secondary-text-color);
+}
+
+.multichain-recent-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  padding: 8px 12px;
+  border: 0;
+  border-radius: 10px;
+  background: var(--light-color);
+  text-align: left;
+  cursor: pointer;
+}
+
+.multichain-recent-row:hover {
+  background: var(--hover-background-purple);
+}
+
+.multichain-recent-address {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-monospace);
+  font-size: var(--font-size-sm);
+  color: var(--text-color);
+}
+
+.multichain-recent-time {
+  flex: 0 0 auto;
+  font-size: var(--font-size-xs);
+  color: var(--secondary-text-color);
+}
+
+/* What is wrong with the address, or what to know before sending on this
+   chain. Hidden by :empty, so no caller has to remember to (DESIGN.md §6). */
+.multichain-field-note {
+  font-size: var(--font-size-xs);
+  line-height: 1.4;
+  color: var(--secondary-text-color);
+}
+
+.multichain-field-note:empty {
+  display: none;
+}
+
+.multichain-field-note[data-kind='error'] {
+  color: var(--danger-color);
+}
+
+.multichain-field-note[data-kind='warning'] {
+  color: var(--warning-color);
+}
+
+/* --- token picker --------------------------------------------------------- */
+
+.multichain-picker-search {
+  flex-shrink: 0;
+  margin: 16px;
+}
+
+/* The shared search bar is styled for a read-only field that opens a search
+   screen; this one is typed into directly. */
+.multichain-picker-search,
+.multichain-picker-search .search-input {
+  cursor: text;
+}
+
+.multichain-picker-results {
+  padding: 0 16px 24px;
+  text-align: left;
+}
+
+.multichain-section-title {
+  margin-bottom: 8px;
+  font-size: var(--font-size-xs);
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--secondary-text-color);
+}
+
+.multichain-list + .multichain-section-title {
+  margin-top: 32px;
+}
+
+.multichain-picker-none {
+  margin: 0;
+  padding: 16px 0;
+  font-size: var(--font-size-sm);
+  color: var(--secondary-text-color);
+  text-align: center;
+}
+
+/* --- quote ---------------------------------------------------------------- */
+
+.multichain-quote {
+  margin-top: 32px;
+  text-align: left;
+}
+
+.multichain-quote-rows {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 8px 16px;
+  margin: 0 0 16px;
+  font-size: var(--font-size-sm);
+}
+
+.multichain-quote-rows dt {
+  color: var(--secondary-text-color);
+}
+
+.multichain-quote-rows dd {
+  margin: 0;
+  text-align: right;
+  color: var(--text-color);
+  overflow-wrap: anywhere;
+}
+
+#multichainConfirmRows dd {
+  white-space: pre-wrap;
+}
+
+/* The number actually being agreed to, when the rate can move. */
+.multichain-quote-rows dd.is-guaranteed {
+  font-weight: 600;
+}
+
+.multichain-quote-note {
+  margin-top: 16px;
+  font-size: var(--font-size-xs);
+  color: var(--secondary-text-color);
+  text-align: center;
+}
+
+.multichain-quote-working,
+.multichain-quote-error {
+  padding: 16px 0;
+  font-size: var(--font-size-sm);
+  color: var(--secondary-text-color);
+  text-align: center;
+}
+
+.multichain-quote-error {
+  color: var(--danger-color);
+}
+
+.multichain-status {
+  margin-top: 16px;
+  padding: 12px 16px;
+  border-radius: 10px;
+  background: var(--light-color);
+  color: var(--secondary-text-color);
+  font-size: var(--font-size-sm);
+  text-align: center;
+}
+
+.multichain-status[data-kind='ok'] {
+  color: var(--success-color);
+}
+
+.multichain-status[data-kind='error'] {
+  color: var(--danger-color);
+}
+
+/* ---------------------------------------------------------------------------
+   Paying inside a conversation
+   --------------------------------------------------------------------------- */
+
+.intents-payment-message {
+  border-radius: 12px;
+  /* The bubble already pads its content; a second inset pushed the amount
+     well in from the time below it. */
+  padding: 0;
+  min-width: 160px;
+  text-align: left;
+}
+
+.intents-payment-amount {
+  font-size: var(--font-size-lg);
+  font-weight: 700;
+  line-height: 1.2;
+}
+
+.intents-payment-chain {
+  margin-top: 8px;
+  font-size: var(--font-size-xs);
+  opacity: 0.75;
+}
+
+.intents-payment-note {
+  margin-top: 8px;
+  font-size: var(--font-size-sm);
+  overflow-wrap: anywhere;
+}
+
+/* A received payment is a claim until the intent behind it is checked, so the
+   verification state is part of the bubble rather than a decoration on it.
+
+   In the bubble's own colour, sentence case: green or red text on the indigo
+   sent bubble was unreadable, and uppercase turned a status into a shout. */
+.intents-payment-verified {
+  margin-top: 8px;
+  font-size: var(--font-size-xs);
+  opacity: 0.75;
+}
+
+.intents-payment-message[data-verified='settled'] .intents-payment-verified::before {
+  content: '✓ ';
+}
+
+/* Failure is the one state worth weight. Red only where it reads -- on the
+   light received bubble; on the sent bubble, weight and a mark carry it. */
+.intents-payment-message[data-verified='failed'] .intents-payment-verified {
+  font-weight: 600;
+  opacity: 1;
+}
+
+.intents-payment-message[data-verified='failed'] .intents-payment-verified::before {
+  content: '⚠ ';
+}
+
+.message.received .intents-payment-message[data-verified='failed'] .intents-payment-verified {
+  color: var(--danger-color);
+}
+
+/* --- sending in a conversation -------------------------------------------- */
+
+.context-menu-option[data-icon="send-money"] .context-menu-icon {
+  background-image: var(--icon-send-money);
+}
+
+/* Typing in dollars: the sign sits in the field's own type, before the
+   figure, so "$10" reads as one amount. */
+.multichain-amount-currency {
+  flex: 0 0 auto;
+  margin-right: -8px;
+  font-size: var(--font-size-xl);
+  font-weight: 600;
+  line-height: 1.2;
+  color: var(--text-color);
+}
+
+.multichain-amount-currency[hidden] {
+  display: none;
+}
+
+/* The other unit's figure is also the switch to typing in it -- the figure
+   people look at to check the conversion is where they reach to change it. */
+.multichain-amount-flip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 0;
+  border: 0;
+  background: none;
+  color: var(--secondary-text-color);
+  font-family: var(--font-primary);
+  font-size: var(--font-size-xs);
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+}
+
+.multichain-amount-flip:hover:not(:disabled) {
+  color: var(--primary-color);
+}
+
+.multichain-amount-flip[hidden] {
+  display: none;
+}
+
+.multichain-amount-flip-icon {
+  width: 14px;
+  height: 14px;
+}
+
+#chatSendRecipientGroup > label {
+  margin-bottom: 8px;
+}
+
+.chat-send-recipient-line {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.chat-send-recipient-line .form-control {
+  flex: 1;
+  min-width: 0;
+}
+
+.chat-send-recipient-line .icon-button {
+  flex-shrink: 0;
+  color: var(--primary-color);
+}
+
+.chat-send-recipient-line .icon-button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.chat-send-costs {
+  display: grid;
+  row-gap: 4px;
+}
+
+.chat-send-cost {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  column-gap: 0.35em;
+  align-items: baseline;
+  text-align: start;
+  overflow-wrap: anywhere;
+}
+
+.chat-send-cost > :first-child {
+  text-align: end;
+}
+
+#chatSendReceiptToll {
+  /* Reserve room for a full-precision amount that wraps. */
+  line-height: 1.25;
+  min-block-size: 2.5em;
+  align-content: center;
+}
+
+#chatSendReceiptToll:has(#chatSendReceiptTollAmount:empty) > [aria-hidden="true"] {
+  visibility: hidden;
+}
+
+.chat-send-cost[hidden] {
+  display: none;
+}
+
+textarea.chat-send-note {
+  height: auto;
+  min-height: 56px;
+  resize: vertical;
+}
+
+.chat-send-recipient-hint {
+  margin: 8px 0 0;
+  color: var(--secondary-text-color);
+  font-size: var(--font-size-sm);
+}
+
+/* One quiet row until someone wants a note (DESIGN.md §1.7). */
+.chat-send-note-toggle {
+  align-self: flex-start;
+  padding: 8px 4px;
+  border: 0;
+  background: none;
+  color: var(--primary-color);
+  font-family: var(--font-primary);
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.chat-send-note-toggle::before {
+  content: '+ ';
+}
+
+.chat-send-note-toggle[hidden],
+.chat-send-note-label[hidden],
+.chat-send-note[hidden] {
+  display: none;
+}
+
+.chat-send-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding-top: 48px;
+  text-align: center;
+}
+
+.chat-send-empty[hidden] {
+  display: none;
+}
+
+.chat-send-empty-text {
+  margin: 0 0 16px;
+  font-size: var(--font-size-sm);
+  color: var(--secondary-text-color);
+}
+
+
+/* An option's icon in the popup that stands in for a native select. Same
+   shape as .asset-mark: the label is drawn and the image laid over it, so an
+   image that never loads still leaves something readable. */
+.popup-select__option-icon {
+  position: relative;
+  flex: 0 0 24px;
+  width: 24px;
+  height: 24px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  border-radius: 50%;
+  background: var(--mark-bg, var(--primary-color));
+  color: #fff;
+  font-family: var(--font-primary);
+  font-size: 8px;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+}
+
+.popup-select__option-icon img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border-radius: 50%;
+}
+
+.popup-select__option {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+/* The trigger shows the same mark beside the chosen value. */
+.popup-select__value {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+/* Pending transfers use the EVM wallet's asset rows. */
+.evm-payment-recovery { margin: 0 1rem 1rem; text-align: left; }
+.evm-payment-recovery h3 {
+  margin: 0 0 8px;
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-semibold);
+  color: var(--secondary-text-color);
+}
+#evmPaymentRecoveryList {
+  border: 1px solid var(--border-color);
+  border-radius: 12px;
+  overflow: hidden;
+  background: var(--background-color);
+}
+.evm-payment-pending-row + .evm-payment-pending-row { border-top: 1px solid var(--border-color); }
+.evm-payment-pending-row .asset-info { min-width: 0; overflow-wrap: anywhere; }
+.evm-payment-status { margin-top: 4px; color: var(--secondary-text-color); font-size: var(--font-size-xs); }
+.evm-payment-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+.evm-payment-actions .secondary-button { width: auto; margin: 0; padding: 6px 10px; font-size: var(--font-size-xs); }
+
+.evm-payment-transaction { margin-top: 8px; font-size: var(--font-size-xs); overflow-wrap: anywhere; }
+.evm-payment-transaction a { color: var(--primary-color); text-decoration: underline; }
+
+.message.evm-payment-bubble,
+.message.intents-payment-bubble { padding: 16px 18px 12px; border-radius: 20px; }
+.message.sent.evm-payment-bubble,
+.message.sent.intents-payment-bubble { border-bottom-right-radius: 4px; }
+.message.received.evm-payment-bubble,
+.message.received.intents-payment-bubble { border-bottom-left-radius: 4px; }
+.evm-payment-message,
+.intents-payment-receipt {
+  --payment-receipt-divider: var(--border-color);
+  --payment-receipt-secondary: var(--secondary-text-color);
+  --payment-receipt-note-background: var(--background-color);
+  width: 280px;
+  max-width: 100%;
+  min-width: 0;
+}
+.message.sent :is(.evm-payment-message, .intents-payment-receipt) {
+  --payment-receipt-divider: rgba(255, 255, 255, 0.22);
+  --payment-receipt-secondary: rgba(255, 255, 255, 0.8);
+  --payment-receipt-note-background: rgba(255, 255, 255, 0.1);
+}
+.evm-payment-label,
+.intents-payment-label { color: var(--payment-receipt-secondary); font-size: var(--chat-message-meta-font-size, var(--font-size-xs)); font-weight: var(--font-weight-medium); letter-spacing: 0.06em; text-transform: uppercase; }
+:is(.evm-payment-message, .intents-payment-receipt) .intents-payment-amount {
+  margin-top: 5px;
+  font-size: calc(var(--chat-message-font-size, var(--font-size-base)) * 1.5);
+  letter-spacing: -0.025em;
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+.evm-payment-unit,
+.intents-payment-unit { font-size: var(--chat-message-font-size, var(--font-size-base)); font-weight: var(--font-weight-medium); letter-spacing: normal; }
+:is(.evm-payment-message, .intents-payment-receipt) .intents-payment-chain { color: var(--payment-receipt-secondary); font-size: var(--chat-message-meta-font-size, var(--font-size-xs)); opacity: 1; }
+.evm-payment-note,
+.intents-payment-note-section { margin-top: 16px; padding: 12px; border-radius: 10px; background: var(--payment-receipt-note-background); }
+:is(.evm-payment-message, .intents-payment-receipt) .intents-payment-note {
+  margin-top: 5px;
+  font-size: var(--chat-message-font-size, var(--font-size-base));
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+.evm-payment-meta,
+.intents-payment-meta { border-top: 1px solid var(--payment-receipt-divider); margin-top: 16px; padding-top: 12px; }
+:is(.evm-payment-message, .intents-payment-receipt) .intents-payment-verified { margin-top: 0; font-size: var(--chat-message-meta-font-size, var(--font-size-xs)); }
+.evm-payment-footer,
+.intents-payment-footer { display: flex; justify-content: flex-end; margin-top: 8px; }
+:is(.evm-payment-message, .intents-payment-receipt) :is(.evm-payment-footer, .intents-payment-footer) .message-time { align-self: center; margin-top: 0; white-space: nowrap; }
+.evm-payment-details,
+.intents-payment-details { margin-top: 10px; cursor: default; user-select: text; }
+:is(.evm-payment-details, .intents-payment-details) summary { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 32px; list-style: none; font-size: var(--chat-message-meta-font-size, var(--font-size-xs)); cursor: pointer; }
+:is(.evm-payment-details, .intents-payment-details) summary::-webkit-details-marker { display: none; }
+:is(.evm-payment-details, .intents-payment-details) summary::after { content: ''; width: 6px; height: 6px; border-right: 1px solid currentColor; border-bottom: 1px solid currentColor; transform: rotate(45deg); margin-right: 2px; }
+:is(.evm-payment-details, .intents-payment-details)[open] summary::after { transform: rotate(225deg); }
+:is(.evm-payment-details, .intents-payment-details) dl { display: grid; gap: 10px; margin: 6px 0 0; font-size: var(--chat-message-meta-font-size, var(--font-size-xs)); }
+:is(.evm-payment-details, .intents-payment-details) dt { opacity: 0.75; }
+:is(.evm-payment-details, .intents-payment-details) dd { margin: 3px 0 0; overflow-wrap: anywhere; }
+:is(.evm-payment-details, .intents-payment-details) a { color: var(--primary-color); text-decoration: underline; text-underline-offset: 3px; }
+:is(.evm-payment-details, .intents-payment-details) code { font-family: var(--font-monospace); font-size: inherit; color: inherit; }
+@media (pointer: coarse) {
+  :is(.evm-payment-details, .intents-payment-details) summary { min-height: 44px; }
+  :is(.evm-payment-details, .intents-payment-details) a { display: block; min-height: 44px; }
 }

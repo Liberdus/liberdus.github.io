@@ -88,6 +88,13 @@
         <div class="header-icons">
           <div class="offline-indicator" id="offlineIndicator">Offline</div>
           <button class="icon-button" id="upcomingCallsBtn" style="display: none;"></button>
+          <button
+            class="icon-button"
+            id="daoNotificationsBtn"
+            title="Open DAO notifications"
+            aria-label="Open DAO notifications"
+            hidden
+          ></button>
           <button class="icon-button" id="toggleSettings"></button>
           <button class="icon-button" id="toggleMenu"></button>
         </div>
@@ -106,11 +113,9 @@
           <button id="createAccountButton" class="btn btn--primary btn--pill btn--full hidden">Create Account</button>
           <button id="openWelcomeMenu" class="btn btn--secondary btn--pill btn--full hidden">Menu</button>
         </div>
-        <div style="font-size: 0.8rem; margin-top: 10px; text-align: center">
-          Version <span id="versionDisplay"></span>
-        </div>
-        <div style="font-size: 0.8rem; margin-top: 5px; text-align: center" id="appVersionDisplay" class="hidden">
-          App Version: <span id="appVersionText"></span>
+        <div class="welcome-version" aria-label="Version information">
+          <div>Web Version: <span id="versionDisplay"></span></div>
+          <div id="appVersionDisplay" class="hidden">App Version: <span id="appVersionText"></span></div>
         </div>
         <!-- Add a unused anchor tag with nothing in it and add a class to it so can't shift and end up on another modal. Should still be displayed but will just show nothing -->
         <a class="last-item" href="#" id="welcomeScreenLastItem"> </a>
@@ -164,52 +169,75 @@
           <!-- Contact items will be inserted here -->
         </ul>
       </div>
-      <button class="floating-button" id="newChatButton">+</button>
+      <button class="floating-button" id="newChatButton" aria-label="New chat"><span class="plus-glyph" aria-hidden="true">+</span></button>
 
       <div class="app-screen" id="walletScreen">
-        <div class="wallet-balance">
-          <div class="balance-label">Total Balance</div>
-          <div class="balance-amount">
-            <span id="walletTotalBalance">-.--</span>
-            <button class="refresh-button" id="refreshBalance">↻</button>
+        <div class="wallet-heading">
+          <h2>Wallet</h2>
+          <div class="wallet-balance-status">
+            <button type="button" class="refresh-button" id="refreshBalance" aria-label="Refresh wallet balances">↻</button>
+            <time id="walletBalanceUpdated">Not updated yet</time>
           </div>
         </div>
-        <div class="wallet-actions">
-          <button class="wallet-action-button" id="openSendAssetFormModal">
-            <span class="action-icon"></span>
-            <span class="action-label">Send</span>
-          </button>
-          <button class="wallet-action-button" id="openReceiveModal">
-            <span class="action-icon"></span>
-            <span class="action-label">Receive</span>
-          </button>
-          <button class="wallet-action-button" id="openHistoryModal">
-            <span class="action-icon"></span>
-            <span class="action-label">History</span>
-          </button>
-          <div class="wallet-actions-break"></div>
-          <button class="wallet-action-button" id="openBuyButton">
-            <span class="action-icon"></span>
-            <span class="action-label">Buy</span>
-          </button>
-          <button class="wallet-action-button" id="openSellButton">
-            <span class="action-icon"></span>
-            <span class="action-label">Sell</span>
-          </button>
-          <button class="wallet-action-button" id="openFaucetBridgeButton">
-            <span class="action-icon"></span>
-            <span class="action-label">Faucet</span>
-          </button>
-        </div>
-        <div class="wallet-assets">
-          <div class="section-title">Assets</div>
+        <div class="wallet-native-balance">
           <div id="assetsList">
             <div class="empty-state">
               <div></div>
               <div>No Assets Yet</div>
               <div>Your assets will appear here</div>
             </div>
-            <!-- List of assets will be inserted here -->
+            <!-- List of native assets will be inserted here -->
+          </div>
+        </div>
+        <div class="wallet-actions" role="group" aria-label="Liberdus actions">
+          <button type="button" class="wallet-action-button" id="openReceiveModal">
+            <span class="action-icon" data-wallet-icon="receive" aria-hidden="true"></span>
+            <span class="action-label">Receive</span>
+          </button>
+          <button type="button" class="wallet-action-button" id="openSendAssetFormModal">
+            <span class="action-icon" data-wallet-icon="sent" aria-hidden="true"></span>
+            <span class="action-label">Send</span>
+          </button>
+          <button type="button" class="wallet-action-button" id="openHistoryModal">
+            <span class="action-icon" data-wallet-icon="history" aria-hidden="true"></span>
+            <span class="action-label">History</span>
+          </button>
+          <div class="wallet-actions-break"></div>
+          <button type="button" class="wallet-action-button" id="openBuyButton" aria-label="Buy LIB (opens in a new tab)">
+            <span class="action-icon" data-wallet-icon="buy" aria-hidden="true"></span>
+            <span class="action-label">Buy</span>
+          </button>
+          <button type="button" class="wallet-action-button" id="openSellButton" aria-label="Sell LIB (opens in a new tab)">
+            <span class="action-icon" data-wallet-icon="sell" aria-hidden="true"></span>
+            <span class="action-label">Sell</span>
+          </button>
+          <button type="button" class="wallet-action-button" id="openFaucetBridgeButton">
+            <span class="action-icon" data-wallet-icon="faucet" aria-hidden="true"></span>
+            <span class="action-label">Faucet</span>
+          </button>
+        </div>
+        <div class="wallet-assets">
+          <h3 class="section-title">Other assets</h3>
+          <div class="wallet-asset-groups">
+            <button type="button" class="wallet-asset-summary" id="multichainSummary">
+              <span class="wallet-asset-group-icon" aria-hidden="true"></span>
+              <span class="wallet-asset-summary-label">NEAR Assets</span>
+              <span class="wallet-value-stack">
+                <span class="wallet-asset-summary-value" id="multichainSummaryValue">$ -</span>
+                <span class="wallet-price-status wallet-price-warning" id="multichainSummaryStatus" role="status"></span>
+              </span>
+              <span class="wallet-asset-summary-chevron" aria-hidden="true"></span>
+            </button>
+            <div class="wallet-asset-summary-divider" aria-hidden="true"></div>
+            <button type="button" class="wallet-asset-summary" id="evmAssetsSummary">
+              <span class="wallet-asset-group-icon" aria-hidden="true"></span>
+              <span class="wallet-asset-summary-label">EVM Assets</span>
+              <span class="wallet-value-stack">
+                <span class="wallet-asset-summary-value" id="evmAssetsSummaryValue">$ -</span>
+                <span class="wallet-price-status wallet-price-warning" id="evmAssetsSummaryStatus" role="status"></span>
+              </span>
+              <span class="wallet-asset-summary-chevron" aria-hidden="true"></span>
+            </button>
           </div>
         </div>
       </div>
@@ -249,8 +277,8 @@
                     style="flex: 1"
                   />
                   <span class="input-append-icons">
-                    <button type="button" id="newChatUploadQRButton" class="icon-button" title="Upload QR image"></button>
-                    <button type="button" id="newChatScanQRButton" class="icon-button" title="Scan QR"></button>
+                    <button type="button" id="newChatUploadQRButton" class="icon-button qr-upload-icon" title="Upload QR image"></button>
+                    <button type="button" id="newChatScanQRButton" class="icon-button qr-scan-icon" title="Scan QR"></button>
                   </span>
                   <input type="file" id="newChatQRFileInput" accept="image/*" style="display: none" />
                 </div>
@@ -278,6 +306,8 @@
         <div class="modal-content">
           <ul class="menu-list">
             <li class="menu-item" id="openInvite" data-icon="mail">Invite</li>
+            <li class="menu-item" id="openAssets" data-icon="assets">EVM Assets</li>
+            <li class="menu-item" id="openMultichain" data-icon="multichain">NEAR Assets</li>
             <li class="menu-item" id="openFarm" data-icon="trending-up">Farm</li>
             <li class="menu-item" id="openValidator" data-icon="shield">Validator</li>
             <li class="menu-item" id="openDao" data-icon="dao" style="display: none;">DAO</li>
@@ -299,55 +329,87 @@
         <div class="modal-header">
           <button class="back-button" id="closeDaoModal"></button>
           <div class="modal-title" id="daoModalTitle">DAO</div>
-          <button class="icon-button filter-icon" id="daoFilterButton" aria-label="Filter"></button>
         </div>
         <div class="modal-content">
-          <div class="dao-toolbar">
-            <div class="dao-group-toggle" role="tablist" aria-label="Proposal group">
-              <button class="dao-group-toggle-button" id="daoGroupActiveButton" type="button">Active</button>
-              <button class="dao-group-toggle-button" id="daoGroupArchivedButton" type="button">Archived</button>
+          <div class="dao-list-pane">
+            <div class="dao-toolbar">
+              <div class="dao-filter-bar" id="daoFilterBar" aria-label="DAO navigation">
+                    <div class="dao-filter-row" role="group" aria-label="All DAO items and claims">
+                      <button class="dao-filter-chip" type="button" data-filter-key="all" aria-pressed="false">
+                        <span class="dao-filter-chip-label">All</span>
+                        <span class="dao-filter-chip-count">—</span>
+                      </button>
+                      <button class="dao-filter-chip" type="button" data-filter-key="claimable" aria-pressed="false">
+                        <span class="dao-filter-chip-label">Claim</span>
+                        <span class="dao-filter-chip-count">—</span>
+                      </button>
+                    </div>
+                <div class="dao-context-switch" role="group" aria-label="DAO section">
+                  <button type="button" data-dao-context="proposals" aria-pressed="true">Proposals</button>
+                  <button type="button" data-dao-context="projects" aria-pressed="false">Projects</button>
+                </div>
+                <div class="dao-filter-label">Filter</div>
+                <div class="dao-filter-slot">
+                  <div class="dao-context-filters" data-dao-filters="proposals">
+                    <div class="dao-filter-row" role="group" aria-label="Review filters">
+                      <button class="dao-filter-chip" type="button" data-filter-key="review" aria-pressed="false">
+                        <span class="dao-filter-chip-label">Review</span>
+                        <span class="dao-filter-chip-count">—</span>
+                      </button>
+                      <button class="dao-filter-chip" type="button" data-filter-key="withheld" aria-pressed="false">
+                        <span class="dao-filter-chip-label">Withheld</span>
+                        <span class="dao-filter-chip-count">—</span>
+                      </button>
+                    </div>
+                    <div class="dao-filter-row dao-filter-row--outcomes" role="group" aria-label="Voting and result filters">
+                      <button class="dao-filter-chip" type="button" data-filter-key="voting" aria-pressed="false">
+                        <span class="dao-filter-chip-label">Vote</span>
+                        <span class="dao-filter-chip-count">—</span>
+                      </button>
+                      <button class="dao-filter-chip" type="button" data-filter-key="rejected" aria-pressed="false">
+                        <span class="dao-filter-chip-label">Rejected</span>
+                        <span class="dao-filter-chip-count">—</span>
+                      </button>
+                      <button class="dao-filter-chip" type="button" data-filter-key="accepted" aria-pressed="false">
+                        <span class="dao-filter-chip-label">Accepted</span>
+                        <span class="dao-filter-chip-count">—</span>
+                      </button>
+                      <button class="dao-filter-chip" type="button" data-filter-key="applied" aria-pressed="false">
+                        <span class="dao-filter-chip-label">Applied</span>
+                        <span class="dao-filter-chip-count">—</span>
+                      </button>
+                    </div>
+                  </div>
+                  <div class="dao-context-filters dao-filter-inactive" data-dao-filters="projects" inert aria-hidden="true">
+                    <div class="dao-filter-row dao-filter-row--projects" role="group" aria-label="Project filters">
+                      <button class="dao-filter-chip" type="button" data-filter-key="executing" aria-pressed="false">
+                        <span class="dao-filter-chip-label">Executing</span>
+                        <span class="dao-filter-chip-count">—</span>
+                      </button>
+                      <button class="dao-filter-chip" type="button" data-filter-key="terminated" aria-pressed="false">
+                        <span class="dao-filter-chip-label">Terminated</span>
+                        <span class="dao-filter-chip-count">—</span>
+                      </button>
+                      <button class="dao-filter-chip" type="button" data-filter-key="completed" aria-pressed="false">
+                        <span class="dao-filter-chip-label">Completed</span>
+                        <span class="dao-filter-chip-count">—</span>
+                      </button>
+                    </div>
+                  </div>
+                  <div class="dao-filter-placeholder dao-filter-inactive" aria-hidden="true">Showing all proposals and projects.</div>
+                </div>
+              </div>
             </div>
+            <ul class="chat-list" id="daoProposalList">
+              <div class="empty-state" id="daoProposalEmptyState">
+                <div></div>
+                <div>No proposals found</div>
+                <div>Proposal data appears here when available</div>
+              </div>
+            </ul>
+            <button class="btn btn--secondary dao-load-more" id="daoLoadMoreButton" type="button" hidden>Load more</button>
           </div>
-          <ul class="chat-list" id="daoProposalList">
-            <div class="empty-state" id="daoProposalEmptyState">
-              <div></div>
-              <div>No proposals found</div>
-              <div>Use + to create a proposal</div>
-            </div>
-          </ul>
-          <button class="floating-button" id="daoAddProposalButton" aria-label="Add proposal">+</button>
-        </div>
-        <a class="last-item" href="#"> </a>
-      </div>
-
-      <!-- DAO Status Context Menu -->
-      <div class="message-context-menu" id="daoStatusContextMenu" style="display: none;">
-        <div class="context-menu-option" data-state-key="discussion">
-          <span class="context-menu-text" id="daoStatusOptionDiscussion">Discussion</span>
-        </div>
-        <div class="context-menu-option" data-state-key="withheld">
-          <span class="context-menu-text" id="daoStatusOptionWithheld">Withheld</span>
-        </div>
-        <div class="context-menu-option" data-state-key="voting">
-          <span class="context-menu-text" id="daoStatusOptionVoting">Voting</span>
-        </div>
-        <div class="context-menu-option" data-state-key="rejected">
-          <span class="context-menu-text" id="daoStatusOptionRejected">Rejected</span>
-        </div>
-        <div class="context-menu-option" data-state-key="accepted">
-          <span class="context-menu-text" id="daoStatusOptionAccepted">Accepted</span>
-        </div>
-        <div class="context-menu-option" data-state-key="applied">
-          <span class="context-menu-text" id="daoStatusOptionApplied">Applied</span>
-        </div>
-        <div class="context-menu-option" data-state-key="executing">
-          <span class="context-menu-text" id="daoStatusOptionExecuting">Executing</span>
-        </div>
-        <div class="context-menu-option" data-state-key="terminated">
-          <span class="context-menu-text" id="daoStatusOptionTerminated">Terminated</span>
-        </div>
-        <div class="context-menu-option" data-state-key="completed">
-          <span class="context-menu-text" id="daoStatusOptionCompleted">Completed</span>
+          <button class="floating-button" id="daoAddProposalButton" aria-label="Add proposal"><span class="plus-glyph" aria-hidden="true">+</span></button>
         </div>
         <a class="last-item" href="#"> </a>
       </div>
@@ -360,35 +422,182 @@
         </div>
         <div class="modal-content">
           <div class="form-container">
-            <form id="addProposalForm" class="form--narrow">
-              <div class="form-group">
-                <label for="addProposalTitle">Title</label>
-                <input id="addProposalTitle" class="form-control" type="text" maxlength="120" required />
+            <form id="addProposalForm" class="form--narrow dao-proposal-form" novalidate>
+              <div class="dao-form-grid">
+                <div class="form-group">
+                  <label for="addProposalEmergency">Emergency <span class="dao-form-required" aria-hidden="true">*</span></label>
+                  <select id="addProposalEmergency" class="form-control" required>
+                    <option value="false">No</option>
+                    <option value="true">Yes</option>
+                  </select>
+                  <div class="dao-form-help" id="addProposalEmergencyHelp">Emergency proposals allow only one additional option.</div>
+                </div>
+                <div class="form-group">
+                  <label for="addProposalFee">Proposal Fee</label>
+                  <input id="addProposalFee" class="form-control dao-form-current-value" type="text" value="Loading..." readonly />
+                  <div class="dao-form-help">Derived from DAO params. Emergency proposals use 0.</div>
+                </div>
               </div>
               <div class="form-group">
-                <label for="addProposalType">Type</label>
+                <label for="addProposalTitle">Title <span class="dao-form-required" aria-hidden="true">*</span></label>
+                <input id="addProposalTitle" class="form-control" type="text" maxlength="100" placeholder="Proposal title" required />
+              </div>
+              <div class="form-group">
+                <label for="addProposalDescription">Description <span class="dao-form-required" aria-hidden="true">*</span></label>
+                <textarea id="addProposalDescription" class="form-control" rows="6" maxlength="10000" placeholder="Describe the proposal" required></textarea>
+              </div>
+              <div class="form-group">
+                <label for="addProposalType">Proposal Type <span class="dao-form-required" aria-hidden="true">*</span></label>
                 <select id="addProposalType" class="form-control" required>
-                  <optgroup label="Treasury">
-                    <option value="treasury_project">Project</option>
-                    <option value="treasury_mint">Mint coins (fund projects)</option>
-                  </optgroup>
-                  <optgroup label="Parameters">
-                    <option value="params_governance">Governance</option>
-                    <option value="params_economic">Economic</option>
-                    <option value="params_protocol">Protocol</option>
-                  </optgroup>
+                  <option value="governance">Governance</option>
+                  <option value="economic">Economic</option>
+                  <option value="protocol">Protocol</option>
+                  <option value="project">Project</option>
                 </select>
+                <div class="dao-form-help" id="addProposalTypeHelp">Choose governance, economic, protocol, or Project.</div>
               </div>
-              <div id="addProposalTypeFields"></div>
-              <div class="form-group">
-                <label for="addProposalSummary">Summary</label>
-                <textarea id="addProposalSummary" class="form-control" rows="6" maxlength="2000" placeholder="Describe the proposal" required></textarea>
+              <div class="form-group dao-form-section" id="addProposalParameterEditor">
+                <div class="dao-form-label-with-help">
+                  <label>Options and Parameter Changes <span class="dao-form-required" aria-hidden="true">*</span></label>
+                  <button
+                    type="button"
+                    class="toll-info-icon dao-form-tooltip"
+                    data-icon="info"
+                    data-dao-form-help
+                    title="No change is always the first option. Choose parameters in Option 1; later options provide alternative values for the same parameters."
+                    aria-label="About proposal options"></button>
+                </div>
+                <div class="dao-form-help" id="addProposalOptionsLimitHelp">2 to 10 total options.</div>
+                <div class="dao-form-list" id="addProposalOptionsList"></div>
+                <button type="button" class="btn btn--secondary dao-form-add-button" id="addProposalOptionButton">
+                  <span class="dao-form-add-icon" aria-hidden="true"><span class="plus-glyph">+</span></span>
+                  <span>Add option</span>
+                </button>
+              </div>
+              <section class="dao-project-editor hidden" id="addProposalProjectEditor" aria-labelledby="addProposalProjectHeading">
+                <div class="dao-form-section-header">
+                  <label id="addProposalProjectHeading">Project Details</label>
+                </div>
+                <div class="dao-form-section-header">
+                  <label>Milestones <span class="dao-form-required" aria-hidden="true">*</span></label>
+                  <span class="dao-form-help" id="addProposalProjectMilestoneLimit"></span>
+                </div>
+                <div class="dao-form-list" id="addProposalProjectMilestones"></div>
+                <button type="button" class="btn btn--secondary dao-form-add-button" id="addProposalProjectAddMilestone">
+                  <span class="dao-form-add-icon" aria-hidden="true"><span class="plus-glyph">+</span></span>
+                  <span>Add milestone</span>
+                </button>
+                <div class="sr-only" id="addProposalProjectLive" aria-live="polite"></div>
+                <div class="form-group">
+                  <label for="addProposalProjectAddress">Recipient Address <span class="dao-form-required" aria-hidden="true">*</span></label>
+                  <input
+                    id="addProposalProjectAddress"
+                    class="form-control"
+                    type="text"
+                    maxlength="66"
+                    placeholder="Recipient Liberdus address"
+                    autocomplete="off"
+                    autocapitalize="none"
+                    spellcheck="false"
+                    data-dao-project-field="address"
+                    required
+                  />
+                  <div class="dao-form-help">The recipient that will be eligible for approved project payments.</div>
+                </div>
+                <div class="form-group">
+                  <label>Budget Summary</label>
+                  <div class="proposal-info-grid dao-project-budget" aria-live="polite">
+                    <div class="proposal-info-row dao-project-budget-item">
+                      <span>Base cost</span>
+                      <div class="proposal-info-value dao-project-budget-value"><span class="dao-project-budget-amount" id="addProposalProjectBaseCost">0</span><span>USD</span></div>
+                    </div>
+                    <div class="proposal-info-row dao-project-budget-item">
+                      <span>Maximum bonuses</span>
+                      <div class="proposal-info-value dao-project-budget-value"><span class="dao-project-budget-amount" id="addProposalProjectMaximumBonus">0</span><span>USD</span></div>
+                    </div>
+                    <div class="proposal-info-row dao-project-budget-item">
+                      <span>Maximum authorized</span>
+                      <div class="proposal-info-value dao-project-budget-value"><span class="dao-project-budget-amount" id="addProposalProjectMaximumBudget">0</span><span>USD</span></div>
+                    </div>
+                  </div>
+                </div>
+                <div class="form-group">
+                  <label>Proposal Options</label>
+                  <div class="proposal-option-cards dao-project-ballot" aria-label="Project ballot choices">
+                    <div class="proposal-option-section">
+                      <span class="proposal-option-label">Reject</span>
+                      <div class="proposal-option-changes">
+                        <p class="proposal-info-muted">Project is not funded.</p>
+                      </div>
+                    </div>
+                    <div class="proposal-option-section">
+                      <span class="proposal-option-label">Fund project</span>
+                      <div class="proposal-option-changes">
+                        <p class="proposal-info-muted">Approve the recipient, milestones, and maximum budget below.</p>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </section>
+              <div class="form-group dao-form-section">
+                <label>Timing</label>
+                <div class="dao-form-grid dao-form-grid--timing">
+                  <div class="form-group">
+                    <div class="dao-form-label-with-help">
+                      <label for="addProposalReviewStartTime">Review Delay (ms)</label>
+                      <button
+                        type="button"
+                        class="toll-info-icon dao-form-tooltip"
+                        data-icon="info"
+                        data-dao-form-help
+                        title="How long to wait before proposal review starts. Select a date and time, or use 0 to start immediately."
+                        aria-label="About Review Delay"
+                      ></button>
+                    </div>
+                    <button id="addProposalReviewStartTime" class="form-control dao-review-start-button" type="button" aria-haspopup="dialog" aria-controls="dateTimePickerModal">0</button>
+                    <div class="dao-form-help" id="addProposalReviewStartHelp">Delay: 0 sec</div>
+                  </div>
+                  <div class="form-group">
+                    <div class="dao-form-label-with-help">
+                      <label for="addProposalGracePeriodMs">Grace Period (ms) <span class="dao-form-required" aria-hidden="true">*</span></label>
+                      <button
+                        type="button"
+                        class="toll-info-icon dao-form-tooltip"
+                        data-icon="info"
+                        data-dao-form-help
+                        title="How long to wait after voting ends before the proposal can be applied. Cannot exceed the DAO grace duration."
+                        aria-label="About Grace Period"
+                      ></button>
+                    </div>
+                    <button id="addProposalGracePeriodMs" class="form-control dao-review-start-button" type="button" aria-haspopup="dialog" aria-controls="durationPickerModal" disabled>0</button>
+                    <div class="dao-form-help" id="addProposalGracePeriodHelp">Duration: loading maximum...</div>
+                    <div class="dao-form-help dao-form-limit hidden" id="addProposalGracePeriodLimit"></div>
+                  </div>
+                </div>
               </div>
               <div class="form-actions">
-                <button type="submit" class="btn btn--primary btn--pill btn--full">Submit</button>
                 <button type="button" id="cancelAddProposal" class="btn btn--secondary btn--pill btn--full">Cancel</button>
+                <button type="submit" class="btn btn--primary btn--pill btn--full" id="addProposalSubmitButton">Review Draft</button>
               </div>
             </form>
+          </div>
+        </div>
+        <a class="last-item" href="#"> </a>
+      </div>
+
+      <!-- Confirm Proposal Modal -->
+      <div class="modal fixed-header" id="confirmProposalModal">
+        <div class="modal-header">
+          <button class="back-button" id="closeConfirmProposalModal"></button>
+          <div class="modal-title" id="confirmProposalModalTitle">Review Proposal</div>
+        </div>
+        <div class="modal-content">
+          <div class="form-container">
+            <div class="proposal-info" id="confirmProposalContent"></div>
+            <div class="form-actions dao-confirm-actions">
+              <button type="button" id="backConfirmProposal" class="btn btn--secondary btn--pill btn--full">Back</button>
+              <button type="button" id="signConfirmProposal" class="btn btn--primary btn--pill btn--full">Sign Proposal</button>
+            </div>
           </div>
         </div>
         <a class="last-item" href="#"> </a>
@@ -398,28 +607,58 @@
       <div class="modal fixed-header" id="proposalInfoModal">
         <div class="modal-header">
           <button class="back-button" id="closeProposalInfoModal"></button>
-          <div class="modal-title">Proposal</div>
+          <div class="modal-title" id="proposalInfoModalTitle">Proposal</div>
         </div>
         <div class="modal-content">
           <div class="form-container">
-            <div style="padding: 1rem">
-              <div style="color: var(--secondary-text-color); font-size: 0.9rem; margin-bottom: 6px" id="proposalInfoNumber"></div>
-              <div style="font-weight: 600; margin-bottom: 6px" id="proposalInfoTitle"></div>
-              <div style="color: var(--secondary-text-color); font-size: 0.9rem; margin-bottom: 10px" id="proposalInfoType"></div>
-              <div style="color: var(--secondary-text-color); font-size: 0.9rem; margin-bottom: 10px" id="proposalInfoMeta"></div>
-              <div style="white-space: pre-wrap" id="proposalInfoSummary"></div>
-
-              <div id="proposalInfoFields" style="margin-top: 12px"></div>
-
-              <div id="proposalVoteSection" style="margin-top: 16px; display: none">
-                <div style="font-weight: 600; margin-bottom: 8px">Vote</div>
-                <div class="form-actions" style="gap: 10px">
-                  <button type="button" id="proposalVoteYes" class="btn btn--secondary btn--pill btn--full">Yes</button>
-                  <button type="button" id="proposalVoteNo" class="btn btn--secondary btn--pill btn--full">No</button>
-                </div>
-                <div style="color: var(--secondary-text-color); font-size: 0.9rem; margin-top: 8px" id="proposalVoteCounts"></div>
+            <div class="proposal-info" id="proposalInfoContent"></div>
+            <section class="proposal-committee-actions hidden" id="proposalCommitteeActionSection" aria-label="Committee review actions">
+              <div class="proposal-committee-actions-header">
+                <h3>Committee action</h3>
+                <p id="proposalCommitteeActionHelp"></p>
               </div>
-            </div>
+              <div class="proposal-decision-field">
+                <div class="proposal-decision-label">Review decision</div>
+                <div class="proposal-action-toggle" role="radiogroup" aria-label="Committee review decision">
+                  <button type="button" class="proposal-decision-option" id="proposalCommitteeAccept" role="radio" aria-checked="true">Accept</button>
+                  <button type="button" class="proposal-decision-option" id="proposalCommitteeWithhold" role="radio" aria-checked="false">Withhold</button>
+                </div>
+              </div>
+              <div class="proposal-withhold-fields hidden" id="proposalWithholdFields">
+                <div class="form-group">
+                  <label for="proposalWithholdReason">Withhold reason</label>
+                  <select id="proposalWithholdReason" class="form-control"></select>
+                </div>
+                <div class="form-group hidden" id="proposalWithholdCustomGroup">
+                  <label for="proposalWithholdCustomReason">Custom reason</label>
+                  <textarea id="proposalWithholdCustomReason" class="form-control" rows="4" maxlength="1000"></textarea>
+                </div>
+              </div>
+              <button type="button" class="btn btn--primary btn--pill btn--full" id="proposalCommitteeSubmit">Submit review</button>
+            </section>
+            <section class="proposal-review-result-actions hidden" id="proposalReviewResultSection" aria-label="Review result action">
+              <div class="proposal-committee-actions-header">
+                <h3>Review result</h3>
+                <p id="proposalReviewResultHelp"></p>
+              </div>
+              <button type="button" class="btn btn--primary btn--pill btn--full" id="proposalReviewResultSubmit">Finalize review result</button>
+            </section>
+            <section class="proposal-lifecycle-actions hidden" id="proposalLifecycleActionSection" aria-label="Proposal lifecycle actions"></section>
+            <section class="proposal-vote-actions hidden" id="proposalVoteActionSection" aria-label="Proposal voting actions">
+              <div class="proposal-committee-actions-header">
+                <h3>Vote preview</h3>
+                <p id="proposalVoteActionHelp"></p>
+              </div>
+              <div class="proposal-vote-options" id="proposalVoteOptions"></div>
+              <div class="proposal-vote-spend-multiple-row">
+                <label for="proposalVoteSpendMultiple">Spend multiple</label>
+                <input type="number" id="proposalVoteSpendMultiple" class="form-control" min="1" step="1" inputmode="numeric" value="1">
+                <span id="proposalVoteMinimumSpend">× minimum spend</span>
+              </div>
+              <div class="proposal-vote-preview" id="proposalVotePreview"></div>
+              <button type="button" class="btn btn--primary btn--pill btn--full" id="proposalVoteSubmit" disabled>Submit vote</button>
+            </section>
+            <div class="proposal-details" id="proposalDetailsContent"></div>
           </div>
         </div>
         <a class="last-item" href="#"> </a>
@@ -467,6 +706,13 @@
                   <div class="message received chat-settings-preview-message">
                     <div class="message-content">Hey, can you read this comfortably?</div>
                     <div class="message-time">10:32</div>
+                    <div class="message-reactions" role="group" aria-label="Reactions">
+                      <span class="message-reaction-chip">👍</span>
+                      <span class="message-reaction-chip my-reaction">❤️</span>
+                      <span class="message-reaction-chip">🎉</span>
+                      <span class="message-reaction-chip">🙌</span>
+                      <span class="message-reaction-chip">😊</span>
+                    </div>
                   </div>
                   <div class="message sent chat-settings-preview-message">
                     <div class="message-content">This is the size chats will use.</div>
@@ -601,7 +847,7 @@
               <p class="about-description">Liberdus is a decentralized messaging and wallet application.</p>
 
               <div class="about-info-section">
-                <div class="about-info-item">Version <span id="versionDisplayAbout"></span></div>
+                <div class="about-info-item">Web Version: <span id="versionDisplayAbout"></span></div>
                 <div class="about-info-item" id="appVersionAbout" style="display: none;">App Version: <span id="appVersionTextAbout"></span></div>
                 <div class="about-info-item">Network Name: <span id="networkNameAbout"></span></div>
                 <div class="about-info-item">
@@ -641,6 +887,7 @@
                 <a class="about-link" href="index.html.txt" target="_blank">index.html</a>
                 <a class="about-link" href="styles.css" target="_blank">styles.css</a>
                 <a class="about-link" href="app.js" target="_blank">app.js</a>
+                <a class="about-link" href="evm-assets.js" target="_blank">evm-assets.js</a>
                 <br>
                 <a class="about-link" href="crypto.js" target="_blank">crypto.js</a>
                 <a class="about-link" href="lib.js" target="_blank">lib.js</a>
@@ -770,68 +1017,95 @@
         </div>
         <div class="modal-content">
           <div class="form-container">
-            <form id="createAccountForm" class="form--narrow">
+            <form id="createAccountForm" class="form--narrow create-account-form">
               <div class="form-group">
                 <label for="newUsername">
                   Username
-                  <span id="newUsernameAvailable" style="color: #28a745; display: none"> available </span>
+                  <span id="newUsernameAvailable" class="create-account-status"> available </span>
                 </label>
-                <div style="position: relative">
-                  <input
-                    type="text"
-                    id="newUsername"
-                    class="form-control"
-                    placeholder="Select a username"
-                    required
-                    pattern="[a-zA-Z0-9]*"
-                    inputmode="text"
-                    maxlength="20"
-                  />
-                </div>
+                <input
+                  type="text"
+                  id="newUsername"
+                  class="form-control"
+                  placeholder="Choose a username"
+                  required
+                  pattern="[a-zA-Z0-9]*"
+                  inputmode="text"
+                  maxlength="20"
+                  autocomplete="off"
+                />
+                <p class="create-account-help">
+                  This is how people find you, and it is permanent — a name cannot be changed once it is taken.
+                </p>
               </div>
-              <div id="privateKeySection" style="display: none">
-                <div class="form-group">
-                  <label for="newPrivateKey"
-                    >Private Key <span id="newPrivateKeyError" style="color: #dc3545; display: none"></span
-                  ></label>
-                  <div style="position: relative">
-                    <input
-                      type="password"
-                      id="newPrivateKey"
-                      class="form-control"
-                      placeholder="Optional private key in hex format"
-                    />
-                    <button type="button" id="togglePrivateKeyVisibility" class="password-toggle-btn"></button>
+
+              <details class="create-account-advanced" id="advancedOptions">
+                <summary id="advancedOptionsSummary">
+                  <span>Advanced</span>
+                  <span class="create-account-chevron" aria-hidden="true"></span>
+                </summary>
+                <div class="create-account-advanced-body">
+                  <div class="create-account-option">
+                    <div class="create-account-option-copy">
+                      <div class="create-account-option-heading">
+                        <label for="togglePrivateAccount">Private account</label>
+                        <button
+                          type="button"
+                          class="toll-info-icon private-account-help"
+                          data-icon="info"
+                          id="privateAccountHelpButton"
+                          aria-label="About private accounts"
+                        ></button>
+                      </div>
+                      <label class="create-account-option-help" for="togglePrivateAccount">
+                        Can only message and pay other private accounts. Cannot be changed later.
+                      </label>
+                    </div>
+                    <label class="create-account-option-toggle" for="togglePrivateAccount">
+                      <input type="checkbox" id="togglePrivateAccount" />
+                      <span class="create-account-check" aria-hidden="true"></span>
+                    </label>
                   </div>
-                  <small>
-                    If you want to use an existing private key enter it here. Otherwise you can leave this empty to have a
-                    private key automatically generated.
-                  </small>
+
+                  <div class="create-account-option">
+                    <div class="create-account-option-copy">
+                      <label class="create-account-option-title" for="togglePrivateKeyInput">Use my own private key</label>
+                      <label class="create-account-option-help" for="togglePrivateKeyInput">
+                        Otherwise one is generated for you.
+                      </label>
+                    </div>
+                    <label class="create-account-option-toggle" for="togglePrivateKeyInput">
+                      <input type="checkbox" id="togglePrivateKeyInput" />
+                      <span class="create-account-check" aria-hidden="true"></span>
+                    </label>
+                  </div>
+
+                  <div id="privateKeySection" hidden>
+                    <label class="create-account-private-key-label" for="newPrivateKey">
+                      Private key <span id="newPrivateKeyError" class="create-account-error"></span>
+                    </label>
+                    <div class="create-account-private-key">
+                      <input
+                        type="password"
+                        id="newPrivateKey"
+                        class="form-control"
+                        placeholder="Your key, in hex"
+                        autocomplete="off"
+                      />
+                      <button
+                        type="button"
+                        id="togglePrivateKeyVisibility"
+                        class="password-toggle-btn"
+                        aria-label="Show private key"
+                        aria-pressed="false"
+                      ></button>
+                    </div>
+                  </div>
                 </div>
-              </div>
-              <div class="form-actions">
+              </details>
+
+              <div class="form-actions create-account-actions">
                 <button type="submit" class="btn btn--primary btn--pill btn--full" disabled>Create Account</button>
-              </div>
-              
-              <div class="form-group u-mt-20">
-                <input type="checkbox" id="toggleMoreOptions" />
-                <label for="toggleMoreOptions" style="display: inline; margin-left: 5px">More Options</label>
-              </div>
-              
-              <div id="moreOptionsSection" style="display: none;">
-                <div class="form-group form-group--checkbox">
-                  <input type="checkbox" id="togglePrivateAccount" />
-                  <label for="togglePrivateAccount">
-                    Make this a private account
-                    <span class="toll-info-icon private-account-help" data-icon="info" id="privateAccountHelpButton"></span>
-                  </label>
-                </div>
-                <div class="form-group form-group--checkbox">
-                  <input type="checkbox" id="togglePrivateKeyInput" />
-                  <label for="togglePrivateKeyInput">
-                    Use my own private key (Advanced)
-                  </label>
-                </div>
               </div>
             </form>
             <div class="form-group" id="migrateAccountsSection" style="display: none; margin-top: 50px; padding: 0 16px">
@@ -1320,6 +1594,489 @@
         <a class="last-item" href="#"> </a>
       </div>
 
+      <!-- Contact Info Modal -->
+      <div class="modal fixed-header" id="contactInfoModal">
+        <div class="modal-header">
+          <button class="back-button" id="closeContactInfoModal"></button>
+          <div class="modal-title">Contact Info</div>
+          <!-- Add header actions container -->
+          <div class="header-actions">
+            <button class="icon-button chat-icon" id="contactInfoChatButton" aria-label="Open chat"></button>
+            <button class="icon-button send-money-icon" id="contactInfoSendButton" aria-label="Send money"></button>
+            <button
+              class="icon-button add-friend-icon"
+              id="addFriendButtonContactInfo"
+              aria-label="Add friend"
+            ></button>
+          </div>
+        </div>
+        <div class="modal-content">
+          <div class="form-container">
+            <div class="contact-info-list">
+              <div class="contact-avatar-section">
+                <div class="avatar" id="contactInfoAvatar"></div>
+                <div class="name"></div>
+                <div class="address-container">
+                  <div id="contactInfoDisplayAddress" class="subtitle"></div>
+                  <button
+                    id="contactInfoCopyAddress"
+                    class="icon-button address-copy-button"
+                    aria-label="Copy address"
+                  ></button>
+                </div>
+              </div>
+              <!-- Template for contact info items -->
+              <template id="contactInfoItemTemplate">
+                <div class="contact-info-item">
+                  <div class="contact-info-label"></div>
+                  <div class="contact-info-value"></div>
+                </div>
+              </template>
+              <!-- Contact info fields -->
+              <div class="contact-info-item" style="display: none">
+                <div class="contact-info-label">Username</div>
+                <div class="contact-info-value" id="contactInfoUsername"></div>
+              </div>
+              <div class="contact-info-item">
+                <div class="contact-info-label">Name</div>
+                <div class="contact-info-value-container">
+                  <div class="contact-info-value" id="contactInfoName"></div>
+                  <button class="icon-button edit-icon" id="nameEditButton" aria-label="Edit name"></button>
+                </div>
+              </div>
+              <div class="contact-info-item" style="display: none">
+                <div class="contact-info-label">Provided Name</div>
+                <div class="contact-info-value" id="contactInfoProvidedName"></div>
+              </div>
+              <!-- Email and Phone fields hidden - may want to restore later
+              <div class="contact-info-item" style="display: none">
+                <div class="contact-info-label">Email</div>
+                <div class="contact-info-value">
+                  <a href="#" id="contactInfoEmail" class="contact-info-link" target="_blank" rel="noopener noreferrer"></a>
+                </div>
+              </div>
+              <div class="contact-info-item" style="display: none">
+                <div class="contact-info-label">Phone</div>
+                <div class="contact-info-value" id="contactInfoPhone"></div>
+              </div>
+              -->
+              <div class="contact-info-item" style="display: none">
+                <div class="contact-info-label">LinkedIn</div>
+                <div class="contact-info-value">
+                  <a href="#" id="contactInfoLinkedin" class="contact-info-link" target="_blank" rel="noopener noreferrer"></a>
+                </div>
+              </div>
+              <div class="contact-info-item" style="display: none">
+                <div class="contact-info-label">X-Twitter</div>
+                <div class="contact-info-value">
+                  <a href="#" id="contactInfoX" class="contact-info-link" target="_blank" rel="noopener noreferrer"></a>
+                </div>
+              </div>
+              <div class="contact-info-item">
+                <div class="contact-info-label">Notes</div>
+                <div class="contact-info-value-container">
+                  <div class="contact-info-value" id="contactInfoNotes"></div>
+                  <button class="icon-button edit-icon" id="notesEditButton" aria-label="Edit notes"></button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <a class="last-item" href="#"> </a>
+      </div>
+
+      <!-- NEAR asset screens follow Chat and Contact Info so they stack above both. -->
+      <div class="modal fixed-header" id="multichainModal">
+        <div class="modal-header">
+          <button class="back-button" id="closeMultichainModal"></button>
+          <div class="modal-title">NEAR Assets</div>
+          <button class="refresh-button" id="refreshMultichainBalance">&#8635;</button>
+        </div>
+        <div class="modal-content">
+          <section class="multichain-hero">
+            <div class="multichain-hero-label">Total balance</div>
+            <div class="multichain-hero-total" id="multichainTotalBalance">$ -</div>
+            <div class="multichain-hero-caption" id="multichainHeroCaption"></div>
+            <div class="wallet-price-status wallet-price-warning" id="multichainPriceStatus" role="status"></div>
+            <!-- Only ever a problem: a healthy screen says nothing here. -->
+            <div class="multichain-hero-warning" id="multichainStatus" role="status"></div>
+          </section>
+          <!-- Shown only when there is a zero row to hide. -->
+          <div class="multichain-list-head" id="multichainListHead" hidden>
+            <div class="multichain-section-title">Assets</div>
+            <label class="wallet-asset-switch">
+              <span>Hide empty</span>
+              <input type="checkbox" role="switch" id="multichainHideEmpty" />
+              <span class="wallet-asset-switch-track" aria-hidden="true"></span>
+            </label>
+          </div>
+          <div class="multichain-empty" id="multichainEmpty" role="status" hidden></div>
+          <div class="multichain-assets" id="multichainAssetsList"></div>
+          <button type="button" class="btn btn--secondary multichain-other-assets" id="multichainOtherAssets">Other assets</button>
+          <p class="multichain-footnote">Held for you, not on each asset’s own chain. Withdraw any time.</p>
+        </div>
+        <a class="last-item" href="#"> </a>
+      </div>
+
+      <!-- One asset: what you hold, and the things you can do with it. -->
+      <div class="modal fixed-header" id="multichainAssetModal">
+        <div class="modal-header asset-detail-header">
+          <button class="back-button" id="closeMultichainAssetModal" aria-label="Back"></button>
+          <div class="modal-title" id="multichainAssetTitle">Asset</div>
+        </div>
+        <div class="modal-content">
+          <section class="asset-detail-hero">
+            <div id="multichainAssetIcon"></div>
+            <div class="asset-detail-amount" id="multichainAssetAmount">&#8212;</div>
+            <div class="asset-detail-value" id="multichainAssetValue">&#8212;</div>
+          </section>
+
+          <div class="multichain-action-groups">
+            <section aria-labelledby="multichainExternalActionsTitle">
+              <h3 class="multichain-action-group-title" id="multichainExternalActionsTitle">Move in or out</h3>
+              <p class="multichain-action-group-description">Between NEAR Intents addresses and external wallet addresses</p>
+              <div class="wallet-actions asset-detail-actions">
+                <button type="button" class="wallet-action-button" id="multichainAssetDeposit">
+                  <span class="action-icon" data-wallet-icon="deposit" aria-hidden="true"></span>
+                  <span class="action-label">Deposit</span>
+                </button>
+                <button type="button" class="wallet-action-button" id="multichainAssetWithdraw">
+                  <span class="action-icon" data-wallet-icon="withdraw" aria-hidden="true"></span>
+                  <span class="action-label">Withdraw</span>
+                </button>
+              </div>
+            </section>
+            <section aria-labelledby="multichainIntentsActionsTitle">
+              <h3 class="multichain-action-group-title" id="multichainIntentsActionsTitle">Within NEAR Intents</h3>
+              <p class="multichain-action-group-description">Send to other NEAR Intents addresses or swap assets</p>
+              <div class="wallet-actions asset-detail-actions">
+                <button type="button" class="wallet-action-button" id="multichainAssetReceive">
+                  <span class="action-icon" data-wallet-icon="received" aria-hidden="true"></span>
+                  <span class="action-label">Receive</span>
+                </button>
+                <button type="button" class="wallet-action-button" id="multichainAssetSend">
+                  <span class="action-icon" data-wallet-icon="sent" aria-hidden="true"></span>
+                  <span class="action-label">Send</span>
+                </button>
+                <button type="button" class="wallet-action-button" id="multichainAssetSwap">
+                  <span class="action-icon" data-wallet-icon="swap" aria-hidden="true"></span>
+                  <span class="action-label">Swap</span>
+                </button>
+              </div>
+            </section>
+          </div>
+
+          <!-- What happened to this asset: deposits, payments, swaps, withdrawals. -->
+          <section class="multichain-activity" aria-labelledby="multichainAssetActivityTitle">
+            <div class="multichain-section-title" id="multichainAssetActivityTitle">Activity</div>
+            <div id="multichainAssetActivity"></div>
+          </section>
+        </div>
+        <a class="last-item" href="#"> </a>
+      </div>
+
+      <!-- A payment request for another NEAR Intents user. -->
+      <div class="modal fixed-header" id="multichainRequestModal">
+        <div class="modal-header">
+          <button class="back-button" id="closeMultichainRequestModal"></button>
+          <div class="modal-title" id="multichainRequestTitle">Receive</div>
+        </div>
+        <div class="modal-content">
+          <div class="form-container">
+            <div class="form-group">
+              <label>Your Address</label>
+              <div class="address-container">
+                <div class="form-control address-display" id="multichainRequestAddress"></div>
+                <button type="button" class="icon-button address-copy-button" id="copyMultichainRequestAddress"
+                  aria-label="Copy address"></button>
+              </div>
+            </div>
+            <div class="form-group">
+              <label>Your Username</label>
+              <div class="address-container">
+                <div class="form-control address-display" id="multichainRequestUsername"></div>
+                <button type="button" class="icon-button address-copy-button" id="copyMultichainRequestUsername"
+                  aria-label="Copy username"></button>
+              </div>
+            </div>
+            <div class="multichain-qr" id="multichainRequestQr"></div>
+            <div class="multichain-field-note" id="multichainRequestStatus" role="status" aria-live="polite"></div>
+            <div class="form-group">
+              <label for="multichainRequestAmount">Amount (Optional)</label>
+              <div class="amount-container">
+                <input type="text" inputmode="decimal" class="form-control" id="multichainRequestAmount"
+                  placeholder="Enter amount" autocomplete="off" maxlength="80" />
+                <span class="toggle-balance" id="multichainRequestSymbol"></span>
+              </div>
+            </div>
+            <div class="form-group">
+              <label for="multichainRequestMemo">Memo (Optional)</label>
+              <textarea class="form-control" id="multichainRequestMemo"
+                placeholder="Add a note for the payment" maxlength="140"></textarea>
+            </div>
+          </div>
+        </div>
+        <a class="last-item" href="#"> </a>
+      </div>
+
+      <!-- Deposit: the address is the whole screen. -->
+      <div class="modal fixed-header" id="multichainReceiveModal">
+        <div class="modal-header">
+          <button class="back-button" id="closeMultichainReceiveModal"></button>
+          <div class="modal-title" id="multichainReceiveTitle">Deposit</div>
+        </div>
+        <div class="modal-content">
+          <div class="multichain-screen" id="multichainReceiveBody"></div>
+        </div>
+        <a class="last-item" href="#"> </a>
+      </div>
+
+      <div class="modal fixed-header" id="multichainWithdrawModal">
+        <div class="modal-header">
+          <button class="back-button" id="closeMultichainWithdrawModal"></button>
+          <div class="modal-title" id="multichainWithdrawTitle">Withdraw</div>
+        </div>
+        <div class="modal-content">
+          <div class="multichain-screen multichain-swap">
+            <!-- Where: the network, when there is a choice, and the address on
+                 it. One question, so one panel. -->
+            <section class="multichain-swap-leg">
+              <label class="multichain-swap-label" for="multichainWithdrawTo">To</label>
+              <div class="multichain-network-chips" id="multichainWithdrawNetworks" role="radiogroup"
+                aria-label="Network" hidden></div>
+              <!-- A textarea so a long address wraps: head and tail are what
+                   people check, and a single line cuts the tail off. -->
+              <textarea class="multichain-address-input" id="multichainWithdrawTo" rows="1" autocomplete="off"
+                autocapitalize="off" autocorrect="off" spellcheck="false"></textarea>
+              <div class="multichain-recent" id="multichainWithdrawRecent"></div>
+              <div class="multichain-field-note" id="multichainWithdrawToNote"></div>
+            </section>
+
+            <section class="multichain-swap-leg">
+              <label class="multichain-swap-label" for="multichainWithdrawAmount">Amount</label>
+              <div class="multichain-swap-line">
+                <span class="multichain-amount-currency" id="multichainWithdrawCurrency" hidden>$</span>
+                <input class="multichain-swap-amount" id="multichainWithdrawAmount" type="text" inputmode="decimal"
+                  autocomplete="off" spellcheck="false" placeholder="0" />
+                <span class="multichain-token-chip" id="multichainWithdrawToken"></span>
+              </div>
+              <div class="multichain-swap-meta">
+                <!-- The other unit, and the way to type in it instead. -->
+                <button type="button" class="multichain-amount-flip" id="multichainWithdrawFlip" hidden></button>
+                <span class="multichain-swap-balance">
+                  <span id="multichainWithdrawAvailable"></span>
+                  <button type="button" class="multichain-max" id="multichainWithdrawMax">Max</button>
+                </span>
+              </div>
+            </section>
+
+            <section class="multichain-swap-leg">
+              <div class="multichain-swap-label">Arrives (estimated)</div>
+              <div class="multichain-swap-line">
+                <div class="multichain-swap-amount is-output is-empty" id="multichainWithdrawOut">0</div>
+                <span class="multichain-token-chip" id="multichainWithdrawOutToken"></span>
+              </div>
+              <div class="multichain-swap-meta">
+                <span id="multichainWithdrawOutUsd"></span>
+                <span id="multichainWithdrawOutChain"></span>
+              </div>
+            </section>
+
+            <div class="multichain-swap-floor" id="multichainWithdrawFee"></div>
+            <button class="btn btn--primary btn--pill btn--full" id="multichainWithdrawPreview" disabled>Review withdrawal</button>
+            <div class="multichain-status" id="multichainWithdrawStatus" hidden></div>
+          </div>
+        </div>
+        <a class="last-item" href="#"> </a>
+      </div>
+
+      <!-- Swap: what you pay and what you get, with the estimate live as you
+           type. The asset you pay with is the one this screen was opened from;
+           the one you get is chosen on the picker below. -->
+      <div class="modal fixed-header" id="multichainSwapModal">
+        <div class="modal-header">
+          <button class="back-button" id="closeMultichainSwapModal"></button>
+          <div class="modal-title" id="multichainSwapTitle">Swap</div>
+        </div>
+        <div class="modal-content">
+          <div class="multichain-screen multichain-swap">
+            <section class="multichain-swap-leg">
+              <label class="multichain-swap-label" for="multichainSwapAmount">You pay</label>
+              <div class="multichain-swap-line">
+                <span class="multichain-amount-currency" id="multichainSwapCurrency" hidden>$</span>
+                <input class="multichain-swap-amount" id="multichainSwapAmount" type="text" inputmode="decimal"
+                  autocomplete="off" spellcheck="false" placeholder="0" />
+                <span class="multichain-token-chip" id="multichainSwapFrom"></span>
+              </div>
+              <div class="multichain-swap-meta">
+                <!-- The other unit, and the way to type in it instead. -->
+                <button type="button" class="multichain-amount-flip" id="multichainSwapFlip" hidden></button>
+                <span class="multichain-swap-balance">
+                  <span id="multichainSwapAvailable"></span>
+                  <button type="button" class="multichain-max" id="multichainSwapMax">Max</button>
+                </span>
+              </div>
+            </section>
+
+            <section class="multichain-swap-leg">
+              <div class="multichain-swap-label">You get (estimated)</div>
+              <div class="multichain-swap-line">
+                <div class="multichain-swap-amount is-output" id="multichainSwapOut">0</div>
+                <button type="button" class="multichain-token-chip is-picker" id="multichainSwapTo"></button>
+              </div>
+              <div class="multichain-swap-meta">
+                <span id="multichainSwapOutUsd"></span>
+                <span id="multichainSwapToChain"></span>
+              </div>
+            </section>
+
+            <div class="multichain-swap-floor" id="multichainSwapFloor"></div>
+            <button class="btn btn--primary btn--pill btn--full" id="multichainSwapPreview" disabled>Review swap</button>
+            <div class="multichain-status" id="multichainSwapStatus" hidden></div>
+          </div>
+        </div>
+        <a class="last-item" href="#"> </a>
+      </div>
+
+      <!-- Send from the wallet by username or address, or to the current chat recipient. -->
+      <div class="modal fixed-header" id="nearIntentsSendModal">
+        <div class="modal-header">
+          <button class="back-button" id="closeNearIntentsSendModal"></button>
+          <div class="modal-title" id="chatSendTitle">Send</div>
+        </div>
+        <div class="modal-content">
+          <div class="multichain-screen multichain-swap" id="chatSendForm">
+            <section id="chatSendRecipientGroup" hidden>
+              <label class="multichain-swap-label" for="chatSendRecipient">Recipient</label>
+              <div class="contact-autocomplete-field">
+                <div class="chat-send-recipient-line">
+                  <input type="text" id="chatSendRecipient" class="form-control" placeholder="Username or address"
+                    autocomplete="off" autocapitalize="off" spellcheck="false" aria-describedby="chatSendRecipientFeedback" />
+                  <button type="button" id="chatSendUploadQR" class="icon-button qr-upload-icon" title="Upload QR Code" aria-label="Upload QR Code"></button>
+                  <button type="button" id="chatSendScanQR" class="icon-button qr-scan-icon" title="Scan QR Code" aria-label="Scan QR Code"></button>
+                  <input type="file" id="chatSendQRFile" accept="image/*" hidden />
+                </div>
+                <div id="chatSendRecipientSuggestions" class="contact-autocomplete-list" aria-label="Saved contacts" hidden></div>
+              </div>
+              <div id="chatSendRecipientFeedback">
+                <p class="chat-send-recipient-hint" id="chatSendRecipientHint" hidden>
+                  Send to a username to include an optional note. Username sends include a Liberdus Intents payment message.
+                </p>
+                <div class="multichain-status" id="chatSendRecipientStatus" role="status" hidden></div>
+              </div>
+            </section>
+
+            <section class="multichain-swap-leg">
+              <label class="multichain-swap-label" for="chatSendAmount">You send</label>
+              <div class="multichain-swap-line">
+                <span class="multichain-amount-currency" id="chatSendCurrency" hidden>$</span>
+                <input class="multichain-swap-amount" id="chatSendAmount" type="text" inputmode="decimal"
+                  autocomplete="off" spellcheck="false" placeholder="0" />
+                <span class="multichain-token-chip" id="chatSendAssetLabel" hidden></span>
+                <button type="button" class="multichain-token-chip is-picker" id="chatSendAsset" hidden></button>
+              </div>
+              <div class="multichain-swap-meta">
+                <!-- The other unit, and the way to type in it instead. -->
+                <button type="button" class="multichain-amount-flip" id="chatSendFlip" hidden></button>
+                <span class="multichain-swap-balance">
+                  <span id="chatSendAvailable"></span>
+                  <button type="button" class="multichain-max" id="chatSendMax">Max</button>
+                </span>
+              </div>
+            </section>
+
+            <button type="button" class="chat-send-note-toggle" id="chatSendNoteToggle">Add a note</button>
+            <label class="multichain-swap-label chat-send-note-label" id="chatSendNoteLabel" for="chatSendNote" hidden>Note (optional)</label>
+            <textarea class="form-control chat-send-note" id="chatSendNote" rows="2" maxlength="140"
+              autocomplete="off" aria-labelledby="chatSendNoteLabel" placeholder="What is it for?" hidden></textarea>
+
+            <button class="btn btn--primary btn--pill btn--full" id="chatSendButton" disabled>Review payment</button>
+            <div class="multichain-quote-note chat-send-costs">
+              <div class="chat-send-cost" id="chatSendReceiptToll" role="status" hidden>
+                <span>Chat message toll</span>
+                <span aria-hidden="true">·</span>
+                <span id="chatSendReceiptTollAmount"></span>
+              </div>
+              <div class="chat-send-cost">
+                <span>Asset transfer</span>
+                <span aria-hidden="true">·</span>
+                <span>No network fee</span>
+              </div>
+            </div>
+            <div class="multichain-status" id="chatSendStatus" hidden></div>
+          </div>
+
+          <!-- Nothing to send: the way to fix that, in place. -->
+          <div class="multichain-screen chat-send-empty" id="chatSendEmpty" hidden>
+            <div class="multichain-deposit-minimum">Nothing to send yet</div>
+            <p class="chat-send-empty-text">Deposit crypto into your multichain wallet, then send it from here.</p>
+            <button class="btn btn--primary btn--pill btn--full" id="chatSendReceive">Deposit</button>
+          </div>
+        </div>
+        <a class="last-item" href="#"> </a>
+      </div>
+
+      <!-- Choosing a token: search, what you hold, the popular coins, then everything else. -->
+      <div class="modal fixed-header" id="multichainTokenPickerModal">
+        <div class="modal-header">
+          <button class="back-button" id="closeMultichainTokenPickerModal"></button>
+          <div class="modal-title" id="multichainTokenPickerTitle">Choose a token</div>
+        </div>
+        <div class="search-bar multichain-picker-search">
+          <span class="search-icon"></span>
+          <input type="search" id="multichainTokenSearch" class="search-input" placeholder="Search by name or network"
+            autocomplete="off" autocapitalize="off" spellcheck="false" enterkeyhint="search" />
+        </div>
+        <div class="modal-content multichain-picker-results" id="multichainTokenResults"></div>
+        <a class="last-item" href="#"> </a>
+      </div>
+
+      <div class="modal fixed-header" id="multichainConfirmModal">
+        <div class="modal-header">
+          <button class="back-button" id="closeMultichainConfirmModal"></button>
+          <div class="modal-title" id="multichainConfirmTitle">Confirm</div>
+        </div>
+        <div class="modal-content">
+          <div class="multichain-screen">
+            <div class="multichain-confirm-hero" id="multichainConfirmHero"></div>
+            <dl class="multichain-quote-rows" id="multichainConfirmRows"></dl>
+            <button class="btn btn--primary btn--pill btn--full" id="multichainConfirmAction">Confirm</button>
+            <div class="multichain-quote-note" id="multichainConfirmNote"></div>
+            <div class="multichain-status" id="multichainConfirmStatus" hidden></div>
+          </div>
+        </div>
+        <a class="last-item" href="#"> </a>
+      </div>
+
+      <!-- Image and Video Modal -->
+      <div class="modal full-image-modal" id="fullImageModal" role="dialog" aria-modal="true" aria-labelledby="fullImageModalTitle">
+        <div class="modal-header">
+          <button class="back-button" id="closeFullImageModal" type="button" aria-label="Close media"></button>
+          <div class="modal-title" id="fullImageModalTitle">Media</div>
+          <button class="full-image-rotate-button" id="fullImageRotate" type="button" aria-label="Rotate clockwise" title="Rotate clockwise" hidden>
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M20 4v5h-5M20 9a8 8 0 1 0 0 6" />
+            </svg>
+          </button>
+        </div>
+        <div class="modal-content full-image-modal-content">
+          <div class="full-image-viewer" id="fullImageViewer" aria-busy="false">
+            <div class="full-image-loading" id="fullImageLoading" role="status" hidden>
+              <div class="spinner" aria-hidden="true"></div>
+              <span id="fullImageLoadingText">Loading image...</span>
+            </div>
+            <div class="full-image-error" id="fullImageError" role="status" hidden></div>
+            <img class="full-image-viewer-image" id="fullImageViewerImage" alt="" draggable="false" hidden>
+            <video class="full-image-viewer-video" id="fullImageViewerVideo" controls playsinline preload="auto" hidden></video>
+            <div class="full-image-zoom-controls" id="fullImageZoomControls" role="group" aria-label="Image zoom controls" hidden>
+              <button class="full-image-zoom-button" id="fullImageZoomOut" type="button" aria-label="Zoom out">−</button>
+              <button class="full-image-zoom-button" id="fullImageZoomIn" type="button" aria-label="Zoom in">+</button>
+            </div>
+          </div>
+        </div>
+        <a class="last-item" href="#"> </a>
+      </div>
+
       <!-- Call Schedule Choice Modal -->
       <div class="modal modal-dialog" id="callScheduleChoiceModal">
         <div class="dialog-box-content">
@@ -1344,35 +2101,74 @@
         <a class="last-item" href="#"></a>
       </div>
 
-      <!-- Call Schedule Date Modal -->
-      <div class="modal modal-dialog" id="callScheduleDateModal">
+      <!-- Shared Date and Time Picker Modal -->
+      <div class="modal modal-dialog" id="dateTimePickerModal">
         <div class="dialog-box-content">
           <div class="modal-header">
-            <button class="back-button" id="closeCallScheduleDateModal"></button>
-            <div class="modal-title">Schedule Call</div>
-            <div class="current-time" id="callScheduleCurrentTime" aria-label="Current time"></div>
+            <button class="back-button" id="closeDateTimePickerModal"></button>
+            <div class="modal-title" id="dateTimePickerModalTitle">Select Date and Time</div>
+            <div class="current-time" id="dateTimePickerCurrentTime" aria-label="Current time"></div>
           </div>
           <div class="modal-content">
             <div class="form-container call-invite-modal-container">
-              <form id="callScheduleDateForm" class="form--narrow">
+              <form id="dateTimePickerForm" class="form--narrow">
                 <div class="form-group">
-                  <label for="callScheduleDate">Select date and time</label>
-                  <div class="call-schedule-form-row">
-                    <input id="callScheduleDate" type="date" class="form-control call-schedule-date-input" />
+                  <label for="dateTimePickerDate">Select date and time</label>
+                  <div class="picker-row">
+                    <input id="dateTimePickerDate" type="date" class="form-control date-time-picker-date-input" />
                   </div>
-                  <div class="call-schedule-form-row">
-                    <select id="callScheduleHour" class="form-control call-schedule-time-select"></select>
-                    <select id="callScheduleMinute" class="form-control call-schedule-time-select"></select>
-                    <select id="callScheduleAmPm" class="form-control call-schedule-time-select">
+                  <div class="picker-row">
+                    <select id="dateTimePickerHour" class="form-control picker-select" aria-label="Hour"></select>
+                    <select id="dateTimePickerMinute" class="form-control picker-select" aria-label="Minute"></select>
+                    <select id="dateTimePickerAmPm" class="form-control picker-select" aria-label="AM or PM">
                       <option value="AM">AM</option>
                       <option value="PM">PM</option>
                     </select>
                   </div>
                 </div>
                 <div class="form-actions">
-                  <div class="contact-time" id="callScheduleConvertedTime" aria-label="Recipient time"></div>
-                  <button type="submit" id="confirmCallSchedule" class="btn btn--primary btn--pill btn--full">Submit</button>
-                  <button type="button" id="cancelCallScheduleDate" class="btn btn--secondary btn--pill btn--full">Cancel</button>
+                  <div class="contact-time picker-preview" id="dateTimePickerPreview" aria-label="Selected time"></div>
+                  <button type="submit" id="confirmDateTimePicker" class="btn btn--primary btn--pill btn--full">Submit</button>
+                  <button type="button" id="clearDateTimePicker" class="btn btn--primary btn--pill btn--full hidden">No delay: 0 ms</button>
+                  <button type="button" id="cancelDateTimePicker" class="btn btn--secondary btn--pill btn--full">Cancel</button>
+                </div>
+              </form>
+            </div>
+          </div>
+        </div>
+        <a class="last-item" href="#"></a>
+      </div>
+
+      <!-- Shared Duration Picker Modal -->
+      <div class="modal modal-dialog" id="durationPickerModal">
+        <div class="dialog-box-content">
+          <div class="modal-header">
+            <button class="back-button" id="closeDurationPickerModal"></button>
+            <div class="modal-title" id="durationPickerModalTitle">Select Duration</div>
+          </div>
+          <div class="modal-content">
+            <div class="form-container call-invite-modal-container">
+              <form id="durationPickerForm" class="form--narrow">
+                <div class="form-group">
+                  <div class="picker-row">
+                    <div class="picker-field">
+                      <label for="durationPickerDays">Days</label>
+                      <select id="durationPickerDays" class="form-control picker-select"></select>
+                    </div>
+                    <div class="picker-field">
+                      <label for="durationPickerHours">Hours</label>
+                      <select id="durationPickerHours" class="form-control picker-select"></select>
+                    </div>
+                    <div class="picker-field">
+                      <label for="durationPickerMinutes">Minutes</label>
+                      <select id="durationPickerMinutes" class="form-control picker-select"></select>
+                    </div>
+                  </div>
+                </div>
+                <div class="form-actions">
+                  <div class="contact-time picker-preview" id="durationPickerPreview" aria-live="polite"></div>
+                  <button type="submit" id="confirmDurationPicker" class="btn btn--primary btn--pill btn--full">Submit</button>
+                  <button type="button" id="cancelDurationPicker" class="btn btn--secondary btn--pill btn--full">Cancel</button>
                 </div>
               </form>
             </div>
@@ -1456,7 +2252,7 @@
           <button class="message-context-reaction-button" type="button" data-emoji="😂" data-default-emoji="😂" data-default-aria-label="React with tears of joy" aria-label="React with tears of joy">😂</button>
           <button class="message-context-reaction-button" type="button" data-emoji="😮" data-default-emoji="😮" data-default-aria-label="React with surprised face" aria-label="React with surprised face">😮</button>
           <button class="message-context-reaction-button" type="button" data-emoji="👎" data-default-emoji="👎" data-default-aria-label="React with thumbs down" aria-label="React with thumbs down">👎</button>
-          <button class="message-context-reaction-button message-context-reaction-button-more" type="button" data-reaction-picker-trigger="true" aria-label="Add reaction">+</button>
+          <button class="message-context-reaction-button message-context-reaction-button-more" type="button" data-reaction-picker-trigger="true" aria-label="Add reaction"><span class="plus-glyph" aria-hidden="true">+</span></button>
         </div>
         <!-- Voice message specific action: Save -->
         <div class="context-menu-option" data-action="save" data-icon="download" style="display: none;">
@@ -1470,6 +2266,16 @@
         <div class="context-menu-option" data-action="copy" data-icon="copy">
           <span class="context-menu-icon"></span>
           <span class="context-menu-text">Copy</span>
+        </div>
+        <div class="context-menu-option" data-action="wallet" data-icon="wallet" style="display: none;">
+          <span class="context-menu-icon"></span>
+          <span class="context-menu-text">Wallet</span>
+        </div>
+        <div class="context-menu-option" data-action="evm-check" data-icon="retry" style="display: none;">
+          <span class="context-menu-icon"></span><span class="context-menu-text">Check again</span>
+        </div>
+        <div class="context-menu-option" data-action="evm-review" data-icon="retry" style="display: none;">
+          <span class="context-menu-icon"></span><span class="context-menu-text">Retry transfer</span>
         </div>
         <!-- Edit own message option (shown only within allowed time window) -->
         <div class="context-menu-option" data-action="edit" data-icon="edit" style="display: none;">
@@ -1510,15 +2316,15 @@
           <button class="message-context-reaction-button" type="button" data-emoji="😂" data-default-emoji="😂" data-default-aria-label="React with tears of joy" aria-label="React with tears of joy">😂</button>
           <button class="message-context-reaction-button" type="button" data-emoji="😮" data-default-emoji="😮" data-default-aria-label="React with surprised face" aria-label="React with surprised face">😮</button>
           <button class="message-context-reaction-button" type="button" data-emoji="👎" data-default-emoji="👎" data-default-aria-label="React with thumbs down" aria-label="React with thumbs down">👎</button>
-          <button class="message-context-reaction-button message-context-reaction-button-more" type="button" data-reaction-picker-trigger="true" aria-label="Add reaction">+</button>
+          <button class="message-context-reaction-button message-context-reaction-button-more" type="button" data-reaction-picker-trigger="true" aria-label="Add reaction"><span class="plus-glyph" aria-hidden="true">+</span></button>
         </div>
         <div class="context-menu-option" data-action="import-contacts" data-icon="contacts" style="display: none;">
           <span class="context-menu-icon"></span>
           <span class="context-menu-text">Import Contacts</span>
         </div>
-        <div class="context-menu-option" data-action="preview" data-icon="eye" style="display: none;">
+        <div class="context-menu-option" data-action="open" data-icon="eye" style="display: none;">
           <span class="context-menu-icon"></span>
-          <span class="context-menu-text">Preview</span>
+          <span class="context-menu-text">Open</span>
         </div>
         <div class="context-menu-option" data-action="save" data-icon="download">
           <span class="context-menu-icon"></span>
@@ -1575,6 +2381,8 @@
         </div>
         <a class="last-item" href="#"> </a>
       </div>
+
+
 
       <!-- Camera Capture Modal -->
       <div class="camera-capture-overlay" id="cameraCaptureOverlay" style="display: none;" role="dialog" aria-modal="true" aria-label="Camera" tabindex="-1">
@@ -1750,6 +2558,12 @@
 
       <!-- Failed Message Context Menu -->
       <div class="failed-message-context-menu" id="failedMessageContextMenu" style="display: none;">
+        <div class="context-menu-option" data-action="evm-review" data-icon="retry" style="display: none;">
+          <span class="context-menu-icon"></span><span class="context-menu-text">Retry transfer</span>
+        </div>
+        <div class="context-menu-option" data-action="evm-check" data-icon="retry" style="display: none;">
+          <span class="context-menu-icon"></span><span class="context-menu-text">Check again</span>
+        </div>
         <div class="context-menu-option" data-action="retry" data-icon="retry">
           <span class="context-menu-icon"></span>
           <span class="context-menu-text">Retry</span>
@@ -1761,95 +2575,27 @@
         <a class="last-item" href="#"> </a>
       </div>
       
-      <!-- Contact Info Modal -->
-      <div class="modal fixed-header" id="contactInfoModal">
-        <div class="modal-header">
-          <button class="back-button" id="closeContactInfoModal"></button>
-          <div class="modal-title">Contact Info</div>
-          <!-- Add header actions container -->
-          <div class="header-actions">
-            <button class="icon-button chat-icon" id="contactInfoChatButton" aria-label="Open chat"></button>
-            <button class="icon-button send-money-icon" id="contactInfoSendButton" aria-label="Send money"></button>
-            <button
-              class="icon-button add-friend-icon"
-              id="addFriendButtonContactInfo"
-              aria-label="Add friend"
-            ></button>
+      <!-- Pay Choice Modal -->
+      <div class="modal modal-dialog" id="payChoiceModal" role="dialog" aria-modal="true" aria-labelledby="payChoiceTitle" aria-describedby="payChoiceRecipient">
+        <div class="dialog-box-content">
+          <div class="modal-header">
+            <button type="button" class="back-button" id="closePayChoiceModal" aria-label="Back"></button>
+            <div class="modal-title" id="payChoiceTitle">Pay</div>
           </div>
-        </div>
-        <div class="modal-content">
-          <div class="form-container">
-            <div class="contact-info-list">
-              <div class="contact-avatar-section">
-                <div class="avatar" id="contactInfoAvatar"></div>
-                <div class="name"></div>
-                <div class="address-container">
-                  <div id="contactInfoDisplayAddress" class="subtitle"></div>
-                  <button
-                    id="contactInfoCopyAddress"
-                    class="icon-button address-copy-button"
-                    aria-label="Copy address"
-                  ></button>
-                </div>
-              </div>
-              <!-- Template for contact info items -->
-              <template id="contactInfoItemTemplate">
-                <div class="contact-info-item">
-                  <div class="contact-info-label"></div>
-                  <div class="contact-info-value"></div>
-                </div>
-              </template>
-              <!-- Contact info fields -->
-              <div class="contact-info-item" style="display: none">
-                <div class="contact-info-label">Username</div>
-                <div class="contact-info-value" id="contactInfoUsername"></div>
-              </div>
-              <div class="contact-info-item">
-                <div class="contact-info-label">Name</div>
-                <div class="contact-info-value-container">
-                  <div class="contact-info-value" id="contactInfoName"></div>
-                  <button class="icon-button edit-icon" id="nameEditButton" aria-label="Edit name"></button>
-                </div>
-              </div>
-              <div class="contact-info-item" style="display: none">
-                <div class="contact-info-label">Provided Name</div>
-                <div class="contact-info-value" id="contactInfoProvidedName"></div>
-              </div>
-              <!-- Email and Phone fields hidden - may want to restore later
-              <div class="contact-info-item" style="display: none">
-                <div class="contact-info-label">Email</div>
-                <div class="contact-info-value">
-                  <a href="#" id="contactInfoEmail" class="contact-info-link" target="_blank" rel="noopener noreferrer"></a>
-                </div>
-              </div>
-              <div class="contact-info-item" style="display: none">
-                <div class="contact-info-label">Phone</div>
-                <div class="contact-info-value" id="contactInfoPhone"></div>
-              </div>
-              -->
-              <div class="contact-info-item" style="display: none">
-                <div class="contact-info-label">LinkedIn</div>
-                <div class="contact-info-value">
-                  <a href="#" id="contactInfoLinkedin" class="contact-info-link" target="_blank" rel="noopener noreferrer"></a>
-                </div>
-              </div>
-              <div class="contact-info-item" style="display: none">
-                <div class="contact-info-label">X-Twitter</div>
-                <div class="contact-info-value">
-                  <a href="#" id="contactInfoX" class="contact-info-link" target="_blank" rel="noopener noreferrer"></a>
-                </div>
-              </div>
-              <div class="contact-info-item">
-                <div class="contact-info-label">Notes</div>
-                <div class="contact-info-value-container">
-                  <div class="contact-info-value" id="contactInfoNotes"></div>
-                  <button class="icon-button edit-icon" id="notesEditButton" aria-label="Edit notes"></button>
+          <div class="modal-content">
+            <div class="form-container">
+              <p class="modal-summary" id="payChoiceRecipient"></p>
+              <div class="form--narrow">
+                <div class="form-actions">
+                  <button type="button" id="payChoiceLibBtn" class="btn btn--primary btn--pill btn--full">LIB</button>
+                  <button type="button" id="payChoiceEvmBtn" class="btn btn--primary btn--pill btn--full">EVM Assets</button>
+                  <button type="button" id="payChoiceNearBtn" class="btn btn--primary btn--pill btn--full">NEAR Assets</button>
+                  <button type="button" id="cancelPayChoice" class="btn btn--secondary btn--pill btn--full">Cancel</button>
                 </div>
               </div>
             </div>
           </div>
         </div>
-        <a class="last-item" href="#"> </a>
       </div>
 
       <!-- Friend Modal -->
@@ -1860,6 +2606,13 @@
         </div>
         <div class="modal-content">
           <form id="friendForm" class="form--narrow">
+            <p
+              id="friendStatusRefreshMessage"
+              class="friend-status-refresh-message"
+              role="status"
+              aria-live="polite"
+              hidden
+            ></p>
             <div class="radio-group">
               <label class="radio-option status-2">
                 <input type="radio" name="friendStatus" value="2" checked />
@@ -1895,7 +2648,7 @@
       <div class="modal fixed-header" id="receiveModal">
         <div class="modal-header">
           <button class="back-button" id="closeReceiveModal"></button>
-          <div class="modal-title">Receive</div>
+          <div class="modal-title">Receive LIB</div>
         </div>
         <div class="modal-content">
           <div class="form-container">
@@ -1919,13 +2672,6 @@
               </div>
             </div>
 
-            <!-- Payment Request Options (New) -->
-            <div class="form-group">
-              <label for="receiveAsset">Asset</label>
-              <select id="receiveAsset" class="form-control">
-                <!-- Will be populated with assets in JavaScript -->
-              </select>
-            </div>
             <div class="form-group">
               <label for="receiveAmount">Amount (Optional)</label>
               <div class="amount-container">
@@ -1943,13 +2689,157 @@
                 </button>
               </div>
             </div>
-            <div class="form-group">
+            <div class="form-group" id="receiveMemoGroup">
               <label for="receiveMemo">Memo (Optional)</label>
               <textarea
                 id="receiveMemo"
                 class="form-control"
                 placeholder="Add a note for the payment"
                 maxlength="300"
+              ></textarea>
+            </div>
+          </div>
+        </div>
+        <a class="last-item" href="#"> </a>
+      </div>
+
+      <!-- EVM asset list and details follow Chat and Contact Info so they stack above both. -->
+      <div class="modal fixed-header" id="assetsModal">
+        <div class="modal-header">
+          <button class="back-button" id="closeAssetsModal"></button>
+          <div class="modal-title">EVM Assets</div>
+        </div>
+        <div class="modal-content assets-modal-content">
+          <div class="wallet-balance">
+            <div class="balance-label">Total Balance</div>
+            <div class="balance-amount">
+              <span id="assetsTotalBalance">$ -</span>
+              <button class="refresh-button" id="refreshAssetsBalance">↻</button>
+            </div>
+            <div class="wallet-price-status wallet-price-warning" id="assetsPriceStatus" role="status"></div>
+          </div>
+          <section id="evmPaymentRecovery" class="evm-payment-recovery" hidden>
+            <h3>Transfers needing attention</h3>
+            <div id="evmPaymentRecoveryList" aria-live="polite"></div>
+          </section>
+          <div class="wallet-assets assets-portfolio">
+            <div class="wallet-network-panel">
+              <div class="wallet-network-heading">
+                <label for="assetsNetwork">Network</label>
+                <span id="assetsConnectionSummary" class="wallet-connection-summary" hidden>Connecting wallet networks…</span>
+              </div>
+              <select id="assetsNetwork" class="form-control wallet-network-select">
+                <option value="all">All connected networks</option>
+                <option value="ethereum">Ethereum (ETH)</option>
+                <option value="bsc">BNB Smart Chain (BSC)</option>
+                <option value="polygon">Polygon (POL)</option>
+              </select>
+            </div>
+            <div class="assets-list-controls">
+              <label class="wallet-asset-switch">
+                <span>Show all</span>
+                <input type="checkbox" role="switch" id="assetsShowAll" aria-controls="connectedAssetsList" />
+                <span class="wallet-asset-switch-track" aria-hidden="true"></span>
+              </label>
+            </div>
+            <div id="connectedAssetsList">
+              <div class="empty-state">
+                <div></div>
+                <div>No EVM Assets Yet</div>
+                <div>Connected assets will appear here</div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <a class="last-item" href="#"> </a>
+      </div>
+
+      <!-- Connected EVM Asset Details Modal -->
+      <div class="modal fixed-header" id="assetDetailsModal">
+        <div class="modal-header asset-detail-header">
+          <button class="back-button" id="closeAssetDetailsModal" aria-label="Back"></button>
+          <div class="modal-title" id="assetDetailsModalTitle">Asset Details</div>
+        </div>
+        <div class="modal-content asset-details-content">
+          <section class="asset-detail-hero">
+            <div class="asset-detail-logo" id="assetDetailsLogo" aria-hidden="true"></div>
+            <div class="asset-detail-amount" id="assetDetailsAmount">—</div>
+            <div class="asset-detail-value" id="assetDetailsValue">Value unavailable</div>
+          </section>
+
+          <div class="wallet-actions asset-detail-actions">
+            <button class="wallet-action-button" id="assetDetailsReceive">
+              <span class="action-icon" data-wallet-icon="receive" aria-hidden="true"></span>
+              <span class="action-label">Receive</span>
+            </button>
+            <button class="wallet-action-button" id="assetDetailsSend">
+              <span class="action-icon" data-wallet-icon="sent" aria-hidden="true"></span>
+              <span class="action-label">Send</span>
+            </button>
+            <button class="wallet-action-button" id="assetDetailsHistory">
+              <span class="action-icon" data-wallet-icon="history" aria-hidden="true"></span>
+              <span class="action-label">History</span>
+            </button>
+          </div>
+
+          <section class="asset-detail-section">
+            <h2>Token details</h2>
+            <dl class="asset-detail-list">
+              <div><dt>Contract</dt><dd id="assetDetailsContract">—</dd></div>
+            </dl>
+          </section>
+        </div>
+        <a class="last-item" href="#"> </a>
+      </div>
+
+      <!-- EVM Receive Modal -->
+      <div class="modal fixed-header" id="evmReceiveModal">
+        <div class="modal-header">
+          <button class="back-button" id="closeEvmReceiveModal"></button>
+          <div class="modal-title">Receive</div>
+        </div>
+        <div class="modal-content">
+          <div class="form-container">
+            <p id="evmReceiveAssetLabel" class="wallet-network-hint"></p>
+            <div class="form-group">
+              <label>Your Address</label>
+              <div class="address-container">
+                <div
+                  id="evmReceiveAddress"
+                  class="form-control address-display"
+                ></div>
+                <button
+                  id="copyEvmReceiveAddress"
+                  class="icon-button address-copy-button"
+                ></button>
+              </div>
+              <div id="evmReceiveQRCode"></div>
+
+              <div id="evmReceiveQRPreview" class="form-control qr-data-preview" style="display: none"></div>
+            </div>
+
+            <div class="form-group">
+              <label for="evmReceiveAmount">Amount (Optional)</label>
+              <div class="amount-container">
+                <input
+                  inputmode="decimal"
+                  type="text"
+                  id="evmReceiveAmount"
+                  class="form-control"
+                  placeholder="Enter amount"
+                />
+                <button id="toggleEvmReceiveBalance" class="toggle-balance">
+                  <span id="evmReceiveSymbol"></span>
+                </button>
+              </div>
+            </div>
+            <div class="form-group">
+              <label for="evmReceiveMemo">Memo (Optional)</label>
+              <textarea
+                id="evmReceiveMemo"
+                class="form-control"
+                placeholder="Add a note for the payment"
+                maxlength="140"
               ></textarea>
             </div>
           </div>
@@ -1986,16 +2876,12 @@
       <div class="modal fixed-header" id="sendAssetFormModal">
         <div class="modal-header">
           <button class="back-button" id="closeSendAssetFormModal"></button>
-          <div class="modal-title">Send</div>
+          <div class="modal-title">Send LIB</div>
         </div>
         <div class="modal-content">
           <div class="form-container">
             <form id="sendForm" class="form--narrow">
-              <div class="form-group">
-                <label for="sendAsset">Asset</label>
-                <select id="sendAsset" class="form-control" required></select>
-              </div>
-              <div class="form-group">
+              <div class="form-group contact-autocomplete-field">
                 <label for="sendToAddress"
                   >Recipient <span id="sendToAddressError" style="color: #dc3545; display: none"></span
                 ></label>
@@ -2004,11 +2890,13 @@
                     type="text"
                     id="sendToAddress"
                     class="form-control"
-                    placeholder="Enter username"
+                    placeholder="Search contacts or enter username"
                     required
-                    pattern="[a-zA-Z0-9]*"
                     inputmode="text"
-                    style="flex: 1"
+                    autocomplete="off"
+                    autocapitalize="off"
+                    spellcheck="false"
+                    style="flex: 1; min-width: 0"
                   />
                   <button
                     type="button"
@@ -2039,6 +2927,7 @@
                     aria-hidden="true"
                   />
                 </div>
+                <div id="sendToAddressSuggestions" class="contact-autocomplete-list" aria-label="Saved contacts" hidden></div>
               </div>
               <div class="form-group">
                 <label for="sendAmount">
@@ -2053,7 +2942,7 @@
                     required
                   />
                   <!-- add button to toggle between LIB and USD -->
-                  <button id="toggleBalance" class="toggle-balance">
+                  <button type="button" id="toggleBalance" class="toggle-balance">
                     <span id="balanceSymbol">LIB</span>
                   </button>
                 </div>
@@ -2064,9 +2953,9 @@
                   </div>
                 </div>
               </div>
-              <div class="form-group">
+              <div class="form-group" id="sendMemoGroup">
                 <label for="sendMemo">
-                  Memo (Optional)
+                  <span id="sendMemoLabel">Memo (Optional)</span>
                   <span class="memo-byte-counter" style="font-size: 12px; margin-left: 8px; font-weight: normal; display: none;"></span>
                 </label>
                 <textarea id="sendMemo" class="form-control"></textarea>
@@ -2091,6 +2980,94 @@
                 <button id="switchCamera" class="scanner-button">Switch Camera</button>
               </div>
             </div>
+          </div>
+        </div>
+        <a class="last-item" href="#"> </a>
+      </div>
+
+      <!-- EVM Send Modal -->
+      <div class="modal fixed-header" id="evmSendModal">
+        <div class="modal-header">
+          <button class="back-button" id="closeEvmSendModal"></button>
+          <div class="modal-title">Send</div>
+        </div>
+        <div class="modal-content">
+          <div class="form-container">
+            <form id="evmSendForm" class="form--narrow">
+              <p id="evmSendAssetLabel" class="wallet-network-hint"></p>
+              <div class="form-group contact-autocomplete-field">
+                <label for="evmSendRecipient"
+                  >Recipient <span id="evmSendRecipientStatus" style="color: #dc3545; display: none"></span
+                ></label>
+                <div style="display: flex; align-items: center; gap: 0.5rem">
+                  <input
+                    type="text"
+                    id="evmSendRecipient"
+                    class="form-control"
+                    placeholder="Username or 0x address"
+                    required
+                    autocomplete="off"
+                    autocapitalize="off"
+                    spellcheck="false"
+                    style="flex: 1; min-width: 0"
+                  />
+                  <button
+                    type="button"
+                    id="evmSendUploadQR"
+                    class="icon-button"
+                    title="Upload QR Code"
+                    style="flex-shrink: 0"
+                  >
+                    <svg viewBox="0 0 24 24" width="24" height="24" style="fill: #007bff">
+                      <path
+                        d="M19 7v2.99s-1.99.01-2 0V7h-3s.01-1.99 0-2h3V2h2v3h3v2h-3zm-3 4V8h-3V5H5c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2v-8h-3zM5 19l3-4 2 3 3-4 4 5H5z"
+                      />
+                    </svg>
+                  </button>
+                  <button type="button" id="evmSendScanQR" class="icon-button" title="Scan QR Code" style="flex-shrink: 0">
+                    <svg viewBox="0 0 24 24" width="24" height="24" style="fill: #007bff">
+                      <path
+                        d="M3,3 L10,3 L10,10 L3,10 Z M5,5 L5,8 L8,8 L8,5 Z M14,3 L21,3 L21,10 L14,10 Z M16,5 L16,8 L19,8 L19,5 Z M3,14 L10,14 L10,21 L3,21 Z M5,16 L5,19 L8,19 L8,16 Z M14,14 L21,14 L21,21 L14,21 Z M16,16 L16,19 L19,19 L19,16 Z M11,3 L13,3 L13,10 L11,10 Z M11,14 L13,14 L13,21 L11,21 Z M3,11 L10,11 L10,13 L3,13 Z M14,11 L21,11 L21,13 L14,13 Z"
+                      />
+                    </svg>
+                  </button>
+                  <input type="file" id="evmSendQRFile" accept="image/*" style="display: none" />
+                </div>
+                <div id="evmSendRecipientSuggestions" class="contact-autocomplete-list" aria-label="Saved contacts" hidden></div>
+              </div>
+              <div class="form-group">
+                <label for="evmSendAmount">
+                  Amount <span id="evmSendWarning" class="balance-warning"></span>
+                </label>
+                <div class="amount-container">
+                  <input
+                    inputmode="decimal"
+                    type="text"
+                    id="evmSendAmount"
+                    class="form-control"
+                    required
+                  />
+                  <span id="evmSendSymbol" class="toggle-balance"></span>
+                </div>
+                <div id="evmSendAvailable" class="available-balance">
+                  <div class="balance-info">
+                    <span>Available: <span id="evmSendBalance"></span></span>
+                    <span class="fee-info">Fee: Calculated at send</span>
+                  </div>
+                </div>
+              </div>
+              <div class="form-group" id="evmSendMemoGroup" hidden>
+                <label for="evmSendMemo">
+                  Add a note (optional)
+                  <span class="memo-byte-counter" style="font-size: 12px; margin-left: 8px; font-weight: normal; display: none;"></span>
+                </label>
+                <textarea id="evmSendMemo" class="form-control"></textarea>
+              </div>
+              <div class="form-actions">
+                <p id="evmSendRecipientToll" class="wallet-network-hint" role="status" hidden></p>
+                <button type="submit" class="btn btn--primary btn--pill btn--full">Send</button>
+              </div>
+            </form>
           </div>
         </div>
         <a class="last-item" href="#"> </a>
@@ -2126,6 +3103,52 @@
             <div class="form-actions">
               <button id="confirmSendButton" class="btn btn--primary btn--pill btn--full">Confirm Send</button>
               <button id="cancelSendButton" class="btn btn--danger btn--pill btn--full">Cancel</button>
+            </div>
+          </div>
+        </div>
+        <a class="last-item" href="#"> </a>
+      </div>
+
+      <!-- EVM Send Confirmation Modal -->
+      <div class="modal fixed-header" id="evmSendConfirmModal">
+        <div class="modal-header">
+          <button class="back-button" id="closeEvmSendConfirmModal"></button>
+          <div class="modal-title">Confirm Transaction</div>
+        </div>
+        <div class="modal-content">
+          <div class="form-container">
+            <div class="confirmation-details">
+              <div class="form-group">
+                <label>Recipient</label>
+                <div id="evmConfirmRecipient" class="confirm-value"></div>
+              </div>
+              <div class="form-group">
+                <label>Amount</label>
+                <div id="evmConfirmAmount" class="confirm-value"></div>
+                <div id="evmConfirmAmountUSD" class="confirm-value-secondary usd-equivalent"></div>
+              </div>
+              <div class="form-group">
+                <label>Asset</label>
+                <div id="evmConfirmAsset" class="confirm-value"></div>
+              </div>
+              <div class="form-group" id="evmConfirmMemoGroup" style="display: none">
+                <label>Memo</label>
+                <div id="evmConfirmMemo" class="confirm-value"></div>
+              </div>
+              <div class="form-group">
+                <label>Network</label>
+                <div id="evmConfirmNetwork" class="confirm-value"></div>
+              </div>
+              <div class="form-group">
+                <label>Maximum network fee</label>
+                <div id="evmConfirmFee" class="confirm-value"></div>
+                <div id="evmConfirmFeeUSD" class="confirm-value-secondary usd-equivalent"></div>
+              </div>
+              <div id="evmConfirmSigningNotice" class="wallet-network-hint"></div>
+            </div>
+            <div class="form-actions">
+              <button id="confirmEvmSendButton" class="btn btn--primary btn--pill btn--full">Confirm Send</button>
+              <button id="cancelEvmSendButton" class="btn btn--danger btn--pill btn--full">Cancel</button>
             </div>
           </div>
         </div>
@@ -2275,7 +3298,10 @@
                 />
               </div>
               <div class="form-actions">
-                <button type="submit" class="btn btn--primary btn--pill btn--full">Save Data</button>
+                <button type="submit" class="btn btn--primary btn--pill btn--full backup-submit-button">
+                  <span class="backup-submit-spinner" aria-hidden="true"></span>
+                  <span>Save Data</span>
+                </button>
               </div>
             </form>
           </div>
@@ -2284,7 +3310,7 @@
       </div>
 
       <!-- Add search modal before the other modals -->
-      <div class="modal search-modal" id="searchModal">
+      <div class="modal search-modal" id="messageSearchModal">
         <div class="modal-header">
           <button class="back-button" id="closeSearchModal"></button>
           <div class="modal-title">Search Messages</div>
@@ -2473,6 +3499,16 @@
           <div class="modal-title">Validator Staking</div>
         </div>
         <div class="modal-content">
+          <!-- Pending stake/unstake status -->
+          <div
+            id="pending-nominee-skeleton-1"
+            class="validator-pending-status"
+            role="status"
+            aria-live="polite"
+          >
+            <span id="pending-tx-text-in-bar"></span>
+          </div>
+
           <!-- Loading State -->
           <div id="validator-loading" style="text-align: center; padding: 1rem; display: none">
             <div class="spinner"></div>
@@ -2502,33 +3538,6 @@
             <!-- Your Stake Info - only shown when a nominee exists -->
             <div id="validator-stake-info" class="info-section">
               <h4>Your Stake Info</h4>
-              <!-- New Skeleton Bars for Pending Nominee Info -->
-              <div
-                class="skeleton-item"
-                id="pending-nominee-skeleton-1"
-                style="
-                  display: none;
-                  height: 22px;
-                  width: 100%;
-                  margin-top: 4px;
-                  margin-bottom: 8px;
-                  background-color: #e0e0e0;
-                  padding: 0 5px;
-                  box-sizing: border-box;
-                "
-              >
-                <span
-                  id="pending-tx-text-in-bar"
-                  style="
-                    display: none;
-                    font-size: 0.75em;
-                    color: #333;
-                    line-height: 22px;
-                    width: 100%;
-                    text-align: center;
-                  "
-                ></span>
-              </div>
               <div class="info-item vertical-layout">
                 <span class="info-label" id="validator-nominee-label">Nominated Validator:</span>
                 <span class="info-value code" id="validator-nominee"></span>
@@ -2727,7 +3736,7 @@
       <!-- QR Scan Modal -->
       <div class="modal fixed-header" id="qrScanModal">
         <div class="modal-header">
-          <button class="back-button" id="closeQRScanModal"></button>
+          <button type="button" class="back-button" id="closeQRScanModal" aria-label="Back"></button>
           <div class="modal-title">Scan QR</div>
         </div>
         <div class="scanner-container">
@@ -2861,6 +3870,10 @@
       </div>
 
       <a class="last-item" href="#"> </a>
+    </div>
+    <div id="popupSelectListbox" class="popup-select__menu" tabindex="-1" role="listbox" hidden></div>
+    <div id="popupSelectScrollIndicator" class="popup-select__scroll-indicator" aria-hidden="true" hidden>
+      <span class="popup-select__scroll-thumb"></span>
     </div>
     <!-- Audio element for notification sounds -->
     <audio id="notificationSound" src="media/chatSound.mp3" preload="auto"></audio>

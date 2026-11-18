@@ -1,8 +1,19 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
-//   Versions should be YYYY.MM.DD.HH.mm like 2025.01.25.10.05
-const version = 's'
+//   Versions should be YYYY.MMDD.HHmm like 2025.0125.1005
+const version = 't'
 const BOOT_SPLASH_HANDOFF_MS = 1000;
+const BOOT_SPLASH_FRAME_TIMEOUT_MS = 100;
+const BOOT_SPLASH_IMAGE_TIMEOUT_MS = 2000;
 let myVersion = '0';
+
+function getComparableVersion(value) {
+  return Number(value.replace(/\D/g, ''));
+}
+
+function getWebVersionDisplay() {
+  return `${myVersion} ${version}`.trim();
+}
+
 async function checkVersion() {
   // Use network-specific version key to avoid false update alerts when switching networks
   const versionKey = network?.netid ? `version_${network.netid}` : 'version';
@@ -25,9 +36,10 @@ async function checkVersion() {
     }
     newVersion = myVersion; // Allow continuing with the old version
   }
-  //console.log('myVersion < newVersion then reload', myVersion, newVersion)
-  console.log(parseInt(myVersion.replace(/\D/g, '')), parseInt(newVersion.replace(/\D/g, '')));
-  if (parseInt(myVersion.replace(/\D/g, '')) != parseInt(newVersion.replace(/\D/g, ''))) {
+  const currentComparableVersion = getComparableVersion(myVersion);
+  const newComparableVersion = getComparableVersion(newVersion);
+  console.log(currentComparableVersion, newComparableVersion);
+  if (currentComparableVersion !== newComparableVersion) {
     alert('Updating to new version: ' + newVersion + ' ' + version);
     localStorage.setItem(versionKey, newVersion); // Save new version with network-specific key
     const newUrl = window.location.href.split('?')[0];
@@ -37,8 +49,9 @@ async function checkVersion() {
       newUrl,
       'styles.css',
       'app.js',
-      'dao.repo.js',
-      'dao.mock-data.js',
+      'evm-assets.js',
+      'near-assets.js',
+      'dao.js',
       'data/emoji-picker-data.js',
       'lib.js',
       'network.js',
@@ -48,6 +61,10 @@ async function checkVersion() {
       'meet/index.html',
     ]);
     window.location.replace(newUrl);
+  } else if (myVersion !== newVersion) {
+    // Store the canonical format without reloading when only the separators changed.
+    myVersion = newVersion;
+    localStorage.setItem(versionKey, newVersion);
   }
   logsModal.log(`Started version: ${myVersion}`)
 }
@@ -78,12 +95,60 @@ async function forceReload(urls) {
 import { stringify, parse } from './external/stringify-shardus.js';
 
 import {
+  createDaoBackendFetcher,
+  createDaoProposalVoteTracker,
+  DAO_ACTION_TYPES,
+  DAO_CONFIG_CHANGE_OPTIONS,
+  DAO_PROPOSAL_CREATE_TYPE,
+  DAO_PROPOSAL_DAY_MS,
+  DAO_PROPOSAL_GRACE_PERIOD_MAX_MS,
+  DAO_PROPOSAL_TITLE_MAX_LENGTH,
+  DAO_USER_VOTE_CAST_STATUSES,
+  DAO_USER_VOTE_SUMMARY_KINDS,
+  DAO_PROJECT_DURATION_MAX_DAYS,
+  DAO_PROJECT_MAX_MILESTONES,
+  DAO_PROJECT_MILESTONE_TEXT_MAX_LENGTH,
+  DAO_PROJECT_MILESTONE_TITLE_MAX_LENGTH,
+  DAO_PROJECT_RECLAIM_DELAY_MS,
+  DAO_PROJECT_TERMINATION_REASON_MAX_LENGTH,
+  DAO_PROJECT_FILTERS,
+  DAO_PROJECT_TYPE,
+  DAO_PARAMETER_MAX_WHOLE_DIGITS,
+  buildDaoProjectProposalCreateDraft,
+  buildDaoProposalCreateDraft,
   daoRepo,
   DAO_STATES,
+  getDaoFinalVoteResult,
+  getDaoNotificationSummary,
+  getDaoProjectBudgetSummary,
+  getDaoProjectMilestonePayout,
+  getDaoProjectPresentation,
+  getDaoProposalInfoStateLabel,
+  getDaoProposalListFilterKey,
+  getDaoTransactionMessage,
+  getDaoTrackedProposalMetadataEntries,
+  getDaoProposalClaimWindow,
+  getDaoProposalOptionLabels,
+  getDaoUserVoteSummary,
+  getDaoPendingFinalizationOutcome,
+  getDaoProposalTimeline,
+  getDaoVoteReminderSchedule,
+  getDaoRewardClaimStatus,
   getDaoStateLabel,
+  getDaoTypeForLifecycleKind,
   getDaoTypeLabel,
   getEffectiveDaoState,
-} from './dao.repo.js';
+  hasPendingDaoAction,
+  isDaoParameterProposalTypeKey,
+  isValidDaoDecimalString,
+  isDaoTransactionType,
+  normalizeDaoAddress,
+  normalizeDaoParameterInput,
+  parseDaoUnsignedBigInt,
+  setDaoBackendFetcher,
+  shouldOpenDaoProjectMilestoneByDefault,
+  shouldShowDaoProjectRuntime,
+} from './dao.js';
 
 // Import crypto functions from crypto.js
 import {
@@ -103,6 +168,7 @@ import {
   dhkeyCombined,
   decryptChacha,
   generateUUIDv4,
+  verifyMessage,
 } from './crypto.js';
 
 // Put standalone conversion function in lib.js
@@ -128,13 +194,28 @@ import {
   bin2hex,
   linkifyUrls,
   escapeHtml,
+  escapeHtmlAttribute,
+  normalizeHttpsUrl,
+  normalizeMimeType,
+  normalizeResourceUrl,
+  normalizeTransactionId,
   debounce,
+  installModalTransitionListeners,
+  openModal,
   withButtonCooldown,
   BUTTON_COOLDOWN_MS,
   FAUCET_COOLDOWN_MS,
   truncateMessage,
   normalizeUnsignedFloat,
+  getVerifiedUsername,
+  getSafeAttachmentPreviewMime,
   EthNum,
+  getExpectedChatId,
+  isPublicKeyForAddress,
+  validateChatTransaction,
+  PaymentQR,
+  QRImageDecoder,
+  WalletUsdValuation,
 } from './lib.js';
 
 import {
@@ -143,15 +224,38 @@ import {
   CHAT_REACTION_SHEET_RECENT_CATEGORY_KEY,
 } from './data/emoji-picker-data.js';
 
+import {
+  evmAssets,
+  EVM_CHAT_MESSAGE_TYPE,
+  parseEvmTransferMessage,
+  evmPaymentId,
+  evmPaymentAmount,
+} from './evm-assets.js';
+import {
+  formatDisplayAmount,
+  multichain,
+  INTENTS_CHAT_MESSAGE_TYPE,
+  IntentsPaymentTollIncreasedError,
+  IntentsPaymentTollRejectedError,
+  buildTransferMessage,
+  paymentStatusLabel,
+  parseTransferMessage,
+  verifyTransferClaim,
+  chatPaymentPanel,
+  intentsActivity,
+  intentsAccountIdForAddress,
+} from './near-assets.js';
+
 const weiDigits = 18;
 const wei = 10n ** BigInt(weiDigits);
 //network.monitor.url = "http://test.liberdus.com:3000"    // URL of the monitor server
 //network.explorer.url = "http://test.liberdus.com:6001"   // URL of the chain explorer
 const MAX_MEMO_BYTES = 1000; // 1000 bytes for memos
 const MENU_NAVIGATION_LOCK_MS = 400;
-const MAX_CHAT_MESSAGE_BYTES = 1000; // 1000 bytes for chat messages
+const MAX_CHAT_MESSAGE_BYTES = 10000; // UTF-8 bytes for chat messages
 const BRIDGE_USERNAME = 'liberdusbridge';
-const TRANSACTION_TIMESTAMP_OFFSET_MS = 500; // Transaction offset to allow for slow connections
+const TRANSACTION_TIMESTAMP_OFFSET_MS = 0; // Transaction offset to allow for slow connections
+const IS_DEV_NETWORK = network?.name === 'Devnet';
 
 let myData = null;
 let myAccount = null; // this is set to myData.account for convience
@@ -169,6 +273,33 @@ let initialViewportHeight = window.innerHeight;
 
 // parameters to add to the call URL when opening the page
 const callUrlParams = `#config.toolbarButtons=["camera","microphone","desktop","hangup"]&config.disableDeepLinking=true&config.prejoinPageEnabled=false&config.startWithAudioMuted=false&startWithVideoMuted=false&userInfo.displayName=`
+// Keep existing default-host call links valid when the configured service changes.
+const ALLOWED_CALL_ORIGINS = Object.freeze(['https://meet.liberdus.com', new URL(network.meetUrl).origin]);
+
+function normalizeCallUrl(value) {
+  if (typeof value !== 'string' || !/^https?:\/\//i.test(value.trim())) return '';
+  const normalized = normalizeResourceUrl(value, network.meetUrl);
+  if (!normalized) return '';
+  const url = new URL(normalized);
+  if (!ALLOWED_CALL_ORIGINS.includes(url.origin)) return '';
+  url.hash = '';
+  return url.toString();
+}
+
+function buildCallJoinUrl(value, displayName) {
+  const callUrl = normalizeCallUrl(value);
+  if (!callUrl) return '';
+  return `${callUrl}${callUrlParams}"${encodeURIComponent(String(displayName || ''))}"`;
+}
+
+function encodeAttachmentName(value) {
+  const fileName = typeof value === 'string' && value ? value.slice(0, 255) : 'Attachment';
+  try {
+    return encodeURIComponent(fileName);
+  } catch {
+    return encodeURIComponent(fileName.replace(/[\uD800-\uDFFF]/g, '\uFFFD'));
+  }
+}
 
 // Used in getNetworkParams function
 const NETWORK_ACCOUNT_UPDATE_INTERVAL_MS = 10 * 60 * 1000; // 10 minutes in milliseconds
@@ -379,10 +510,16 @@ function newDataRecord(myAccount) {
       defaultGatewayIndex: -1, // -1 means use random selection
     },
     contacts: {},
+    daoUserVotes: {},
+    daoNotifications: {
+      lastDaoOpenedAt: 0,
+    },
     chats: [],
     wallet: {
       networth: 0.0,
-      timestamp: 0, // last balance update timestamp
+      timestamp: 0, // balance refresh throttle
+      balanceUpdatedAt: 0, // last complete successful native balance refresh
+      overviewUpdatedAt: 0, // last finished attempt to refresh all wallet balance groups
       priceTimestamp: 0, // last time when prices were updated
       assets: [
         {
@@ -405,6 +542,7 @@ function newDataRecord(myAccount) {
       ],
       history: [],
     },
+    evmPayments: [], // External transfers and their chat receipt recovery records
     pending: [], // Array to track pending transactions
     state: {
       unread: 0,
@@ -425,8 +563,20 @@ function newDataRecord(myAccount) {
  * This function centralizes the clearing of user data to ensure consistency
  */
 function clearMyData() {
+  chatModal.resetPendingMessageConfirmations();
   myData = null;
   myAccount = null;
+  walletScreen.reset();
+  stopEvmPaymentChecks();
+  evmAssets.reset();
+  sendAssetFormModal.reset();
+  receiveModal.close();
+  chatPaymentPanel.close();
+  multichain.reset();
+  payChoiceModal.close();
+  daoRepo.reset();
+  daoModal.resetNotificationState();
+  resetDaoNotificationSummary();
 }
 
 /**
@@ -683,11 +833,13 @@ function lockRapidMenuClicks(menuList) {
 
 // Load saved account data and update chat list on page load
 document.addEventListener('DOMContentLoaded', async () => {
+  installModalTransitionListeners();
   markConnectivityDependentElements();
   await checkVersion(); // version needs to be checked before anything else happens
   timeDifference(); // Calculate and log time difference early
 
   setupConnectivityDetection();
+  PopupSelect.load();
 
   // React Native App
   reactNativeApp.load();
@@ -722,6 +874,15 @@ document.addEventListener('DOMContentLoaded', async () => {
   // Wallet Screen
   walletScreen.load();
 
+  // Connected EVM assets
+  evmAssets.load();
+
+  // Sending a NEAR Intents balance from the wallet or chat
+  chatPaymentPanel.load();
+
+  // Multichain (NEAR Intents) assets
+  multichain.load();
+
   // About and Contact Modals
   sourceModal.load();
   aboutModal.load();
@@ -734,21 +895,21 @@ document.addEventListener('DOMContentLoaded', async () => {
   createAccountModal.load();
 
   // Account Form Modal
-  myProfileModal.load();
+  accountModal.load();
 
-  restoreAccountModal.load();
+  importModal.load();
 
   // Validator Modals
-  validatorStakingModal.load();
+  validatorModal.load();
 
   // Toll Modal
   tollModal.load();
 
   // Stake Modal
-  stakeValidatorModal.load();
+  stakeModal.load();
 
   // Backup Form Modal
-  backupAccountModal.load();
+  backupModal.load();
 
   // Remove Account Modal
   removeAccountModal.load();
@@ -758,6 +919,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   // Chat Modal
   chatModal.load();
+  fullImageModal.load();
 
   // Contact Info Modal
   contactInfoModal.load();
@@ -781,13 +943,13 @@ document.addEventListener('DOMContentLoaded', async () => {
   editContactModal.load();
 
   // Scan QR Modal
-  scanQRModal.load();
+  qrScanModal.load();
 
   // Search Messages Modal
-  searchMessagesModal.load();
+  messageSearchModal.load();
 
   // Contact Search Modal
-  searchContactsModal.load();
+  contactSearchModal.load();
 
   // History Modal
   historyModal.load();
@@ -798,6 +960,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   // DAO Modals
   daoModal.load();
   addProposalModal.load();
+  confirmProposalModal.load();
   proposalInfoModal.load();
 
   // Settings Modal
@@ -863,12 +1026,19 @@ document.addEventListener('DOMContentLoaded', async () => {
   // Import Contacts Modal
   importContactsModal.load();
 
-  // Call Schedule Modals
+  // Chat payment chooser
+  payChoiceModal.load();
+
+  // Call scheduling and shared date/time picker modals
   callScheduleChoiceModal.load();
-  callScheduleDateModal.load();
+  dateTimePickerModal.load();
+  durationPickerModal.load();
 
   // Remove Accounts Modal
   removeAccountsModal.load();
+
+  // Feature loaders may update native select values and options programmatically.
+  PopupSelect.syncAll(document);
 
   // add event listener for back-button presses to prevent shift+tab
   document.querySelectorAll('.back-button').forEach((button) => {
@@ -898,7 +1068,7 @@ function handleBeforeUnload(e) {
     return;
   }
   // Check if backup is in progress
-  if (backupAccountModal.isUploading) {
+  if (backupModal.isUploading) {
     reactNativeApp.handleNativeAppSubscribe();
     e.preventDefault();
     e.returnValue = 'A backup is currently being uploaded to Google Drive. Leaving the page will interrupt the backup. Are you sure you want to leave?';
@@ -918,6 +1088,7 @@ function handleBeforeUnload(e) {
 
 // This is for installed apps where we can't stop the back button; just save the state
 function handleVisibilityChange() {
+  chatModal.resetPendingMessageConfirmations();
   if (document.visibilityState === 'hidden') {
     reactNativeApp.handleNativeAppSubscribe();
     if (reactNativeApp.isReactNativeWebView) {
@@ -1058,7 +1229,7 @@ class WelcomeScreen {
     this.appVersionText = document.getElementById('appVersionText');
     
     
-    this.versionDisplay.textContent = myVersion + ' ' + version;
+    this.versionDisplay.textContent = getWebVersionDisplay();
     this.networkNameDisplay.textContent = network.name;
 
     if (reactNativeApp?.appVersion) {
@@ -1090,6 +1261,12 @@ class WelcomeScreen {
   }
 
   async revealHydratedWelcome() {
+    // A hidden tab paints nothing, so it stalls image decoding and animation frames.
+    if (document.visibilityState === 'hidden') {
+      this.showHydratedWelcome();
+      return;
+    }
+
     await this.waitForBootSplashImages();
 
     if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
@@ -1112,17 +1289,36 @@ class WelcomeScreen {
       this.waitForImage(splashLogo),
       this.waitForImage(welcomeLogo),
     ]);
-    await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    await this.waitForBootSplashFrame();
+    await this.waitForBootSplashFrame();
+  }
+
+  // A hidden tab runs no animation frames, so never block boot on one.
+  waitForBootSplashFrame() {
+    return Promise.race([
+      new Promise((resolve) => requestAnimationFrame(resolve)),
+      new Promise((resolve) => setTimeout(resolve, BOOT_SPLASH_FRAME_TIMEOUT_MS)),
+    ]);
   }
 
   async waitForImage(image) {
     if (!image.complete) {
-      await new Promise((resolve) => image.addEventListener('load', resolve, { once: true }));
+      await Promise.race([
+        new Promise((resolve) => image.addEventListener('load', resolve, { once: true })),
+        new Promise((resolve) => setTimeout(resolve, BOOT_SPLASH_IMAGE_TIMEOUT_MS)),
+      ]);
+    }
+    if (!image.complete) {
+      return;
     }
     assert(image.naturalWidth > 0, 'Boot splash image is required');
 
+    // Decoding only avoids a flash of a blank logo, and a tab hidden mid-boot never finishes it.
     if (image.decode) {
-      await image.decode();
+      await Promise.race([
+        image.decode().catch(() => {}),
+        new Promise((resolve) => setTimeout(resolve, BOOT_SPLASH_IMAGE_TIMEOUT_MS)),
+      ]);
     }
   }
 
@@ -1151,12 +1347,21 @@ class WelcomeScreen {
     assert(welcomeLogo, 'Welcome logo is required');
     assert(welcomeTitle, 'Welcome title is required');
 
-    await new Promise((resolve) => requestAnimationFrame(resolve));
+    // The handoff is purely cosmetic and a hidden tab neither paints it nor finishes it.
+    if (document.visibilityState === 'hidden') {
+      this.showHydratedWelcome();
+      return;
+    }
+
+    await this.waitForBootSplashFrame();
     this.bootSplash.classList.add('is-handoff');
 
-    await Promise.all([
-      this.createBootSplashHandoffAnimation(splashLogo, welcomeLogo).finished,
-      this.createBootSplashHandoffAnimation(splashTitle, welcomeTitle).finished,
+    await Promise.race([
+      Promise.all([
+        this.createBootSplashHandoffAnimation(splashLogo, welcomeLogo).finished,
+        this.createBootSplashHandoffAnimation(splashTitle, welcomeTitle).finished,
+      ]),
+      new Promise((resolve) => setTimeout(resolve, BOOT_SPLASH_HANDOFF_MS + 100)),
     ]);
     this.showHydratedWelcome();
   }
@@ -1246,8 +1451,8 @@ class WelcomeScreen {
     }
 
     const now = getCorrectedTimestamp();
-    const lastBackup = backupAccountModal.getGDriveBackupTs();
-    const lastReminder = backupAccountModal.getGDriveReminderTs();
+    const lastBackup = backupModal.getGDriveBackupTs();
+    const lastReminder = backupModal.getGDriveReminderTs();
     const sevenDaysMs = 7 * 24 * 60 * 60 * 1000;
     const threeDaysMs = 3 * 24 * 60 * 60 * 1000;
 
@@ -1261,7 +1466,7 @@ class WelcomeScreen {
 
     const message = 'Click "Menu" and "Backup" to Google drive. You can restore if anything happens to this device.';
     showToast(message, 0, 'warning');
-    backupAccountModal.setGDriveReminderTs(now);
+    backupModal.setGDriveReminderTs(now);
   }
 
   isActive() {
@@ -1325,8 +1530,8 @@ class WelcomeMenuModal {
     this.updateButton = document.getElementById('welcomeOpenUpdate');
     this.helpButton = document.getElementById('welcomeOpenHelp');
 
-    this.backupButton.addEventListener('click', () => backupAccountModal.open());
-    this.restoreButton.addEventListener('click', () => restoreAccountModal.open());
+    this.backupButton.addEventListener('click', () => backupModal.open());
+    this.restoreButton.addEventListener('click', () => importModal.open());
     this.removeButton.addEventListener('click', () => removeAccountsModal.open());
     this.migrateButton.addEventListener('click', () => migrateAccountsModal.open());
     this.aboutButton.addEventListener('click', () => aboutModal.open());
@@ -1336,9 +1541,9 @@ class WelcomeMenuModal {
     // Show launch button if ReactNativeWebView is available
     if (window?.ReactNativeWebView) {
       this.launchButton.addEventListener('click', () => launchModal.open());
-      this.launchButton.style.display = 'block';
+      this.launchButton.style.display = 'flex';
       this.updateButton.addEventListener('click', () => aboutModal.openStore());
-      this.updateButton.style.display = 'block';
+      this.updateButton.style.display = 'flex';
     }
   }
 
@@ -1347,7 +1552,7 @@ class WelcomeMenuModal {
       unlockModal.openButtonElementUsed = welcomeScreen.openWelcomeMenuButton;
       unlockModal.open();
     } else {
-      this.modal.classList.add('active');
+      openModal(this.modal);
       enterFullscreen();
     }
   }
@@ -1376,11 +1581,13 @@ class Header {
     this.menuButton = document.getElementById('toggleMenu');
     this.settingsButton = document.getElementById('toggleSettings');
     this.upcomingCallsBtn = document.getElementById('upcomingCallsBtn');
+    this.daoNotificationsButton = document.getElementById('daoNotificationsBtn');
 
     this.logoLink.addEventListener('keydown', ignoreShiftTabKey); // add event listener for first-item to prevent shift+tab
     this.menuButton.addEventListener('click', () => menuModal.open());
     this.settingsButton.addEventListener('click', () => settingsModal.open());
     this.upcomingCallsBtn.addEventListener('click', () => callsModal.open());
+    this.daoNotificationsButton.addEventListener('click', () => daoModal.open());
     
     // Add click event for whole name container
     this.nameContainer.addEventListener('click', () => {
@@ -1443,6 +1650,23 @@ class Header {
     } else {
       this.upcomingCallsBtn.classList.remove('upcoming-calls-glow');
     }
+  }
+
+  updateDaoNotificationsIcon() {
+    if (!this.daoNotificationsButton) return;
+
+    const hasVoting = hasDaoVotingNotifications(daoNotificationSummary);
+    const hasClaim = hasDaoClaimNotifications(daoNotificationSummary);
+    const hasNotifications = hasVoting || hasClaim;
+    let label = 'Open DAO notifications';
+    if (hasVoting && hasClaim) label = 'Open DAO voting and claim notifications';
+    else if (hasVoting) label = 'Open DAO voting notifications';
+    else if (hasClaim) label = 'Open DAO claim notifications';
+
+    this.daoNotificationsButton.hidden = !hasNotifications;
+    this.daoNotificationsButton.classList.toggle('dao-notification-glow', hasNotifications);
+    this.daoNotificationsButton.title = label;
+    this.daoNotificationsButton.setAttribute('aria-label', label);
   }
 
 }
@@ -1617,7 +1841,7 @@ class ChatsScreen {
 
     // Handle search input click that's on the chatsScreen
     this.searchInput.addEventListener('click', () => {
-      searchMessagesModal.open();
+      messageSearchModal.open();
     });
   }
 
@@ -1723,6 +1947,7 @@ class ChatsScreen {
       const isShowingReactionPreview = !!reactionPreview && reactionPreview.timestamp > latestActivity.timestamp;
       const latestItemTimestamp = isShowingReactionPreview ? reactionPreview.timestamp : latestActivity.timestamp;
       const unreadCount = contact.unread;
+      const isFailedOutgoingActivity = !isShowingReactionPreview && latestActivity.my && latestActivity.status === 'failed';
 
       let previewHTML = '';
       if (isShowingReactionPreview) {
@@ -1763,6 +1988,21 @@ class ChatsScreen {
         previewHTML = `<span><i>Voice message</i></span>`;
       } else if (latestActivity.type === 'location') {
         previewHTML = `<span><i>Shared location</i></span>`;
+      } else if (latestActivity.type === EVM_CHAT_MESSAGE_TYPE) {
+        const payment = latestActivity.payment;
+        previewHTML = payment ? `<span class="payment-preview">${latestActivity.my ? '-' : '+'} ${escapeHtml(evmPaymentAmount(payment))} ${escapeHtml(payment.symbol)}</span>` : '<span>Payment</span>';
+      } else if (latestActivity.type === INTENTS_CHAT_MESSAGE_TYPE) {
+        // The same shape as a LIB payment's preview: signed amount, then note.
+        const payment = latestActivity.payment;
+        if (payment) {
+          const directionText = latestActivity.my ? '-' : '+';
+          previewHTML = `<span class="payment-preview">${directionText} ${escapeHtml(formatDisplayAmount(payment.amount))} ${escapeHtml(payment.symbol)}</span>`;
+          if (payment.note) {
+            previewHTML += ` <span class="memo-preview"> | ${truncateMessage(escapeHtml(payment.note), 50)}</span>`;
+          }
+        } else {
+          previewHTML = `<span><i>Payment</i></span>`;
+        }
       } else if (latestActivity.type === 'update_toll_required') {
         previewHTML = truncateMessage(escapeHtml(getUpdateTollRequiredPreviewText(latestActivity, contact)), 50);
       } else if ((!latestActivity.message || String(latestActivity.message).trim() === '') && latestActivity.xattach) {
@@ -1781,6 +2021,7 @@ class ChatsScreen {
       let displayPreview = previewHTML;
       const isOutgoingPreview = isShowingReactionPreview ? reactionPreview.my : latestActivity.my;
       let displayPrefix = isOutgoingPreview ? '< ' : '> ';
+      const draft = contact.draft;
       let hasDraftAttachment = false;
 
       // Check for draft attachments
@@ -1789,8 +2030,9 @@ class ChatsScreen {
       }
       
       // If there's draft text, show that (prioritize draft text over reply preview)
-      if (contact.draft && contact.draft.trim() !== '') {
-        displayPreview = truncateMessage(escapeHtml(contact.draft), 50);
+      if (draft && draft.trim() !== '') {
+        const draftPreview = draft.length > 50 ? draft.slice(0, 50) + '...' : draft;
+        displayPreview = escapeHtml(draftPreview);
         displayPrefix = '< ';
       } else if (contact.draftReplyTxid) {
         // If there's only reply content (no text), show "Replying to: [message]"
@@ -1803,7 +2045,7 @@ class ChatsScreen {
           displayPreview = '[message]';
         }
         displayPrefix = 'Replying to: ';
-      } else if (hasDraftAttachment && !contact.draft) {
+      } else if (hasDraftAttachment && !draft) {
         // If there's only attachment draft (no text, no reply), show attachment indicator
         const attachmentCount = contact.draftAttachments.length;
         displayPreview = attachmentCount === 1 
@@ -1811,6 +2053,9 @@ class ChatsScreen {
           : `📎 ${attachmentCount} attachments`;
         displayPrefix = '< ';
       }
+      const failedIndicatorHTML = isFailedOutgoingActivity
+        ? '<span class="chat-failed-indicator" title="Not sent" aria-label="Not sent">!</span>'
+        : '';
       // Create the list item element
       const li = document.createElement('li');
       li.classList.add('chat-item');
@@ -1823,7 +2068,7 @@ class ChatsScreen {
                   <div class="chat-time">${timeDisplay}</div>
               </div>
               <div class="chat-message">
-                ${unreadCount ? `<span class="chat-unread">${unreadCount}</span>` : ((contact.draft || contact.draftReplyTxid || hasDraftAttachment) ? `<span class="chat-draft" title="Draft"></span>` : '')}
+                ${failedIndicatorHTML}${unreadCount ? `<span class="chat-unread">${unreadCount}</span>` : ((draft || contact.draftReplyTxid || hasDraftAttachment) ? `<span class="chat-draft" title="Draft"></span>` : '')}
                 ${displayPrefix}${displayPreview}
               </div>
           </div>
@@ -1858,7 +2103,7 @@ class ContactsScreen {
 
     // Handle search input click that's on the contactsScreen
     this.contactSearchInput.addEventListener('click', () => {
-      searchContactsModal.open();
+      contactSearchModal.open();
     });
   }
 
@@ -1979,14 +2224,18 @@ class WalletScreen {
   constructor() {
     this.firstTimeLoad = true;
     this.isFaucetRequestInProgress = false;
+    this.balanceUpdatedTimer = null;
+    this.balanceRefreshId = 0;
+    this.walletViewRefreshId = 0;
+    this.isUpdating = false;
   }
 
   load() {
     // screen
     this.screen = document.getElementById('walletScreen');
     // balance elements
-    this.totalBalance = document.getElementById('walletTotalBalance');
     this.refreshBalanceButton = document.getElementById('refreshBalance');
+    this.balanceUpdatedLabel = document.getElementById('walletBalanceUpdated');
     // assets list
     this.assetsList = document.getElementById('assetsList');
     // action buttons
@@ -2070,6 +2319,7 @@ class WalletScreen {
 
   open() {
     this.screen.classList.add('active');
+    this.startBalanceUpdatedTimer();
     // Show testnet warning toast once per account (first-time tip).
     if (!this.isMainnet() && !checkFirstTimeTip('testnetWarning')) {
       showToast('The LIB in this Testnet is not of any value and will not be transferred to the Mainnet.', 0, 'info');
@@ -2079,6 +2329,16 @@ class WalletScreen {
 
   close() {
     this.screen.classList.remove('active');
+    this.stopBalanceUpdatedTimer();
+  }
+
+  reset() {
+    this.stopBalanceUpdatedTimer();
+    this.balanceRefreshId++;
+    this.walletViewRefreshId++;
+    this.isUpdating = false;
+    this.firstTimeLoad = true;
+    this.updateBalanceUpdatedAt();
   }
 
   isActive() {
@@ -2090,120 +2350,181 @@ class WalletScreen {
     return network?.name === 'Mainnet';
   }
 
-  // Update wallet view; refresh wallet
-  async updateWalletView() {
-    const walletData = myData.wallet;
+  getLibAsset() {
+    return (myData?.wallet?.assets || []).find((asset) => isLibAsset(asset)) || null;
+  }
 
-    // Show loading toast if we're about to fetch fresh data
+  isCurrentWallet(account, wallet) {
+    return Boolean(account && wallet && myAccount === account && myData?.wallet === wallet);
+  }
+
+  getBalanceUpdatedText(timestamp, now = getCorrectedTimestamp()) {
+    if (!Number.isFinite(timestamp) || timestamp <= 0 || !Number.isFinite(new Date(timestamp).getTime())) {
+      return 'Not updated yet';
+    }
+    const minutes = Math.max(0, Math.floor((now - timestamp) / 60000));
+    if (minutes === 0) return 'Updated just now';
+    if (minutes < 60) return `Updated ${minutes}m ago`;
+    const hours = Math.floor(minutes / 60);
+    if (hours < 24) return `Updated ${hours}h ago`;
+    return `Updated ${Math.floor(hours / 24)}d ago`;
+  }
+
+  updateBalanceUpdatedAt() {
+    if (!this.balanceUpdatedLabel) return;
+    const timestamp = myData?.wallet?.overviewUpdatedAt;
+    const text = this.isUpdating ? 'Updating…' : this.getBalanceUpdatedText(timestamp);
+    this.balanceUpdatedLabel.textContent = text;
+    if (this.isUpdating || text === 'Not updated yet') {
+      this.balanceUpdatedLabel.removeAttribute('datetime');
+      this.balanceUpdatedLabel.removeAttribute('title');
+      return;
+    }
+    const date = new Date(timestamp);
+    this.balanceUpdatedLabel.setAttribute('datetime', date.toISOString());
+    this.balanceUpdatedLabel.title = `Balances updated ${date.toLocaleString()}`;
+  }
+
+  startBalanceUpdatedTimer() {
+    this.updateBalanceUpdatedAt();
+    if (this.balanceUpdatedTimer !== null) return;
+    this.balanceUpdatedTimer = setInterval(() => this.updateBalanceUpdatedAt(), 30000);
+  }
+
+  stopBalanceUpdatedTimer() {
+    if (this.balanceUpdatedTimer === null) return;
+    clearInterval(this.balanceUpdatedTimer);
+    this.balanceUpdatedTimer = null;
+  }
+
+  // Refresh all balance groups while keeping native rendering responsive.
+  async updateWalletView() {
+    const account = myAccount;
+    const walletData = myData?.wallet;
+    if (!this.isCurrentWallet(account, walletData)) return;
+
+    const refreshId = ++this.walletViewRefreshId;
+    this.isUpdating = true;
+    this.updateBalanceUpdatedAt();
     let loadingToastId = null;
-    // only show toast if myData.wallet.timestamp is not 0
     if (this.firstTimeLoad && isOnline) {
-      loadingToastId = showToast('Loading wallet balance...', 0, 'loading');
+      loadingToastId = showToast('Loading wallet balances...', 0, 'loading');
       this.firstTimeLoad = false;
     }
 
+    const externalRefreshes = Promise.allSettled([
+      multichain.updateSummary({ refresh: true }),
+      evmAssets.refresh(),
+    ]);
     try {
       await this.updateWalletBalances();
+      if (!this.isCurrentWallet(account, walletData) || refreshId !== this.walletViewRefreshId) return;
+
+      const walletUsdValue = calculateWalletUsdValue(walletData.assets);
+      walletData.networth = walletUsdValue ?? 0.0;
+
+      if (!Array.isArray(walletData.assets) || walletData.assets.length === 0) {
+        this.assetsList.innerHTML = '<div class="empty-state"><div></div><div>No Assets Yet</div><div>Your assets will appear here</div></div>';
+        return;
+      }
+
+      this.assetsList.innerHTML = walletData.assets
+        .map((asset) => {
+          const assetUsdPrice = getAssetUsdPrice(asset);
+          const valuation = WalletUsdValuation.fromValue(asset.balance === 0n ? 0 : calculateAssetUsdValue(asset));
+          const assetRateText = assetUsdPrice === null
+            ? escapeHtml(asset.symbol)
+            : `1 ${escapeHtml(asset.symbol)} = $${assetUsdPrice.toFixed(6)}`;
+          const [whole, fraction] = formatDisplayAmount(big2str(asset.balance, 18), 6).split('.');
+          const assetQuantityText = whole.replace(/\B(?=(\d{3})+(?!\d))/g, ',') + (fraction ? `.${fraction}` : '');
+          return `
+                <div class="asset-item">
+                    <img src="./media/liberdus_logo_50.png" class="asset-logo" alt="Liberdus">
+                    <div class="asset-info">
+                        <div class="asset-name">${escapeHtml(asset.name)}</div>
+                        <div class="asset-symbol">${assetRateText}</div>
+                    </div>
+                    <div class="asset-balance">
+                        <span class="wallet-native-quantity">${assetQuantityText} ${escapeHtml(asset.symbol)}</span>
+                        <span class="wallet-native-usd${valuation.state === 'none' ? ' wallet-price-unavailable' : ''}">${valuation.valueText}</span>
+                        <span class="wallet-price-status">${valuation.caption}</span>
+                    </div>
+                </div>
+            `;
+        })
+        .join('');
     } catch (error) {
       console.error('Error updating wallet balances:', error);
     } finally {
-      // Always hide loading toast if it was shown, regardless of success or failure
-      if (loadingToastId) {
-        hideToast(loadingToastId);
+      await externalRefreshes;
+      if (loadingToastId) hideToast(loadingToastId);
+      if (this.isCurrentWallet(account, walletData) && refreshId === this.walletViewRefreshId) {
+        // Track the attempt itself: missing prices and balances are captioned beside each total.
+        walletData.overviewUpdatedAt = getCorrectedTimestamp();
+        this.isUpdating = false;
+        this.updateBalanceUpdatedAt();
       }
     }
-
-    // Update total networth
-    const walletUsdValue = calculateWalletUsdValue(walletData.assets);
-    walletData.networth = walletUsdValue ?? 0.0;
-    this.totalBalance.textContent = walletUsdValue === null ? 'N/A' : walletUsdValue.toFixed(2);
-
-    if (!Array.isArray(walletData.assets) || walletData.assets.length === 0) {
-      this.assetsList.querySelector('.empty-state').style.display = 'block';
-      return;
-    }
-
-    this.assetsList.innerHTML = walletData.assets
-      .map((asset) => {
-        const assetUsdPrice = getAssetUsdPrice(asset);
-        const assetNetworth = calculateAssetUsdValue(asset);
-        const assetPriceText = assetUsdPrice === null ? 'N/A' : `$${assetUsdPrice.toFixed(6)} / ${asset.symbol}`;
-        const assetNetworthText = assetNetworth === null ? 'N/A' : `$${assetNetworth.toFixed(6)}`;
-        return `
-              <div class="asset-item">
-                  <div class="asset-logo"><img src="./media/liberdus_logo_50.png" class="asset-logo"></div>
-                  <div class="asset-info">
-                      <div class="asset-name">${asset.name}</div>
-                      <div class="asset-symbol">${assetPriceText}</div>
-                  </div>
-                  <div class="asset-balance">${(Number(asset.balance) / Number(wei)).toFixed(6)}<br><span class="asset-symbol">${assetNetworthText}</span></div>
-              </div>
-          `;
-      })
-      .join('');
   }
 
   // refresh wallet balance
   async updateWalletBalances() {
-    if (!myAccount || !myData || !myData.wallet || !myData.wallet.assets) {
+    const account = myAccount;
+    const wallet = myData?.wallet;
+    if (!account || !Array.isArray(wallet?.assets)) {
       console.error('No wallet data available');
       return;
     }
 
     await updateAssetPricesIfNeeded();
+    if (!this.isCurrentWallet(account, wallet)) return;
     if (!isOnline) {
       console.warn('Not online. Not updating wallet balances');
       return;
     }
 
     const now = getCorrectedTimestamp();
-    if (!myData.wallet.timestamp) {
-      myData.wallet.timestamp = 0;
+    if (now - (wallet.timestamp || 0) < 5000) {
+      return Number.isFinite(wallet.balanceUpdatedAt) && wallet.balanceUpdatedAt > 0 && now - wallet.balanceUpdatedAt < 5000;
     }
-    if (now - myData.wallet.timestamp < 5000) {
-      return;
-    }
-
-    let totalWalletNetworth = 0.0;
-    let failedToGetBalance = false;
-    // Update balances for each asset and address
-    for (const asset of myData.wallet.assets) {
-      let assetTotalBalance = 0n;
-
-      // Get balance for each address in the asset
-      for (const addr of asset.addresses) {
-        try {
+    const refreshId = ++this.balanceRefreshId;
+    const assets = wallet.assets;
+    const updates = [];
+    try {
+      for (const asset of assets) {
+        if (!Array.isArray(asset.addresses) || asset.addresses.length === 0) continue;
+        let balance = 0n;
+        const addresses = [];
+        for (const addr of asset.addresses) {
           const address = longAddress(addr.address);
           const data = await queryNetwork(`/account/${address}/balance`);
-          if (!data) {
-            failedToGetBalance = true;
-            console.error(`Error fetching balance for address ${addr.address}:`, data);
-            continue;
+          if (!this.isCurrentWallet(account, wallet) || wallet.assets !== assets || refreshId !== this.balanceRefreshId) return;
+          if (typeof data?.balance !== 'bigint' || data.balance < 0n) {
+            throw new Error('Balance response is missing a valid nonnegative balance');
           }
-          if (data?.balance !== undefined) {
-            // Update address balance
-            addr.balance = data.balance;
-          }
-          assetTotalBalance += addr.balance;
-        } catch (error) {
-          console.error(`Error fetching balance for address ${addr.address}:`, error);
+          addresses.push({ address: addr, balance: data.balance });
+          balance += data.balance;
         }
+        updates.push({ asset, balance, addresses });
       }
-      asset.balance = assetTotalBalance;
-      asset.networth = calculateAssetUsdValue(asset) ?? 0.0;
-
-      // Add this asset's total to wallet total
-      totalWalletNetworth += asset.networth;
-    }
-
-    if (failedToGetBalance) {
+    } catch (error) {
+      if (!this.isCurrentWallet(account, wallet) || refreshId !== this.balanceRefreshId) return;
       showToast(`Error fetching balance. Try again later.`, 0, 'error');
-      console.error('Failed to get balance for some addresses');
+      console.error('Failed to update wallet balances:', error);
+      return;
     }
-
-    // Update total wallet balance
-    myData.wallet.networth = totalWalletNetworth;
-    myData.wallet.timestamp = now;
+    if (updates.length === 0 || !this.isCurrentWallet(account, wallet) || wallet.assets !== assets) return;
+    // Commit only a complete refresh so failed requests cannot erase cached balances.
+    for (const { asset, balance, addresses } of updates) {
+      for (const update of addresses) update.address.balance = update.balance;
+      asset.balance = balance;
+      asset.networth = calculateAssetUsdValue(asset) ?? 0.0;
+    }
+    wallet.networth = calculateWalletUsdValue(assets) ?? 0.0;
+    wallet.timestamp = getCorrectedTimestamp();
+    wallet.balanceUpdatedAt = wallet.timestamp;
+    this.updateBalanceUpdatedAt();
+    return true;
   }
 
   /**
@@ -2237,6 +2558,11 @@ class WalletScreen {
       }
     }
 
+    if (!network.faucetUrl) {
+      showToast('Faucet not available', 0, 'error');
+      return;
+    }
+
     const toastId = showToast('Requesting from faucet...', 0, 'loading');
     try {
       this.isFaucetRequestInProgress = true;
@@ -2248,9 +2574,7 @@ class WalletScreen {
       };
       await signObj(payload, myAccount.keys);
       
-      const faucetUrl = network.faucetUrl || 'https://dev.liberdus.com:3355/faucet';
-      
-      const response = await fetch(faucetUrl, {
+      const response = await fetch(network.faucetUrl, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -2290,16 +2614,14 @@ class MenuModal {
     this.closeButton = document.getElementById('closeMenu');
     this.closeButton.addEventListener('click', () => this.close());
     this.validatorButton = document.getElementById('openValidator');
-    this.validatorButton.addEventListener('click', () => validatorStakingModal.open());
+    this.validatorButton.addEventListener('click', () => validatorModal.open());
     this.daoButton = document.getElementById('openDao');
-    if (network.name === 'Devnet') {
-      this.daoButton.style.display = 'block';
-      this.daoButton.addEventListener('click', () => daoModal.open());
-    }
+    this.daoButton.style.display = 'flex';
+    this.daoButton.addEventListener('click', () => daoModal.open());
     this.inviteButton = document.getElementById('openInvite');
     this.inviteButton.addEventListener('click', () => inviteModal.open());
     this.explorerButton = document.getElementById('openExplorer');
-    this.explorerButton.addEventListener('click', () => this.handleExternalClick('./explorer', 'explorer'));
+    this.explorerButton.addEventListener('click', () => this.handleExternalClick(normalizeHttpsUrl(network.explorerUrl), 'explorer'));
     this.networkButton = document.getElementById('openMonitor');
     this.networkButton.addEventListener('click', () => this.handleExternalClick('./network', 'network'));
     this.helpButton = document.getElementById('openHelp');
@@ -2323,28 +2645,16 @@ class MenuModal {
     if (window?.ReactNativeWebView) {
       this.launchButton = document.getElementById('openLaunchUrl');
       this.launchButton.addEventListener('click', () => launchModal.open());
-      this.launchButton.style.display = 'block';
+      this.launchButton.style.display = 'flex';
 
       this.updateButton = document.getElementById('openUpdate');
       this.updateButton.addEventListener('click', () => updateWarningModal.open());
-      this.updateButton.style.display = 'block';
+      this.updateButton.style.display = 'flex';
     }
   }
 
-  enableSignOutButtonWithDelay() {
-    // Disable button initially
-    this.signOutHeaderButton.classList.remove('active');
-    // Re-enable after modal animation completes (300ms) + small buffer to prevent accidental double-taps
-    setTimeout(() => {
-      if (this.isActive()) {
-        this.signOutHeaderButton.classList.add('active');
-      }
-    }, 400); // 400ms = modal animation (300ms) + 100ms buffer
-  }
-
   open() {
-    this.modal.classList.add('active');
-    this.enableSignOutButtonWithDelay();
+    openModal(this.modal);
     enterFullscreen();
   }
 
@@ -2367,7 +2677,7 @@ class MenuModal {
   
   async handleSignOut() {
     // Check if backup is in progress
-    if (backupAccountModal.isUploading) {
+    if (backupModal.isUploading) {
       showToast('Please wait for the backup to complete before signing out.', 0, 'warning');
       return;
     }
@@ -2385,15 +2695,13 @@ class MenuModal {
       getSystemNoticeIntervalId = null;
     }
     callsModal.stopPeriodicCallsRefresh();
-    // Stop camera if it's running
-    if (typeof scanQRModal !== 'undefined' && scanQRModal.camera.scanInterval) {
-      scanQRModal.stopCamera();
-    }
+    if (qrScanModal.session) qrScanModal.close();
 
     // Save myData to localStorage if it exists
     saveState();
 
     // clear storage
+    fullImageModal.close();
     clearMyData();
 
     // Lock the app
@@ -2444,11 +2752,112 @@ const menuModal = new MenuModal();
 // DAO / Proposals
 // =====================
 
-// DAO proposals are loaded via `daoRepo` and kept in memory (no localStorage persistence).
+setDaoBackendFetcher(createDaoBackendFetcher(queryNetwork));
+const daoProposalVoteTracker = createDaoProposalVoteTracker({
+  getDaoUserVotes: () => myData?.daoUserVotes,
+  setDaoUserVotes: (votes) => {
+    if (!myData) return;
+    myData.daoUserVotes = votes;
+  },
+});
 
-function getDaoVoterId() {
-  return myAccount?.address || myData?.account?.address || myAccount?.username || myData?.account?.username || 'anon';
+function createEmptyDaoNotificationSummary() {
+  return {
+    newVoting: [],
+    endedVoting: [],
+    finalizedTrackedVote: [],
+  };
 }
+
+function copyDaoNotificationSummary(summary) {
+  return {
+    newVoting: [...summary.newVoting],
+    endedVoting: [...summary.endedVoting],
+    finalizedTrackedVote: [...summary.finalizedTrackedVote],
+  };
+}
+
+function mergeDaoNotificationSummaries(current, incoming) {
+  return {
+    newVoting: [...new Set([...current.newVoting, ...incoming.newVoting])],
+    endedVoting: [...new Set([...current.endedVoting, ...incoming.endedVoting])],
+    finalizedTrackedVote: [...new Set([
+      ...current.finalizedTrackedVote,
+      ...incoming.finalizedTrackedVote,
+    ])],
+  };
+}
+
+function getDaoNotificationProposalNumbers(summary) {
+  return new Set([
+    ...summary.newVoting,
+    ...summary.endedVoting,
+    ...summary.finalizedTrackedVote,
+  ]);
+}
+
+function hasDaoVotingNotifications(summary) {
+  return summary.newVoting.length > 0 || summary.endedVoting.length > 0;
+}
+
+function hasDaoClaimNotifications(summary) {
+  return summary.finalizedTrackedVote.length > 0;
+}
+
+function getDaoNotificationInitialFilter(summary) {
+  if (hasDaoClaimNotifications(summary)) return 'claimable';
+  if (hasDaoVotingNotifications(summary)) return 'voting';
+  return '';
+}
+
+let daoNotificationSummary = createEmptyDaoNotificationSummary();
+
+function resetDaoNotificationSummary() {
+  daoNotificationSummary = createEmptyDaoNotificationSummary();
+  header.updateDaoNotificationsIcon();
+}
+
+async function refreshDaoNotificationSummary() {
+  const accountData = myData;
+  if (!accountData) {
+    resetDaoNotificationSummary();
+    return false;
+  }
+
+  const notificationCutoff = getCorrectedTimestamp();
+  try {
+    await daoRepo.refresh({ force: true });
+    if (accountData !== myData) return false;
+
+    if (!accountData.daoNotifications?.lastDaoOpenedAt) {
+      daoModal.acknowledgeNotifications(notificationCutoff);
+      return true;
+    }
+
+    daoNotificationSummary = getDaoNotificationSummary({
+      metadataEntries: daoRepo.getProposalMetaForUi(),
+      daoUserVotes: accountData.daoUserVotes,
+      lastDaoOpenedAt: accountData.daoNotifications.lastDaoOpenedAt,
+      now: getTransactionTimestamp(),
+    });
+    header.updateDaoNotificationsIcon();
+    return true;
+  } catch (error) {
+    console.warn('Failed to refresh DAO notifications:', error);
+    return false;
+  }
+}
+
+const DAO_PROPOSAL_PAGE_SIZE = 10;
+const DAO_ALL_FILTER = { key: 'all', label: 'All' };
+const DAO_CLAIMABLE_FILTER = { key: 'claimable', label: 'Claim' };
+const DAO_FILTER_OPTIONS = [
+  DAO_ALL_FILTER,
+  ...DAO_STATES,
+  DAO_CLAIMABLE_FILTER,
+  ...DAO_PROJECT_FILTERS,
+];
+const DAO_PROJECT_FILTER_KEYS = new Set(DAO_PROJECT_FILTERS.map(({ key }) => key));
 
 function formatDaoTimestamp(ts) {
   const n = Number(ts || 0);
@@ -2460,96 +2869,157 @@ function formatDaoTimestamp(ts) {
   }
 }
 
+function formatDaoDate(ts) {
+  const n = Number(ts || 0);
+  if (!n) return '';
+  try {
+    return new Date(n).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
+  } catch {
+    return '';
+  }
+}
+
+function formatDaoDayOrTime(ts, now) {
+  const at = Number(ts || 0);
+  if (!at) return '';
+  const atDate = new Date(at);
+  const nowDate = new Date(now);
+  const sameDay = (
+    atDate.getFullYear() === nowDate.getFullYear()
+    && atDate.getMonth() === nowDate.getMonth()
+    && atDate.getDate() === nowDate.getDate()
+  );
+  if (!sameDay) return formatDaoDate(at);
+  try {
+    return atDate.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
+  } catch {
+    return '';
+  }
+}
+
+function formatDaoReadyAtLabel(ts, now) {
+  const when = formatDaoDayOrTime(ts, now);
+  return when ? `Ready at ${when}` : '';
+}
+
+function formatDaoProposalTitle(proposal) {
+  const title = String(proposal.title || '').trim() || 'Proposal';
+  return proposal.number ? `${proposal.number}: ${title}` : title;
+}
+
 class DaoModal {
   constructor() {
-    this.selectedGroupKey = 'active';
-    this.selectedStateKey = 'voting';
-    this._outsideClickHandler = null;
-    this.isLoading = false;
+    this.loadingToastId = null;
+    this.loadingSession = null;
+    this.selectedFilterKey = 'voting';
+    this.contextFilters = { proposals: 'voting', projects: 'executing' };
+    this.refreshState = 'loading';
+    this.refreshSequence = 0;
+    this.openRefreshId = 0;
+    this.lastSuccessfulRefreshId = 0;
+    this.visibleProposalCount = DAO_PROPOSAL_PAGE_SIZE;
+    this.detailsRequest = null;
+    this.proposalOpenSequence = 0;
+    this.notificationBatch = createEmptyDaoNotificationSummary();
+    this.notificationProposalNumbers = new Set();
   }
 
   load() {
     this.modal = document.getElementById('daoModal');
     this.closeButton = document.getElementById('closeDaoModal');
     this.titleEl = document.getElementById('daoModalTitle');
-    this.statusMenuButton = document.getElementById('daoFilterButton');
-    this.statusMenu = document.getElementById('daoStatusContextMenu');
-    this.groupActiveButton = document.getElementById('daoGroupActiveButton');
-    this.groupArchivedButton = document.getElementById('daoGroupArchivedButton');
+    this.filterBar = document.getElementById('daoFilterBar');
     this.list = document.getElementById('daoProposalList');
     this.emptyState = document.getElementById('daoProposalEmptyState');
+    this.loadMoreButton = document.getElementById('daoLoadMoreButton');
     this.addButton = document.getElementById('daoAddProposalButton');
 
     if (this.closeButton) this.closeButton.addEventListener('click', () => this.close());
-    if (this.addButton) this.addButton.addEventListener('click', () => addProposalModal.open());
-
-    if (this.statusMenuButton) {
-      this.statusMenuButton.addEventListener('click', (e) => this.toggleStatusMenu(e));
-    }
-
-    if (this.groupActiveButton) {
-      this.groupActiveButton.addEventListener('click', () => {
-        this.setGroupFilter('active');
-      });
-    }
-    if (this.groupArchivedButton) {
-      this.groupArchivedButton.addEventListener('click', () => {
-        this.setGroupFilter('archived');
+    if (this.loadMoreButton) this.loadMoreButton.addEventListener('click', () => this.loadMore());
+    if (this.addButton) {
+      this.addButton.addEventListener('click', () => {
+        if (hasPendingDaoProposalCreation()) {
+          showToast('Wait for your pending proposal to confirm before creating another.', 3000, 'info');
+          return;
+        }
+        addProposalModal.open();
       });
     }
 
-    if (this.statusMenu) {
-      this.statusMenu.addEventListener('click', (e) => {
-        const option = e.target.closest('.context-menu-option');
-        if (!option) return;
-        const key = option.dataset.stateKey;
+    if (this.filterBar) {
+      this.filterBar.addEventListener('click', (e) => {
+        const contextButton = e.target.closest('[data-dao-context]');
+        if (contextButton) {
+          this.setFilter(this.contextFilters[contextButton.dataset.daoContext]);
+          return;
+        }
+        const chip = e.target.closest('.dao-filter-chip');
+        if (!chip) return;
+        const key = chip.dataset.filterKey;
         if (!key) return;
-        this.setStateFilter(key);
+        this.setFilter(key);
       });
     }
-
-    // Close the DAO menu on outside click
-    this._outsideClickHandler = (e) => {
-      if (!this.statusMenu || this.statusMenu.style.display !== 'block') return;
-      if (this.statusMenu.contains(e.target)) return;
-      if (this.statusMenuButton && this.statusMenuButton.contains(e.target)) return;
-      this.closeStatusMenu();
-    };
-    document.addEventListener('click', this._outsideClickHandler);
   }
 
-  open() {
-    this._open();
+  open(initialFilterKey = '') {
+    assert(getDaoCurrentAccountAddress(), 'DAO modal requires an active account');
+    const filterKey = initialFilterKey || getDaoNotificationInitialFilter(daoNotificationSummary);
+    assert(!filterKey || DAO_FILTER_OPTIONS.some((filter) => filter.key === filterKey), 'Unknown DAO initial filter');
+    const incomingNotifications = copyDaoNotificationSummary(daoNotificationSummary);
+    this.notificationBatch = mergeDaoNotificationSummaries(this.notificationBatch, incomingNotifications);
+    for (const proposalNumber of getDaoNotificationProposalNumbers(incomingNotifications)) {
+      this.notificationProposalNumbers.add(proposalNumber);
+    }
+    this._open(filterKey);
   }
 
-  async _open() {
-    this.isLoading = true;
+  async _open(initialFilterKey) {
+    // Do not close the menu or start a refresh while another modal is still opening.
+    if (!this.isActive() && !openModal(this.modal)) return;
+
+    const session = this.beginLoadingSession();
+    daoRepo.reset();
+    const refreshId = this.openRefreshId;
 
     // Close the main menu if opened from it
     if (menuModal?.isActive?.()) menuModal.close();
     footer?.closeNewChatButton?.();
 
-    this.modal.classList.add('active');
     enterFullscreen();
 
-    // Default filter is Voting
-    this.selectedStateKey = this.selectedStateKey || 'voting';
-    this.selectedGroupKey = this.selectedGroupKey || 'active';
+    this.selectFilter(initialFilterKey || this.selectedFilterKey);
+    this.visibleProposalCount = DAO_PROPOSAL_PAGE_SIZE;
     this.render();
 
+    const notificationCutoff = getCorrectedTimestamp();
+    const toastId = showToast('Loading DAO proposals...', 0, 'loading', false, { dedupe: false });
+    this.loadingToastId = toastId;
     try {
-      await daoRepo.refresh({ force: true });
+      await daoRepo.refresh({ force: true, signal: session.controller.signal });
+      if (!this.isLoadingSessionCurrent(session) || refreshId !== this.openRefreshId) return;
+      this.acknowledgeNotifications(notificationCutoff);
+      await this.syncTrackedClaimWindows(session.controller.signal);
+      if (!this.isLoadingSessionCurrent(session) || refreshId !== this.openRefreshId) return;
+      this.refreshState = 'ready';
+      await this.loadSelectedFilter({ reset: true });
+      if (!this.isLoadingSessionCurrent(session) || refreshId !== this.openRefreshId) return;
+      this.lastSuccessfulRefreshId = Math.max(this.lastSuccessfulRefreshId, refreshId);
     } catch (e) {
+      if (!this.isLoadingSessionCurrent(session) || refreshId !== this.openRefreshId
+        || this.lastSuccessfulRefreshId > refreshId) return;
+      this.refreshState = 'error';
       console.warn('Failed to refresh DAO proposals:', e);
       showToast('Failed to load proposals', 2500, 'error');
     } finally {
-      this.isLoading = false;
-      this.render();
+      if (this.loadingToastId === toastId) this.hideLoadingToast();
     }
+
+    this.render();
   }
 
   close() {
-    this.closeStatusMenu();
+    this.cancelLoadingSession();
     this.modal.classList.remove('active');
     enterFullscreen();
 
@@ -2568,95 +3038,360 @@ class DaoModal {
     return this.modal.classList.contains('active');
   }
 
-  toggleStatusMenu(e) {
-    e.preventDefault();
-    e.stopPropagation();
-    if (!this.statusMenu) return;
-    if (this.statusMenu.style.display === 'block') {
-      this.closeStatusMenu();
-      return;
-    }
-    this.showStatusMenu();
+  beginLoadingSession() {
+    this.cancelLoadingSession();
+    this.loadingSession = {
+      controller: new AbortController(),
+      accountData: myData,
+      networkId: network.netid,
+    };
+    return this.loadingSession;
   }
 
-  showStatusMenu() {
-    if (!this.statusMenu || !this.statusMenuButton) return;
-    const buttonRect = this.statusMenuButton.getBoundingClientRect();
-    const menuWidth = 200;
-    const approxMenuHeight = 8 + DAO_STATES.length * 44; // padding + items
+  cancelLoadingSession() {
+    this.loadingSession?.controller.abort();
+    this.loadingSession = null;
+    this.openRefreshId = ++this.refreshSequence;
+    this.proposalOpenSequence += 1;
+    this.detailsRequest = null;
+    this.refreshState = 'loading';
+    this.hideLoadingToast();
+  }
 
-    let left = buttonRect.right - menuWidth;
-    let top = buttonRect.bottom + 8;
+  isLoadingSessionCurrent(session) {
+    return Boolean(session && session === this.loadingSession
+      && !session.controller.signal.aborted && session.accountData === myData
+      && session.networkId === network.netid && this.isActive());
+  }
 
-    if (left < 10) left = 10;
-    if (top + approxMenuHeight > window.innerHeight - 10) {
-      top = buttonRect.top - approxMenuHeight - 8;
+  hideLoadingToast() {
+    if (!this.loadingToastId) return;
+    hideToast(this.loadingToastId);
+    this.loadingToastId = null;
+  }
+
+  resetNotificationState() {
+    this.cancelLoadingSession();
+    this.notificationBatch = createEmptyDaoNotificationSummary();
+    this.notificationProposalNumbers.clear();
+    this.selectedFilterKey = 'voting';
+    this.contextFilters = { proposals: 'voting', projects: 'executing' };
+  }
+
+  acknowledgeNotifications(notificationCutoff) {
+    if (!myData) return;
+
+    const lastOpenedAt = Number(myData.daoNotifications?.lastDaoOpenedAt) || 0;
+    myData.daoNotifications = {
+      lastDaoOpenedAt: Math.max(lastOpenedAt, notificationCutoff),
+    };
+    saveState();
+    resetDaoNotificationSummary();
+  }
+
+  clearNotificationForProposal(proposalNumber) {
+    if (!this.notificationProposalNumbers.delete(proposalNumber)) return false;
+
+    this.notificationBatch.newVoting = this.notificationBatch.newVoting
+      .filter((number) => number !== proposalNumber);
+    this.notificationBatch.endedVoting = this.notificationBatch.endedVoting
+      .filter((number) => number !== proposalNumber);
+    this.notificationBatch.finalizedTrackedVote = this.notificationBatch.finalizedTrackedVote
+      .filter((number) => number !== proposalNumber);
+
+    for (const filter of DAO_FILTER_OPTIONS) {
+      const chip = this.filterBar?.querySelector(`.dao-filter-chip[data-filter-key="${filter.key}"]`);
+      chip?.classList.toggle('has-notification', this.hasNotificationForFilter(filter.key));
+    }
+    return true;
+  }
+
+  hasNotificationForFilter(key) {
+    if (key === 'voting') return hasDaoVotingNotifications(this.notificationBatch);
+    if (key === DAO_CLAIMABLE_FILTER.key) return hasDaoClaimNotifications(this.notificationBatch);
+    return false;
+  }
+
+  getClaimCandidateMetadataEntries(entries, now = getTransactionTimestamp()) {
+    const proposalNumbers = daoProposalVoteTracker.getOpenClaimProposalNumbers(now);
+    return getDaoTrackedProposalMetadataEntries(entries, proposalNumbers);
+  }
+
+  async syncTrackedClaimWindows(signal) {
+    const accountData = myData;
+    const networkId = network.netid;
+    const pendingProposalNumbers = daoProposalVoteTracker.getPendingClaimProposalNumbers();
+    if (pendingProposalNumbers.length === 0) return;
+
+    const entries = getDaoTrackedProposalMetadataEntries(
+      daoRepo.getProposalMetaForUi(),
+      pendingProposalNumbers,
+    ).filter((entry) => isDaoFinalResultState(entry.status));
+
+    const proposals = [];
+    for (let start = 0; start < entries.length; start += 4) {
+      signal?.throwIfAborted();
+      const results = await Promise.allSettled(entries.slice(start, start + 4)
+        .map(entry => daoRepo.refreshProposal(entry.proposal, signal)));
+      signal?.throwIfAborted();
+      if (accountData !== myData || networkId !== network.netid) return;
+      for (const result of results) {
+        if (result.status === 'fulfilled' && result.value) proposals.push(result.value);
+      }
     }
 
-    Object.assign(this.statusMenu.style, {
-      left: `${left}px`,
-      top: `${top}px`,
-      display: 'block',
+    for (const proposal of proposals) {
+      if (!proposal || !Number(proposal.votingEndedAt)) continue;
+      const claimWindow = getDaoProposalClaimWindow(proposal);
+      daoProposalVoteTracker.setAuthoritativeClaimWindow(
+        proposal.number,
+        claimWindow.start,
+        claimWindow.end,
+      );
+    }
+  }
+
+  getSelectedMetadataEntries(entries) {
+    if (this.selectedFilterKey === DAO_ALL_FILTER.key) return entries;
+    if (this.selectedFilterKey === DAO_CLAIMABLE_FILTER.key) return this.getClaimCandidateMetadataEntries(entries);
+    const proposalsByNumber = new Map(
+      daoRepo.getProposalsForUi().map((proposal) => [proposal.number, proposal]),
+    );
+    return entries.filter((entry) => {
+      const proposal = proposalsByNumber.get(entry.proposal);
+      const filterKey = proposal ? getDaoProposalListFilterKey(proposal) : entry.status;
+      return filterKey === this.selectedFilterKey;
     });
   }
 
-  closeStatusMenu() {
-    if (!this.statusMenu) return;
-    this.statusMenu.style.display = 'none';
-  }
+  async loadSelectedFilter({ reset }) {
+    const session = this.loadingSession;
+    if (!this.isLoadingSessionCurrent(session)) return;
+    const entries = this.getSelectedMetadataEntries(daoRepo.getProposalMetaForUi());
 
-  setStateFilter(key) {
-    this.selectedStateKey = key;
-    this.closeStatusMenu();
+    if (reset) this.visibleProposalCount = DAO_PROPOSAL_PAGE_SIZE;
+    const pageStart = reset ? 0 : Math.max(this.visibleProposalCount - DAO_PROPOSAL_PAGE_SIZE, 0);
+    const entriesToLoad = entries.slice(pageStart, this.visibleProposalCount);
+    const cachedNumbers = new Set(daoRepo.getProposalsForUi().map(proposal => proposal.number));
+    const entriesToFetch = entriesToLoad.filter(entry => !cachedNumbers.has(entry.proposal));
+    if (entriesToFetch.length === 0) {
+      this.detailsRequest = null;
+      this.render();
+      return;
+    }
+
+    const request = daoRepo.loadProposalEntries(entriesToFetch, { append: true, signal: session.controller.signal });
+    this.detailsRequest = request;
+    this.render();
+
+    try {
+      await request;
+      if (!this.isLoadingSessionCurrent(session) || this.detailsRequest !== request) return;
+      const loadedNumbers = new Set(daoRepo.getProposalsForUi().map((proposal) => proposal.number));
+      if (entriesToLoad.some((entry) => !loadedNumbers.has(entry.proposal))) {
+        throw new Error('Some DAO items could not be loaded');
+      }
+    } catch (error) {
+      if (!this.isLoadingSessionCurrent(session) || this.detailsRequest !== request) return;
+      this.refreshState = 'error';
+      throw error;
+    } finally {
+      if (this.detailsRequest === request) this.detailsRequest = null;
+    }
+    if (!this.isLoadingSessionCurrent(session)) return;
+
     this.render();
   }
 
-  setGroupFilter(key) {
-    this.selectedGroupKey = key;
-    this.render();
+  async loadPageWithFeedback(reset, errorMessage) {
+    const session = this.loadingSession;
+    const key = this.selectedFilterKey;
+    try {
+      await this.loadSelectedFilter({ reset });
+    } catch (error) {
+      if (!this.isLoadingSessionCurrent(session) || key !== this.selectedFilterKey) return;
+      console.warn('Failed to load DAO page:', error);
+      showToast(errorMessage, 2500, 'error');
+      this.render();
+    }
   }
 
-  getProposals() {
-    return daoRepo.getProposalsForUi(this.selectedGroupKey);
+  async loadMore() {
+    if (this.refreshState !== 'ready' || this.detailsRequest) return;
+    this.visibleProposalCount += DAO_PROPOSAL_PAGE_SIZE;
+    return this.loadPageWithFeedback(false, 'Failed to load more proposals');
+  }
+
+  async refreshAfterDaoSettlement(pendingTxInfo, outcome, receipt) {
+    const accountData = myData;
+    const { type, proposalNumber, proposalStoreId } = pendingTxInfo;
+    const isVote = type === DAO_ACTION_TYPES.VOTE;
+    const refreshId = ++this.refreshSequence;
+    daoProposalVoteTracker.handleSettlement({
+      type,
+      outcome,
+      proposalNumber,
+      txid: pendingTxInfo.txid,
+      optionWeights: receipt?.additionalInfo?.optionWeights,
+      votingEndsAt: pendingTxInfo.votingEndsAt,
+      estimatedClaimEndsAt: pendingTxInfo.estimatedClaimEndsAt,
+      reminderExpiresAt: pendingTxInfo.reminderExpiresAt,
+    });
+    if (isVote && outcome !== 'timeout') {
+      try {
+        saveState();
+      } catch (error) {
+        console.warn('Failed to save the vote receipt:', error);
+      }
+    }
+
+    let didRefreshDaoData = false;
+    try {
+      await daoRepo.refresh({ force: true });
+      // Claim tracking reads the active account after the metadata request.
+      if (myData !== accountData) return false;
+      await this.syncTrackedClaimWindows(null);
+      if (this.isActive()) {
+        await this.loadSelectedFilter({ reset: true });
+      }
+      if (!daoRepo.getProposalById(proposalStoreId)) {
+        await daoRepo.refreshProposal(proposalNumber);
+      }
+      didRefreshDaoData = true;
+    } catch (error) {
+      console.warn('DAO settlement refresh failed:', error);
+    }
+    if (myData !== accountData) return false;
+
+    if (didRefreshDaoData) {
+      this.lastSuccessfulRefreshId = Math.max(this.lastSuccessfulRefreshId, refreshId);
+      if (this.isActive() && refreshId > this.openRefreshId) this.refreshState = 'ready';
+    }
+
+    // A confirmed action must remain blocked until the UI can render fresh
+    // proposal state. Failed and timed-out actions can safely release the UI.
+    if (didRefreshDaoData || outcome !== 'success') {
+      if (this.isActive()) this.render();
+      proposalInfoModal.refreshIfOpen(proposalStoreId, {
+        resetVoteForm: outcome === 'success' && isVote
+          && !pendingTxInfo.daoVoteReceiptRetryAt,
+      });
+    } else if (isVote) {
+      proposalInfoModal.refreshIfOpen(proposalStoreId, { voteOnly: true });
+    }
+
+    if (outcome === 'success' && type === DAO_ACTION_TYPES.APPLY_PARAMETERS) {
+      try {
+        const refreshed = await getNetworkParams(true);
+        if (!refreshed) throw new Error('Network parameter refresh failed');
+      } catch (error) {
+        console.warn('DAO network parameter refresh failed after settlement:', error);
+      }
+    }
+
+    return didRefreshDaoData;
+  }
+
+  selectFilter(key) {
+    assert(DAO_FILTER_OPTIONS.some((filter) => filter.key === key), 'Unknown DAO filter');
+    this.selectedFilterKey = key;
+    if (key === 'all' || key === 'claimable') return;
+    const context = DAO_PROJECT_FILTER_KEYS.has(key) ? 'projects' : 'proposals';
+    this.contextFilters[context] = key;
+  }
+
+  async setFilter(key) {
+    if (key === this.selectedFilterKey || this.refreshState !== 'ready' || this.detailsRequest) return;
+    this.proposalOpenSequence += 1;
+    this.selectFilter(key);
+    this.list?.parentElement.scrollTo({ top: 0 });
+    return this.loadPageWithFeedback(true, 'Failed to load proposals');
+  }
+
+  renderFilterArea() {
+    const key = this.selectedFilterKey;
+    const context = key === 'all' || key === 'claimable'
+      ? null : DAO_PROJECT_FILTER_KEYS.has(key) ? 'projects' : 'proposals';
+    for (const button of this.filterBar.querySelectorAll('[data-dao-context]')) {
+      button.setAttribute('aria-pressed', String(button.dataset.daoContext === context));
+    }
+    for (const panel of this.filterBar.querySelectorAll('[data-dao-filters]')) {
+      const inactive = panel.dataset.daoFilters !== context;
+      panel.classList.toggle('dao-filter-inactive', inactive);
+      panel.inert = inactive;
+      panel.setAttribute('aria-hidden', String(inactive));
+    }
+    const placeholder = this.filterBar.querySelector('.dao-filter-placeholder');
+    placeholder.classList.toggle('dao-filter-inactive', context !== null);
+    placeholder.setAttribute('aria-hidden', String(context !== null));
+    placeholder.textContent = key === 'claimable'
+      ? 'Voting rewards available to your account.' : 'Showing all proposals and projects.';
   }
 
   render() {
-    const proposalsActive = daoRepo.getProposalsForUi('active');
-    const proposalsArchived = daoRepo.getProposalsForUi('archived');
+    const hasFreshData = this.refreshState === 'ready';
+    const proposals = hasFreshData ? daoRepo.getProposalsForUi() : [];
+    const metadataEntries = hasFreshData ? daoRepo.getProposalMetaForUi() : [];
+    const currentAddress = getDaoCurrentAccountAddress();
+    const now = getTransactionTimestamp();
+    const isClaimableFilter = this.selectedFilterKey === DAO_CLAIMABLE_FILTER.key;
+    const detailsLoading = Boolean(this.detailsRequest);
+    const claimCandidateMetadataEntries = this.getClaimCandidateMetadataEntries(metadataEntries, now);
+    const selectedMetadataEntries = isClaimableFilter
+      ? claimCandidateMetadataEntries
+      : this.getSelectedMetadataEntries(metadataEntries);
 
-    const proposals = this.selectedGroupKey === 'archived' ? proposalsArchived : proposalsActive;
+    const counts = Object.fromEntries(DAO_FILTER_OPTIONS.map((filter) => [filter.key, 0]));
+    const proposalsByNumber = new Map(proposals.map((proposal) => [proposal.number, proposal]));
+    for (const entry of metadataEntries) {
+      const proposal = proposalsByNumber.get(entry.proposal);
+      const filterKey = proposal ? getDaoProposalListFilterKey(proposal) : entry.status;
+      if (counts[filterKey] !== undefined) counts[filterKey] += 1;
+    }
+    counts[DAO_ALL_FILTER.key] = metadataEntries.length;
+    counts[DAO_CLAIMABLE_FILTER.key] = claimCandidateMetadataEntries.length;
 
-    // Update counts by state (within selected group)
-    const counts = Object.fromEntries(DAO_STATES.map((s) => [s.key, 0]));
-    for (const p of proposals) {
-      const state = getEffectiveDaoState(p);
-      if (counts[state] !== undefined) counts[state] += 1;
+    if (this.titleEl) this.titleEl.textContent = 'DAO';
+    if (this.filterBar) this.renderFilterArea();
+
+    for (const filter of DAO_FILTER_OPTIONS) {
+      const chip = this.filterBar?.querySelector(`.dao-filter-chip[data-filter-key="${filter.key}"]`);
+      const countEl = chip?.querySelector('.dao-filter-chip-count');
+      const count = counts[filter.key] || 0;
+
+      if (countEl) {
+        countEl.textContent = hasFreshData ? String(count) : '—';
+        let countAriaLabel = `${filter.label} count unavailable`;
+        if (hasFreshData) {
+          if (filter.key === DAO_CLAIMABLE_FILTER.key) {
+            countAriaLabel = `${count} tracked claim candidates`;
+          } else if (filter.key === DAO_ALL_FILTER.key) {
+            countAriaLabel = `${count} DAO items`;
+          } else if (DAO_PROJECT_FILTER_KEYS.has(filter.key)) {
+            countAriaLabel = `${count} ${filter.label.toLowerCase()} projects`;
+          } else {
+            countAriaLabel = `${count} ${filter.label.toLowerCase()} proposals`;
+          }
+        }
+        countEl.setAttribute('aria-label', countAriaLabel);
+      }
+      if (chip) {
+        const selected = filter.key === this.selectedFilterKey;
+        chip.classList.toggle('active', selected);
+        chip.classList.toggle('has-notification', this.hasNotificationForFilter(filter.key));
+        chip.setAttribute('aria-pressed', String(selected));
+      }
     }
 
-    // Update header title
-    const groupLabel = this.selectedGroupKey === 'archived' ? 'Archived' : 'Active';
-    const label = getDaoStateLabel(this.selectedStateKey);
-    if (this.titleEl) this.titleEl.textContent = `DAO · ${groupLabel} · ${label}`;
-
-    // Update group toggle labels + selection
-    if (this.groupActiveButton) {
-      this.groupActiveButton.textContent = `Active ${proposalsActive.length}`;
-      this.groupActiveButton.classList.toggle('active', this.selectedGroupKey !== 'archived');
-    }
-    if (this.groupArchivedButton) {
-      this.groupArchivedButton.textContent = `Archived ${proposalsArchived.length}`;
-      this.groupArchivedButton.classList.toggle('active', this.selectedGroupKey === 'archived');
-    }
-
-    for (const s of DAO_STATES) {
-      const el = document.getElementById(`daoStatusOption${s.label.replace(/\s+/g, '')}`);
-      if (el) el.textContent = `${s.label} ${counts[s.key] || 0}`;
-    }
-
-    // Filter + sort (newest entered into state first)
+    // Metadata establishes filter membership and recent-transition ordering.
+    const proposalOrder = new Map(selectedMetadataEntries.map((entry, index) => [entry.proposal, index]));
     const filtered = proposals
-      .filter((p) => getEffectiveDaoState(p) === this.selectedStateKey)
-      .sort((a, b) => Number(b.stateEnteredAt || b.createdAt || 0) - Number(a.stateEnteredAt || a.createdAt || 0));
+      .filter((proposal) => proposalOrder.has(proposal.number))
+      .filter((proposal) => (
+        !isClaimableFilter || getDaoRewardClaimStatus(proposal, currentAddress, now) === 'Claimable'
+      ))
+      .sort((a, b) => proposalOrder.get(a.number) - proposalOrder.get(b.number))
+      .slice(0, this.visibleProposalCount);
 
     // Clear old list items
     if (this.list) {
@@ -2666,24 +3401,27 @@ class DaoModal {
     const hasAny = filtered.length > 0;
     if (this.emptyState) this.emptyState.style.display = hasAny ? 'none' : 'block';
 
-    // Update empty state copy based on group.
     if (this.emptyState && !hasAny) {
       const lines = Array.from(this.emptyState.querySelectorAll('div'));
       // Structure is: [0]=spacer, [1]=headline, [2]=subline, [3]=optional third line.
       const headlineEl = lines[1] || null;
       const sublineEl = lines[2] || null;
-      const isArchived = this.selectedGroupKey === 'archived';
 
-      if (this.isLoading) {
+      if (this.refreshState === 'loading' || detailsLoading) {
         if (headlineEl) headlineEl.textContent = 'Loading proposals…';
         if (sublineEl) sublineEl.textContent = 'Please wait';
+      } else if (this.refreshState === 'error') {
+        if (headlineEl) headlineEl.textContent = 'Failed to load proposals';
+        if (sublineEl) sublineEl.textContent = 'Close and reopen the DAO to try again';
+      } else if (isClaimableFilter) {
+        if (headlineEl) headlineEl.textContent = 'No claimable proposals found';
+        if (sublineEl) sublineEl.textContent = 'Claimable proposals appear here when available';
+      } else if (DAO_PROJECT_FILTER_KEYS.has(this.selectedFilterKey)) {
+        if (headlineEl) headlineEl.textContent = `No ${label.toLowerCase()} projects found`;
+        if (sublineEl) sublineEl.textContent = 'Projects appear here after proposal acceptance';
       } else {
-        if (headlineEl) headlineEl.textContent = isArchived ? 'No archived proposals found' : 'No proposals found';
-        if (sublineEl) {
-          sublineEl.textContent = isArchived
-            ? 'Archived proposals appear here after they age out'
-            : 'Use + to create a proposal';
-        }
+        if (headlineEl) headlineEl.textContent = 'No proposals found';
+        if (sublineEl) sublineEl.textContent = 'Proposal data appears here when available';
       }
     }
 
@@ -2691,51 +3429,324 @@ class DaoModal {
 
     for (const p of filtered) {
       const li = document.createElement('li');
-      li.classList.add('chat-item');
+      li.classList.add('chat-item', 'dao-proposal-row');
+      li.dataset.proposalNumber = String(p.number);
 
-      const title = escapeHtml(p.title || 'Untitled Proposal');
-      const summary = escapeHtml((p.summary || '').trim());
-      const time = formatDaoTimestamp(p.stateEnteredAt || p.createdAt);
+      const rowTitleText = formatDaoProposalTitle(p);
+      const title = escapeHtml(rowTitleText);
+      const typeLabel = escapeHtml(getDaoTypeLabel(p.proposalType) || 'Proposal');
+      const previewHtml = this.renderProposalRowPreview(p);
+      const hasNotification = this.notificationProposalNumbers.has(p.number);
 
-      const numberPrefix = p.number ? `#${p.number} ` : '';
-
+      li.tabIndex = 0;
+      li.setAttribute('role', 'button');
+      li.classList.toggle('has-notification', hasNotification);
+      li.setAttribute(
+        'aria-label',
+        `${hasNotification ? 'New DAO activity. ' : ''}Open ${p.emergency === true ? 'emergency ' : ''}${rowTitleText}`,
+      );
       li.innerHTML = `
-        <div class="chat-content">
-          <div class="chat-header">
-            <div class="chat-name">${escapeHtml(numberPrefix)}${title}</div>
-            <div class="chat-time">${escapeHtml(time)}</div>
+        <div class="dao-row-content">
+          <div class="dao-row-title">${title}</div>
+          <div class="dao-row-meta">
+            <span class="dao-row-meta-item dao-row-meta-item--type">
+              ${typeLabel}
+            </span>
+            ${previewHtml}
           </div>
-          <div class="chat-message">${truncateMessage(summary || '—', 70)}</div>
         </div>
       `;
-      li.onclick = () => proposalInfoModal.open(p.id);
+      li.onclick = () => this.openProposal(p, li);
+      li.addEventListener('keydown', (e) => {
+        if (e.key !== 'Enter' && e.key !== ' ') return;
+        e.preventDefault();
+        this.openProposal(p, li);
+      });
       this.list.appendChild(li);
+    }
+
+    if (this.loadMoreButton) {
+      const total = selectedMetadataEntries.length;
+      const hasMore = this.visibleProposalCount < total;
+      this.loadMoreButton.hidden = !hasMore;
+      this.loadMoreButton.disabled = detailsLoading;
+      this.loadMoreButton.textContent = detailsLoading ? 'Loading…' : 'Load more';
     }
 
     // Show + button when modal is active
     if (this.addButton) {
-      this.addButton.classList.toggle('visible', this.isActive());
+      const proposalCreationPending = hasPendingDaoProposalCreation(currentAddress);
+      this.addButton.classList.toggle('visible', hasFreshData && this.isActive());
+      this.addButton.disabled = proposalCreationPending;
+      this.addButton.title = proposalCreationPending
+        ? 'Wait for your pending proposal to confirm before creating another.'
+        : 'Add proposal';
+      this.addButton.setAttribute(
+        'aria-label',
+        proposalCreationPending
+          ? 'Add proposal unavailable while your pending proposal confirms'
+          : 'Add proposal'
+      );
     }
+  }
+
+  renderProposalRowPreview(proposal) {
+    const chips = [];
+    const state = getEffectiveDaoState(proposal);
+    const projectFilter = DAO_PROJECT_FILTERS.find(
+      ({ key }) => key === getDaoProposalListFilterKey(proposal),
+    );
+    const result = getDaoProposalResultSummary(proposal);
+    const reward = getDaoProposalRewardSummary(proposal);
+
+    if (proposal.emergency === true) {
+      chips.push({
+        value: 'Emergency',
+        tone: 'emergency',
+      });
+    }
+
+    if (state === 'review') {
+      const now = getTransactionTimestamp();
+      const reviewWindow = getDaoProposalReviewWindow(proposal, now);
+      const pendingFinalizationOutcome = getDaoPendingFinalizationOutcome(proposal, now);
+
+      if (reviewWindow.canFinalizeReviewResult) {
+        if (pendingFinalizationOutcome) {
+          chips.push({
+            value: `${getDaoStateLabel(pendingFinalizationOutcome.nextState)} next`,
+            tone: 'neutral',
+          });
+        } else {
+          const { acceptCount, withholdCount } = getDaoCommitteeReview(proposal);
+          const isWithheld = withholdCount > acceptCount;
+          chips.push({
+            value: isWithheld ? 'Withheld' : 'Approved',
+            tone: isWithheld ? 'rejected' : 'accepted',
+          });
+        }
+      }
+
+      let reviewLabel = reviewWindow.label;
+      if (reviewWindow.canFinalizeReviewResult) {
+        reviewLabel = 'Ready to finalize';
+      } else if (now < reviewWindow.start) {
+        reviewLabel = formatDaoReadyAtLabel(reviewWindow.start, now) || reviewLabel;
+      } else if (now <= reviewWindow.end) {
+        const endLabel = formatDaoDayOrTime(reviewWindow.end, now);
+        if (endLabel) reviewLabel = `Ends ${endLabel}`;
+      }
+
+      chips.push({
+        value: reviewLabel,
+        tone: 'neutral',
+      });
+    } else if (state === 'voting') {
+      const now = getTransactionTimestamp();
+      const votingWindow = getDaoProposalVotingWindow(proposal, now);
+      const endLabel = formatDaoDayOrTime(votingWindow.end, now);
+      const votingEnded = Boolean(votingWindow.end && now > votingWindow.end);
+
+      if (endLabel && !votingEnded) {
+        chips.push({
+          value: `Ends ${endLabel}`,
+          tone: 'neutral',
+        });
+      }
+      if (votingEnded) {
+        chips.push({
+          value: 'Ready to finalize',
+          tone: 'neutral',
+        });
+      }
+    } else if (state === 'canceled') {
+      chips.push({
+        value: getDaoStateLabel(state),
+        tone: 'rejected',
+      });
+    } else {
+      const lifecycleActions = getDaoProposalLifecycleActions(proposal, reward);
+      const claimAction = lifecycleActions.find((action) => action.kind === 'claim_reward');
+      const readyAction = lifecycleActions.find((action) => action.rowPreviewLabel);
+
+      if (claimAction) {
+        chips.push({
+          value: 'Ready to claim',
+          tone: reward?.statusTone,
+        });
+      }
+      if (lifecycleActions.some((action) => action.kind === 'burn_reward')) {
+        chips.push({
+          value: 'Ready to burn',
+          tone: 'neutral',
+        });
+      }
+      if (readyAction) {
+        chips.push({
+          value: readyAction.rowPreviewLabel,
+          tone: readyAction.canSubmit ? 'accepted' : 'neutral',
+        });
+      }
+    }
+    if (projectFilter) {
+      chips.push({
+        value: projectFilter.label,
+        tone: getDaoProjectStatusTone(state) || 'neutral',
+      });
+    } else if (result && state !== 'accepted') {
+      chips.push({
+        value: result.headline,
+        tone: result.tone,
+      });
+    }
+
+    if (chips.length === 0) return '';
+    return `
+      <div class="dao-row-previews">
+        ${chips.map((chip) => `
+          <span class="dao-row-preview dao-row-preview--${escapeDaoFormAttribute(chip.tone || 'neutral')}">
+            ${escapeHtml(chip.value)}
+          </span>
+        `).join('')}
+      </div>
+    `;
+  }
+
+  async openProposal(proposal, proposalRow) {
+    const session = this.loadingSession;
+    if (!this.isLoadingSessionCurrent(session)) return;
+    const openId = ++this.proposalOpenSequence;
+    try {
+      const refreshed = await daoRepo.refreshProposal(proposal.number, session.controller.signal);
+      if (!this.isLoadingSessionCurrent(session) || openId !== this.proposalOpenSequence) return;
+      if (!refreshed) throw new Error(`Proposal #${proposal.number} is unavailable`);
+      if (this.clearNotificationForProposal(proposal.number)) {
+        proposalRow.classList.remove('has-notification');
+        const ariaLabel = proposalRow.getAttribute('aria-label');
+        if (ariaLabel) proposalRow.setAttribute('aria-label', ariaLabel.replace(/^New DAO activity\. /, ''));
+      }
+      proposalInfoModal.open(proposal.id);
+      this.returnProposalNumber = proposal.number;
+    } catch (error) {
+      if (!this.isLoadingSessionCurrent(session) || openId !== this.proposalOpenSequence) return;
+      console.warn('Failed to refresh DAO proposal:', error);
+      showToast('Failed to load proposal', 2500, 'error');
+    }
+  }
+
+  restoreListFocus() {
+    if (!this.isActive()) return;
+    const row = this.list.querySelector(`[data-proposal-number="${this.returnProposalNumber}"]`);
+    (row || this.filterBar.querySelector('[aria-pressed="true"]'))?.focus();
   }
 }
 
 const daoModal = new DaoModal();
 
+function getPathValue(source, path) {
+  return String(path || '').split('.').reduce((value, key) => {
+    if (value == null || typeof value !== 'object') return undefined;
+    return value[key];
+  }, source);
+}
+
+function escapeDaoFormAttribute(value) {
+  return escapeHtml(value).replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+
+const DAO_REVIEW_START_MAX_MS = new Date(9999, 11, 31, 23, 59, 0, 0).getTime();
+const DURATION_MINUTE_MS = 60 * 1000;
+const DURATION_HOUR_MS = 60 * DURATION_MINUTE_MS;
+const DURATION_DAY_MS = 24 * DURATION_HOUR_MS;
+const DURATION_PICKER_MAX_DAYS = 30;
+const DAO_GRACE_PERIOD_PRODUCT_MAX_MS = DURATION_PICKER_MAX_DAYS * DURATION_DAY_MS;
+const DAO_PARAMETER_NUMBER_LIMIT = 10 ** DAO_PARAMETER_MAX_WHOLE_DIGITS;
+
+function durationPartsToMilliseconds(days, hours, minutes) {
+  const parts = [days, hours, minutes].map(Number);
+  if (parts.some((part) => !Number.isInteger(part) || part < 0)) return NaN;
+  if (parts[1] > 23 || parts[2] > 59) return NaN;
+  const milliseconds = (parts[0] * DURATION_DAY_MS)
+    + (parts[1] * DURATION_HOUR_MS)
+    + (parts[2] * DURATION_MINUTE_MS);
+  return Number.isSafeInteger(milliseconds) ? milliseconds : NaN;
+}
+
+function millisecondsToDurationParts(milliseconds) {
+  const value = Number(milliseconds);
+  if (!Number.isSafeInteger(value) || value < 0 || value % DURATION_MINUTE_MS !== 0) return null;
+  const days = Math.floor(value / DURATION_DAY_MS);
+  const remainder = value % DURATION_DAY_MS;
+  const hours = Math.floor(remainder / DURATION_HOUR_MS);
+  const minutes = Math.floor((remainder % DURATION_HOUR_MS) / DURATION_MINUTE_MS);
+  return { days, hours, minutes };
+}
+
+function formatDurationParts(milliseconds) {
+  const parts = millisecondsToDurationParts(milliseconds);
+  if (!parts) return '';
+  if (milliseconds === 0) return '0 minutes';
+  return [
+    [parts.days, 'day'],
+    [parts.hours, 'hour'],
+    [parts.minutes, 'minute'],
+  ]
+    .filter(([value]) => value > 0)
+    .map(([value, unit]) => `${value} ${unit}${value === 1 ? '' : 's'}`)
+    .join(' ');
+}
+
 class AddProposalModal {
+  static USD_EXTRA_DECIMALS = /\.\d{3}/;
+
+  static EMPTY_MILESTONE = Object.freeze({
+    title: '',
+    description: '',
+    deliverable: '',
+    durationDays: '',
+    costUsdStr: '',
+    penaltyUsdStr: '0.00',
+    bonusUsdStr: '0.00',
+  });
+
   load() {
     this.modal = document.getElementById('addProposalModal');
+    this.bindCommitteeAddressCopy(this.modal);
     this.closeButton = document.getElementById('closeAddProposalModal');
     this.cancelButton = document.getElementById('cancelAddProposal');
     this.form = document.getElementById('addProposalForm');
     this.titleInput = document.getElementById('addProposalTitle');
     this.typeSelect = document.getElementById('addProposalType');
-    this.summaryInput = document.getElementById('addProposalSummary');
-    this.typeFieldsContainer = document.getElementById('addProposalTypeFields');
-
-    this.submitButton = this.form?.querySelector('button[type="submit"]');
+    this.descriptionInput = document.getElementById('addProposalDescription');
+    this.proposalFeeInput = document.getElementById('addProposalFee');
+    this.typeHelp = document.getElementById('addProposalTypeHelp');
+    this.parameterEditor = document.getElementById('addProposalParameterEditor');
+    this.optionsList = document.getElementById('addProposalOptionsList');
+    this.optionsLimitHelp = document.getElementById('addProposalOptionsLimitHelp');
+    this.addOptionButton = document.getElementById('addProposalOptionButton');
+    this.projectEditor = document.getElementById('addProposalProjectEditor');
+    this.projectAddressInput = document.getElementById('addProposalProjectAddress');
+    this.projectMilestonesList = document.getElementById('addProposalProjectMilestones');
+    this.projectAddMilestoneButton = document.getElementById('addProposalProjectAddMilestone');
+    this.projectMilestoneLimit = document.getElementById('addProposalProjectMilestoneLimit');
+    this.projectBaseCost = document.getElementById('addProposalProjectBaseCost');
+    this.projectMaximumBonus = document.getElementById('addProposalProjectMaximumBonus');
+    this.projectMaximumBudget = document.getElementById('addProposalProjectMaximumBudget');
+    this.projectLive = document.getElementById('addProposalProjectLive');
+    this.emergencySelect = document.getElementById('addProposalEmergency');
+    this.emergencyHelp = document.getElementById('addProposalEmergencyHelp');
+    this.reviewStartButton = document.getElementById('addProposalReviewStartTime');
+    this.reviewStartHelp = document.getElementById('addProposalReviewStartHelp');
+    this.gracePeriodButton = document.getElementById('addProposalGracePeriodMs');
+    this.gracePeriodHelp = document.getElementById('addProposalGracePeriodHelp');
+    this.gracePeriodLimit = document.getElementById('addProposalGracePeriodLimit');
+    this.gracePeriodLoadError = false;
+    this.submitButton = document.getElementById('addProposalSubmitButton');
+    this.resetConfigCache();
 
     if (this.closeButton) this.closeButton.addEventListener('click', () => this.close());
     if (this.cancelButton) this.cancelButton.addEventListener('click', () => this.close());
+    if (this.addOptionButton) this.addOptionButton.addEventListener('click', () => this.addOption());
 
     if (this.form && this.submitButton) {
       this.form.addEventListener('submit', withButtonCooldown(
@@ -2744,28 +3755,1816 @@ class AddProposalModal {
         null,
         () => this.handleCreate()
       ));
+      this.form.addEventListener('input', (event) => this.handleDraftInput(event));
+      this.form.addEventListener('change', (event) => this.handleDraftInput(event));
+      this.form.addEventListener('click', (event) => this.handleFormHelpClick(event));
     }
 
     if (this.typeSelect) {
-      this.typeSelect.addEventListener('change', () => {
-        this.renderTypeFields();
+      this.typeSelect.addEventListener('change', () => this.handleProposalTypeChange());
+    }
+
+    if (this.emergencySelect) {
+      this.emergencySelect.addEventListener('change', () => {
+        this.renderProposalFee();
+        this.renderOptions();
       });
+    }
+    if (this.reviewStartButton) this.reviewStartButton.addEventListener('click', () => this.openReviewStartPicker());
+    if (this.gracePeriodButton) this.gracePeriodButton.addEventListener('click', () => this.openGracePeriodPicker());
+
+    if (this.optionsList) {
+      this.optionsList.addEventListener('click', (event) => this.handleOptionsClick(event));
+      this.optionsList.addEventListener('input', (event) => this.handleOptionsInput(event));
+      this.optionsList.addEventListener('change', (event) => this.handleOptionsChange(event));
+    }
+    if (this.projectAddMilestoneButton) {
+      this.projectAddMilestoneButton.addEventListener('click', () => this.addProjectMilestone());
+    }
+    if (this.projectEditor) {
+      this.projectEditor.addEventListener('input', (event) => this.handleProjectInput(event));
+      this.projectEditor.addEventListener('click', (event) => this.handleProjectClick(event));
     }
   }
 
   open() {
-    this.modal.classList.add('active');
+    openModal(this.modal);
     enterFullscreen();
+    this.discardWarningShown = false;
+    this.resetConfigCache();
+    this.proposalFeeUsdStr = null;
+    this.maxGracePeriodMs = null;
+    this.gracePeriodLoadError = false;
     if (this.titleInput) this.titleInput.value = '';
-    if (this.typeSelect) this.typeSelect.value = 'treasury_project';
-    if (this.summaryInput) this.summaryInput.value = '';
-    this.renderTypeFields();
+    if (this.typeSelect) {
+      this.typeSelect.value = 'governance';
+      PopupSelect.sync(this.typeSelect);
+    }
+    if (this.descriptionInput) this.descriptionInput.value = '';
+    if (this.emergencySelect) {
+      this.emergencySelect.value = 'false';
+      PopupSelect.sync(this.emergencySelect);
+    }
+    this.reviewStartTimeMs = 0;
+    this.gracePeriodMs = 0;
+    this.projectMilestoneSequence = 0;
+    this.projectDraft = {
+      address: '',
+      milestones: [this.createProjectMilestone()],
+    };
+    this.renderReviewStartTime();
+    this.options = [this.createOption()];
+    this.renderProposalTypeEditor();
+    this.renderProjectEditor();
+    this.renderOptions('Loading current DAO config values...');
+    this.renderGracePeriodLimitHint();
+    this.refreshProposalDefaults();
+    this.refreshSelectedConfigOptions();
     setTimeout(() => {
-      this.titleInput.focus();
+      this.titleInput?.focus();
     }, 325);
   }
 
   close() {
+    if (!this.discardWarningShown && this.hasUnsavedChanges()) {
+      this.discardWarningShown = true;
+      showToast('Press back again to discard changes.', 5000, 'warning');
+      return;
+    }
+
+    this.forceClose();
+  }
+
+  forceClose() {
+    PopupSelect.hide();
+    this.modal.classList.remove('active');
+    this.discardWarningShown = false;
+    enterFullscreen();
+  }
+
+  handleDraftInput(event) {
+    this.discardWarningShown = false;
+    this.clearValidationError(event.target);
+  }
+
+  hasUnsavedChanges() {
+    if (
+      this.titleInput?.value || this.descriptionInput?.value ||
+      (this.typeSelect && this.typeSelect.value !== 'governance') ||
+      (this.emergencySelect && this.emergencySelect.value !== 'false') ||
+      this.reviewStartTimeMs !== 0 || this.gracePeriodMs !== 0
+    ) {
+      return true;
+    }
+    return this.hasProjectChanges() || this.hasOptionChanges();
+  }
+
+  hasProjectChanges() {
+    const { address, milestones } = this.projectDraft;
+    if (address || milestones.length !== 1) return true;
+
+    const [milestone] = milestones;
+    return Object.entries(AddProposalModal.EMPTY_MILESTONE).some(([field, value]) => milestone[field] !== value);
+  }
+
+  hasOptionChanges() {
+    if (this.options.length > 1) return true;
+    const { changes } = this.options[0];
+    if (changes.length === 0) return false;
+
+    // The first parameter is filled in automatically when config values load.
+    const [defaultOption] = this.getConfigOptions();
+    return !defaultOption || JSON.stringify(changes) !== JSON.stringify([this.createChange(defaultOption.key)]);
+  }
+
+  isActive() {
+    return this.modal.classList.contains('active');
+  }
+
+  isProjectProposal() {
+    return this.typeSelect?.value === DAO_PROJECT_TYPE;
+  }
+
+  renderProposalTypeEditor() {
+    const isProject = this.isProjectProposal();
+    this.parameterEditor?.classList.toggle('hidden', isProject);
+    this.projectEditor?.classList.toggle('hidden', !isProject);
+
+    if (this.typeHelp) {
+      this.typeHelp.textContent = isProject
+        ? 'Project proposals fund a recipient through milestones. This editor is a UI preview.'
+        : 'Choose governance, economic, or protocol. This controls which parameters can be selected below.';
+    }
+
+    if (this.emergencySelect) {
+      if (isProject) this.emergencySelect.value = 'false';
+      this.emergencySelect.disabled = isProject;
+      PopupSelect.sync(this.emergencySelect);
+    }
+    if (this.emergencyHelp) {
+      this.emergencyHelp.textContent = isProject
+        ? 'Project proposals cannot be emergency proposals.'
+        : 'Emergency proposals allow only one additional option.';
+    }
+
+    this.renderProposalFee();
+  }
+
+  handleProposalTypeChange() {
+    this.clearValidationErrors();
+    this.renderProposalTypeEditor();
+
+    if (this.isProjectProposal()) {
+      this.configRequestId += 1;
+      this.renderProjectEditor();
+      return;
+    }
+
+    this.options = this.options.map((proposalOption) => ({ ...proposalOption, changes: [] }));
+    this.refreshSelectedConfigOptions();
+  }
+
+  resetConfigCache() {
+    this.configOptionsByType = {};
+    this.configOptionPromises = {};
+    this.networkAccountConfigPromise = null;
+    this.protocolConfigPromise = null;
+    this.configRequestId = 0;
+    this.proposalDefaultsRequestId = 0;
+  }
+
+  getConfigOptions() {
+    const proposalType = this.typeSelect?.value || 'governance';
+    return this.configOptionsByType?.[proposalType] || [];
+  }
+
+  renderConfigLoadingState() {
+    this.renderOptions('Loading current DAO config values...');
+  }
+
+  renderConfigUnavailableState() {
+    this.renderOptions('Current DAO config values are unavailable. Try again when the network responds.');
+  }
+
+  renderProposalFee() {
+    if (!this.proposalFeeInput) return;
+
+    if (this.emergencySelect?.value === 'true') {
+      this.proposalFeeInput.value = '0 USD';
+      this.clearValidationError(this.proposalFeeInput);
+      return;
+    }
+
+    if (this.proposalFeeUsdStr === null) {
+      this.proposalFeeInput.value = 'Loading...';
+      return;
+    }
+
+    this.proposalFeeInput.value = this.proposalFeeUsdStr
+      ? `${this.proposalFeeUsdStr} USD`
+      : 'Unavailable';
+  }
+
+  renderMaximumWarning(input, warning, message) {
+    if (!warning) return;
+    warning.textContent = message;
+    warning.classList.toggle('hidden', !input?.validity.rangeOverflow);
+  }
+
+  renderGracePeriodLimitHint() {
+    const maximumSummary = this.maxGracePeriodMs === null
+      ? ''
+      : `${formatDaoDurationEstimate(this.maxGracePeriodMs)} (${this.maxGracePeriodMs} ms)`;
+    const currentSummary = formatDurationParts(this.gracePeriodMs);
+    if (this.gracePeriodButton) {
+      this.gracePeriodButton.textContent = String(this.gracePeriodMs);
+      this.gracePeriodButton.disabled = this.maxGracePeriodMs === null;
+      this.gracePeriodButton.setAttribute('aria-busy', String(this.maxGracePeriodMs === null));
+    }
+    if (this.gracePeriodHelp) {
+      this.gracePeriodHelp.textContent = this.maxGracePeriodMs === null
+        ? (this.gracePeriodLoadError ? 'Duration: maximum unavailable' : 'Duration: loading maximum...')
+        : `Duration: ${currentSummary}`;
+    }
+    if (this.gracePeriodLimit) {
+      this.gracePeriodLimit.textContent = maximumSummary ? `Maximum: ${maximumSummary}` : '';
+      this.gracePeriodLimit.classList.toggle('hidden', !maximumSummary);
+    }
+  }
+
+  async refreshProposalDefaults() {
+    const requestId = ++this.proposalDefaultsRequestId;
+    this.renderProposalFee();
+
+    try {
+      const { proposalFeeUsdStr, maxGracePeriodMs } = await this.loadDaoProposalDefaults();
+      if (!this.isActive() || requestId !== this.proposalDefaultsRequestId) return;
+      this.proposalFeeUsdStr = proposalFeeUsdStr;
+      this.maxGracePeriodMs = maxGracePeriodMs;
+      this.gracePeriodLoadError = false;
+      this.renderProposalFee();
+      this.renderGracePeriodLimitHint();
+    } catch (error) {
+      console.warn('Could not refresh DAO proposal fee:', error);
+      if (!this.isActive() || requestId !== this.proposalDefaultsRequestId) return;
+      this.proposalFeeUsdStr = '';
+      this.maxGracePeriodMs = null;
+      this.gracePeriodLoadError = true;
+      this.renderProposalFee();
+      this.renderGracePeriodLimitHint();
+      showToast('Could not refresh DAO proposal fee', 2500, 'warning');
+    }
+  }
+
+  createValidationError(message, target) {
+    const error = new Error(message);
+    error.validationTarget = target;
+    return error;
+  }
+
+  clearValidationErrors() {
+    this.modal?.querySelectorAll('.dao-form-error').forEach((el) => {
+      el.classList.remove('dao-form-error');
+    });
+    this.modal?.querySelectorAll('[aria-invalid="true"]').forEach((el) => {
+      el.removeAttribute('aria-invalid');
+    });
+  }
+
+  clearValidationError(target) {
+    if (target?.closest?.('[data-dao-committee-addresses]')) return;
+    const control = PopupSelect.getVisibleControl(target);
+    const highlight = this.getValidationHighlight(control);
+    highlight?.classList.remove('dao-form-error');
+    if (control?.matches?.('input, select, textarea, button')) {
+      control.removeAttribute('aria-invalid');
+    }
+  }
+
+  getValidationHighlight(target) {
+    return target?.closest?.('.dao-form-change-box, .dao-form-option, .form-group') || target || null;
+  }
+
+  showValidationError(error) {
+    const target = PopupSelect.getVisibleControl(error?.validationTarget);
+    const highlight = this.getValidationHighlight(target);
+    if (highlight) {
+      highlight.classList.add('dao-form-error');
+      highlight.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    }
+    if (target?.matches?.('input, select, textarea, button')) {
+      target.setAttribute('aria-invalid', 'true');
+      target.focus({ preventScroll: true });
+    }
+    showToast(error?.message || 'Please check the proposal form', 2500, 'warning');
+  }
+
+  async refreshSelectedConfigOptions() {
+    const proposalType = this.typeSelect?.value || 'governance';
+    if (!isDaoParameterProposalTypeKey(proposalType)) return;
+
+    const requestId = ++this.configRequestId;
+    this.renderConfigLoadingState();
+
+    const options = await this.loadConfigOptions(proposalType);
+
+    if (!this.isActive() || requestId !== this.configRequestId || this.typeSelect?.value !== proposalType) {
+      return;
+    }
+
+    if (options.length === 0) {
+      this.renderConfigUnavailableState();
+      return;
+    }
+
+    this.synchronizeOptions();
+    this.renderOptions();
+  }
+
+  async loadConfigOptions(proposalType) {
+    if (this.configOptionsByType[proposalType]) return this.configOptionsByType[proposalType];
+    if (this.configOptionPromises[proposalType]) return this.configOptionPromises[proposalType];
+
+    this.configOptionPromises[proposalType] = this.fetchConfigOptions(proposalType)
+      .then((options) => {
+        this.configOptionsByType[proposalType] = options;
+        return options;
+      })
+      .catch((error) => {
+        console.warn(`Could not refresh DAO ${proposalType} config values:`, error);
+        showToast('Could not refresh current DAO config values', 2500, 'warning');
+        return [];
+      })
+      .finally(() => {
+        delete this.configOptionPromises[proposalType];
+      });
+
+    return this.configOptionPromises[proposalType];
+  }
+
+  async fetchConfigOptions(proposalType) {
+    const catalog = DAO_CONFIG_CHANGE_OPTIONS[proposalType] || [];
+    if (catalog.length === 0) return [];
+
+    const source = await this.fetchConfigSource(proposalType);
+    if (!source) throw new Error(`Missing ${proposalType} config source`);
+
+    const options = catalog
+      .map((option) => {
+        let current = getPathValue(source, option.path);
+        if (current !== undefined && option.validation === 'committeeAddresses') {
+          current = daoRepo.normalizeCommitteeAddresses(current);
+        }
+        return current === undefined ? null : { ...option, current };
+      })
+      .filter(Boolean);
+
+    if (options.length === 0) {
+      throw new Error(`No current ${proposalType} config values found`);
+    }
+
+    return options;
+  }
+
+  async loadDaoProposalDefaults({ refresh = false } = {}) {
+    const account = await this.fetchNetworkAccountConfig({ refresh });
+    const daoConfig = account?.current?.dao;
+    const proposalFeeUsdStr = String(daoConfig?.proposalFeeUsdStr ?? '').trim();
+    if (!proposalFeeUsdStr) throw new Error('Missing DAO proposal fee');
+    const graceDuration = Number(daoConfig?.graceDuration);
+    if (!Number.isSafeInteger(graceDuration) || graceDuration < 0) {
+      throw new Error('Missing DAO maximum grace duration');
+    }
+    const proposalDurations = {
+      reviewDuration: Number(daoConfig?.reviewDuration),
+      votingDuration: Number(daoConfig?.votingDuration),
+      claimDuration: Number(daoConfig?.claimDuration),
+    };
+    if (Object.values(proposalDurations).some((duration) => !Number.isSafeInteger(duration) || duration < 0)) {
+      throw new Error('Missing DAO proposal lifecycle durations');
+    }
+    const rawMaximumMs = Math.min(
+      graceDuration,
+      DAO_PROPOSAL_GRACE_PERIOD_MAX_MS,
+      DAO_GRACE_PERIOD_PRODUCT_MAX_MS,
+    );
+    const maxGracePeriodMs = Math.floor(rawMaximumMs / DURATION_MINUTE_MS) * DURATION_MINUTE_MS;
+    return { proposalFeeUsdStr, maxGracePeriodMs, proposalDurations };
+  }
+
+  async fetchNetworkAccountConfig({ refresh = false } = {}) {
+    if (refresh || !this.networkAccountConfigPromise) {
+      this.networkAccountConfigPromise = queryNetwork(`/account/${NETWORK_ACCOUNT_ID}`)
+        .then((result) => result?.account || null);
+    }
+    return this.networkAccountConfigPromise;
+  }
+
+  async fetchConfigSource(proposalType) {
+    if (proposalType === 'protocol') {
+      if (!this.protocolConfigPromise) {
+        this.protocolConfigPromise = queryNetwork('/netconfig');
+      }
+      return this.protocolConfigPromise;
+    }
+
+    return this.fetchNetworkAccountConfig();
+  }
+
+  createProjectMilestone() {
+    this.projectMilestoneSequence += 1;
+    return {
+      uiId: `milestone-${this.projectMilestoneSequence}`,
+      ...AddProposalModal.EMPTY_MILESTONE,
+    };
+  }
+
+  renderProjectEditor() {
+    if (!this.projectMilestonesList || !this.projectDraft) return;
+
+    if (this.projectAddressInput) this.projectAddressInput.value = this.projectDraft.address;
+    this.projectMilestonesList.innerHTML = this.projectDraft.milestones
+      .map((milestone, index) => this.renderProjectMilestone(milestone, index))
+      .join('');
+
+    const milestoneCount = this.projectDraft.milestones.length;
+    if (this.projectMilestoneLimit) {
+      this.projectMilestoneLimit.textContent = `${milestoneCount} of ${DAO_PROJECT_MAX_MILESTONES}`;
+    }
+    if (this.projectAddMilestoneButton) {
+      this.projectAddMilestoneButton.disabled = milestoneCount >= DAO_PROJECT_MAX_MILESTONES;
+    }
+    this.renderProjectBudgetSummary();
+  }
+
+  renderProjectMilestone(milestone, index) {
+    const milestoneNumber = index + 1;
+    const uiId = escapeDaoFormAttribute(milestone.uiId);
+    const idPrefix = `addProposalProject${milestone.uiId}`;
+    const moveUpDisabled = index === 0 ? 'disabled' : '';
+    const moveDownDisabled = index === this.projectDraft.milestones.length - 1 ? 'disabled' : '';
+    const removeDisabled = this.projectDraft.milestones.length === 1 ? 'disabled' : '';
+
+    return `
+      <section class="dao-project-milestone" data-dao-milestone-id="${uiId}" aria-labelledby="${idPrefix}Heading">
+        <div class="dao-form-row-title">
+          <label id="${idPrefix}Heading">Milestone ${milestoneNumber}</label>
+          <div class="dao-project-milestone-actions">
+            <button type="button" class="btn btn--secondary dao-project-milestone-action" data-dao-milestone-move="-1" aria-label="Move milestone ${milestoneNumber} up" title="Move milestone ${milestoneNumber} up" ${moveUpDisabled}>
+              <svg class="dao-project-milestone-action-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                <line x1="12" y1="19" x2="12" y2="5"></line>
+                <polyline points="5 12 12 5 19 12"></polyline>
+              </svg>
+            </button>
+            <button type="button" class="btn btn--secondary dao-project-milestone-action" data-dao-milestone-move="1" aria-label="Move milestone ${milestoneNumber} down" title="Move milestone ${milestoneNumber} down" ${moveDownDisabled}>
+              <svg class="dao-project-milestone-action-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                <line x1="12" y1="5" x2="12" y2="19"></line>
+                <polyline points="19 12 12 19 5 12"></polyline>
+              </svg>
+            </button>
+            <button type="button" class="btn btn--secondary dao-form-remove-button" data-dao-remove-milestone aria-label="Remove milestone ${milestoneNumber}" title="Remove milestone ${milestoneNumber}" ${removeDisabled}>
+              ${this.renderRemoveIcon()}
+            </button>
+          </div>
+        </div>
+        <div class="dao-form-grid dao-project-milestone-fields">
+          <div class="form-group form-group--full">
+            <label for="${idPrefix}Title">Title <span class="dao-form-required" aria-hidden="true">*</span></label>
+            <input id="${idPrefix}Title" class="form-control" type="text" maxlength="${DAO_PROJECT_MILESTONE_TITLE_MAX_LENGTH}" value="${escapeDaoFormAttribute(milestone.title)}" data-dao-milestone-field="title" data-dao-milestone-id="${uiId}" required />
+          </div>
+          <div class="form-group form-group--full">
+            <label for="${idPrefix}Description">Description <span class="dao-form-required" aria-hidden="true">*</span></label>
+            <textarea id="${idPrefix}Description" class="form-control" rows="3" maxlength="${DAO_PROJECT_MILESTONE_TEXT_MAX_LENGTH}" data-dao-milestone-field="description" data-dao-milestone-id="${uiId}" required>${escapeHtml(milestone.description)}</textarea>
+          </div>
+          <div class="form-group form-group--full">
+            <label for="${idPrefix}Deliverable">Deliverable / Acceptance Criteria <span class="dao-form-required" aria-hidden="true">*</span></label>
+            <textarea id="${idPrefix}Deliverable" class="form-control" rows="3" maxlength="${DAO_PROJECT_MILESTONE_TEXT_MAX_LENGTH}" data-dao-milestone-field="deliverable" data-dao-milestone-id="${uiId}" required>${escapeHtml(milestone.deliverable)}</textarea>
+          </div>
+          <div class="form-group">
+            <label for="${idPrefix}Duration">Duration (days) <span class="dao-form-required" aria-hidden="true">*</span></label>
+            <input id="${idPrefix}Duration" class="form-control" type="number" inputmode="numeric" min="1" max="${DAO_PROJECT_DURATION_MAX_DAYS}" step="1" placeholder="30" value="${escapeDaoFormAttribute(milestone.durationDays)}" data-dao-milestone-field="durationDays" data-dao-milestone-id="${uiId}" required />
+            <div class="dao-form-help">1–${DAO_PROJECT_DURATION_MAX_DAYS} days</div>
+          </div>
+          <div class="form-group">
+            <label for="${idPrefix}Cost">Cost (USD) <span class="dao-form-required" aria-hidden="true">*</span></label>
+            <input id="${idPrefix}Cost" class="form-control" type="number" inputmode="decimal" min="0" step="0.01" placeholder="0.00" value="${escapeDaoFormAttribute(milestone.costUsdStr)}" data-dao-milestone-field="costUsdStr" data-dao-milestone-id="${uiId}" required />
+          </div>
+          <div class="form-group">
+            <label for="${idPrefix}Penalty">Late Penalty (USD) <span class="dao-form-required" aria-hidden="true">*</span></label>
+            <input id="${idPrefix}Penalty" class="form-control" type="number" inputmode="decimal" min="0" step="0.01" value="${escapeDaoFormAttribute(milestone.penaltyUsdStr)}" data-dao-milestone-field="penaltyUsdStr" data-dao-milestone-id="${uiId}" required />
+          </div>
+          <div class="form-group">
+            <label for="${idPrefix}Bonus">Early Bonus (USD) <span class="dao-form-required" aria-hidden="true">*</span></label>
+            <input id="${idPrefix}Bonus" class="form-control" type="number" inputmode="decimal" min="0" step="0.01" value="${escapeDaoFormAttribute(milestone.bonusUsdStr)}" data-dao-milestone-field="bonusUsdStr" data-dao-milestone-id="${uiId}" required />
+          </div>
+        </div>
+      </section>
+    `;
+  }
+
+  handleProjectInput(event) {
+    if (event.target.matches('[data-dao-project-field="address"]')) {
+      this.projectDraft.address = event.target.value;
+      return;
+    }
+    if (!event.target.matches('[data-dao-milestone-field]')) return;
+
+    const milestone = this.projectDraft.milestones.find(
+      (item) => item.uiId === event.target.dataset.daoMilestoneId
+    );
+    if (!milestone) return;
+
+    const field = event.target.dataset.daoMilestoneField;
+    milestone[field] = event.target.value;
+    if (field === 'costUsdStr' || field === 'bonusUsdStr') this.renderProjectBudgetSummary();
+  }
+
+  handleProjectClick(event) {
+    const actionButton = event.target.closest('[data-dao-milestone-move], [data-dao-remove-milestone]');
+    if (!actionButton) return;
+
+    const milestoneElement = actionButton.closest('[data-dao-milestone-id]');
+    const uiId = milestoneElement?.dataset.daoMilestoneId;
+    const index = this.projectDraft.milestones.findIndex((milestone) => milestone.uiId === uiId);
+    if (index < 0) return;
+
+    if (actionButton.matches('[data-dao-remove-milestone]')) {
+      if (this.projectDraft.milestones.length === 1) return;
+      this.projectDraft.milestones.splice(index, 1);
+      this.discardWarningShown = false;
+      this.renderProjectEditor();
+      const nextIndex = Math.min(index, this.projectDraft.milestones.length - 1);
+      this.focusProjectMilestone(this.projectDraft.milestones[nextIndex].uiId);
+      this.announceProjectChange(`Removed milestone ${index + 1}`);
+      return;
+    }
+
+    const destination = index + Number(actionButton.dataset.daoMilestoneMove);
+    if (destination < 0 || destination >= this.projectDraft.milestones.length) return;
+    const [milestone] = this.projectDraft.milestones.splice(index, 1);
+    this.projectDraft.milestones.splice(destination, 0, milestone);
+    this.discardWarningShown = false;
+    this.renderProjectEditor();
+    this.focusProjectMilestone(uiId);
+    this.announceProjectChange(`Moved milestone to position ${destination + 1}`);
+  }
+
+  addProjectMilestone() {
+    if (this.projectDraft.milestones.length >= DAO_PROJECT_MAX_MILESTONES) {
+      showToast(`Projects can have at most ${DAO_PROJECT_MAX_MILESTONES} milestones`, 2500, 'warning');
+      return;
+    }
+
+    const milestone = this.createProjectMilestone();
+    this.projectDraft.milestones.push(milestone);
+    this.discardWarningShown = false;
+    this.renderProjectEditor();
+    this.focusProjectMilestone(milestone.uiId);
+    this.announceProjectChange(`Added milestone ${this.projectDraft.milestones.length}`);
+  }
+
+  focusProjectMilestone(uiId) {
+    this.projectMilestonesList?.querySelector(
+      `[data-dao-milestone-id="${uiId}"] [data-dao-milestone-field="title"]`
+    )?.focus();
+  }
+
+  announceProjectChange(message) {
+    if (this.projectLive) this.projectLive.textContent = message;
+  }
+
+  renderProjectBudgetSummary() {
+    const amounts = this.projectDraft?.milestones.map(({ costUsdStr, bonusUsdStr }) => ({
+      costUsdStr: AddProposalModal.USD_EXTRA_DECIMALS.test(costUsdStr) ? '' : costUsdStr,
+      bonusUsdStr: AddProposalModal.USD_EXTRA_DECIMALS.test(bonusUsdStr) ? '' : bonusUsdStr,
+    }));
+    const summary = getDaoProjectBudgetSummary(amounts);
+    if (this.projectBaseCost) this.projectBaseCost.textContent = formatDaoProjectDraftUsd(summary.baseCostUsdStr, '');
+    if (this.projectMaximumBonus) this.projectMaximumBonus.textContent = formatDaoProjectDraftUsd(summary.maximumBonusUsdStr, '');
+    if (this.projectMaximumBudget) this.projectMaximumBudget.textContent = formatDaoProjectDraftUsd(summary.maximumAuthorizedUsdStr, '');
+  }
+
+  createOption() {
+    return { changes: [] };
+  }
+
+  renderRemoveIcon() {
+    return `<svg class="dao-form-remove-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+      <polyline points="3 6 5 6 21 6"></polyline>
+      <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+      <line x1="10" y1="11" x2="10" y2="17"></line>
+      <line x1="14" y1="11" x2="14" y2="17"></line>
+    </svg>`;
+  }
+
+  createChange(key) {
+    const option = this.getConfigOption(key);
+    if (option.validation === 'archiverVersions') {
+      return { key, value: { ...option.current } };
+    }
+    return {
+      key,
+      value: option.validation === 'committeeAddresses'
+        ? option.current.map(daoRepo.toCommitteeDisplayAddress)
+        : '',
+    };
+  }
+
+  getOptionLabel(optionIndex) {
+    return `Option ${optionIndex + 1}`;
+  }
+
+  synchronizeOptions() {
+    const configOptions = this.getConfigOptions();
+    if (configOptions.length === 0) return;
+
+    const validKeys = new Set(configOptions.map((option) => option.key));
+    const templateChanges = this.options[0].changes.filter((change) => validKeys.has(change.key));
+    const changes = templateChanges.length ? templateChanges : [this.createChange(configOptions[0].key)];
+
+    this.options = this.options.map((proposalOption, optionIndex) => {
+      if (optionIndex === 0) return { ...proposalOption, changes };
+
+      const valuesByKey = new Map(proposalOption.changes.map((change) => [change.key, change.value]));
+      return {
+        ...proposalOption,
+        changes: changes.map((change) => valuesByKey.has(change.key)
+          ? { key: change.key, value: valuesByKey.get(change.key) }
+          : this.createChange(change.key)),
+      };
+    });
+  }
+
+  getConfigOption(key) {
+    return this.getConfigOptions().find((option) => option.key === key) || null;
+  }
+
+  renderOptions(unavailableMessage = '') {
+    if (!this.optionsList) return;
+
+    PopupSelect.hide();
+
+    const configOptions = this.getConfigOptions();
+    const isEmergency = this.emergencySelect?.value === 'true';
+    this.optionsLimitHelp?.classList.toggle('hidden', isEmergency);
+    this.optionsList.innerHTML = [
+      `
+        <div class="dao-form-option dao-form-option--no-change">
+          <div class="dao-form-row-title"><label>Option: No change</label></div>
+          <div class="form-control dao-form-current-value">No change</div>
+          <p class="dao-form-help">This required first option makes no parameter changes.</p>
+        </div>
+      `,
+      ...this.options.map((proposalOption, index) => (
+        this.renderOption(proposalOption, index, configOptions, unavailableMessage)
+      )),
+    ].join('');
+
+    PopupSelect.enhanceAll(this.optionsList);
+    this.optionsList.querySelectorAll('[data-dao-committee-addresses]').forEach((group) => {
+      this.validateCommitteeAddressGroup(group);
+    });
+
+    if (this.addOptionButton) {
+      this.addOptionButton.disabled = configOptions.length === 0 || isEmergency || this.options.length >= 9;
+    }
+  }
+
+  renderOption(proposalOption, optionIndex, configOptions, unavailableMessage) {
+    const label = this.getOptionLabel(optionIndex);
+    const removeDisabled = this.options.length <= 1 ? 'disabled' : '';
+    const isTemplate = optionIndex === 0;
+    const changesHtml = configOptions.length
+      ? this.renderOptionChanges(optionIndex, proposalOption.changes, configOptions, isTemplate)
+      : `<p class="dao-form-help">${escapeHtml(unavailableMessage || 'Current DAO config values are unavailable.')}</p>`;
+    const addChangeDisabled = configOptions.length === 0 ? 'disabled' : '';
+
+    return `
+      <section class="dao-form-option" data-dao-option="${optionIndex}">
+        <div class="dao-form-row-title">
+          <label>${label}</label>
+          <button type="button" class="btn btn--secondary dao-form-remove-button" data-dao-remove-option="${optionIndex}" aria-label="Remove option ${optionIndex + 1}" title="Remove option ${optionIndex + 1}" ${removeDisabled}>${this.renderRemoveIcon()}</button>
+        </div>
+        <div class="dao-form-section-header"><label>Parameter Changes</label></div>
+        <div class="dao-form-list">${changesHtml}</div>
+        ${isTemplate ? `
+        <button type="button" class="btn btn--secondary dao-form-add-button" data-dao-add-parameter-change="${optionIndex}" ${addChangeDisabled}>
+          <span class="dao-form-add-icon" aria-hidden="true"><span class="plus-glyph">+</span></span>
+          <span>Add parameter change</span>
+        </button>` : ''}
+      </section>
+    `;
+  }
+
+  renderOptionChanges(optionIndex, changes, configOptions, isTemplate) {
+    return changes.map((change, changeIndex) => (
+      this.renderOptionChange(optionIndex, change, changeIndex, changes.length, configOptions, isTemplate)
+    )).join('');
+  }
+
+  renderOptionChange(optionIndex, change, changeIndex, changeCount, configOptions, isTemplate) {
+    const option = configOptions.find((item) => item.key === change.key) || configOptions[0];
+    if (!option) return '';
+
+    const optionNumber = optionIndex + 1;
+    const changeNumber = changeIndex + 1;
+    const configId = `addProposalOption${optionNumber}Config${changeNumber}`;
+    const currentId = `addProposalOption${optionNumber}Current${changeNumber}`;
+    const proposedId = `addProposalOption${optionNumber}Proposed${changeNumber}`;
+    const removeDisabled = changeCount <= 1 ? 'disabled' : '';
+    const dataAttributes = `data-dao-change-value data-dao-option-index="${optionIndex}" data-dao-change-index="${changeIndex}"`;
+    const selectOptions = isTemplate ? configOptions.map((item) => `
+      <option value="${escapeHtml(item.key)}" ${item.key === option.key ? 'selected' : ''}>${escapeHtml(item.label)}</option>
+    `).join('') : '';
+    const parameterControl = isTemplate
+      ? `<select id="${configId}" class="form-control" aria-label="Select parameter for Option ${optionNumber}, change ${changeNumber}" data-dao-change-key data-dao-option-index="${optionIndex}" data-dao-change-index="${changeIndex}" required>${selectOptions}</select>`
+      : `<input id="${configId}" class="form-control dao-form-current-value" type="text" value="${escapeDaoFormAttribute(option.label)}" readonly />`;
+    let currentControl;
+    if (option.validation === 'committeeAddresses') {
+      currentControl = `<div id="${currentId}" class="form-control dao-form-current-value" role="group" aria-label="Current committee addresses">${this.renderCommitteeAddresses(option.current)}</div>`;
+    } else if (option.validation === 'archiverVersions') {
+      currentControl = this.renderArchiverVersionEditor(option.current, currentId, '', true);
+    } else {
+      currentControl = `<input id="${currentId}" class="form-control dao-form-current-value" type="text" value="${escapeDaoFormAttribute(option.current)}" readonly />`;
+    }
+    const valueLineClass = option.validation === 'committeeAddresses' ? ' dao-form-change-line--committee' : '';
+    const valueTypeLabel = option.unit
+      ? `${option.valueType} in ${option.unit}${option.unitHint ? ` (${option.unitHint})` : ''}`
+      : option.valueType;
+
+    return `
+      <div class="dao-form-row dao-form-row--change" data-dao-change-row>
+        <div class="dao-form-row-title">
+          <label>Parameter change ${changeNumber}</label>
+          ${isTemplate ? `<button type="button" class="btn btn--secondary dao-form-remove-button" data-dao-remove-change="${optionIndex}:${changeIndex}" aria-label="Remove parameter change ${changeNumber} from Option ${optionNumber}" title="Remove parameter change ${changeNumber} from Option ${optionNumber}" ${removeDisabled}>${this.renderRemoveIcon()}</button>` : ''}
+        </div>
+        <div class="dao-form-change-box">
+          <div class="dao-form-change-line">
+            <label for="${configId}">${isTemplate ? 'Select' : 'Parameter'}${isTemplate ? ' <span class="dao-form-required" aria-hidden="true">*</span>' : ''}</label>
+            ${parameterControl}
+          </div>
+          <div class="dao-form-change-line${valueLineClass}">
+            <label for="${currentId}">Current</label>
+            ${currentControl}
+          </div>
+          <div class="dao-form-change-line${valueLineClass}">
+            <label for="${proposedId}">Enter <span class="dao-form-required" aria-hidden="true">*</span></label>
+            ${this.renderProposedValueControl(option, change.value, proposedId, dataAttributes)}
+          </div>
+          <div class="dao-form-meta">${escapeHtml(option.path)} · ${escapeHtml(valueTypeLabel)}</div>
+        </div>
+      </div>
+    `;
+  }
+
+  renderProposedValueControl(option, value, id, dataAttributes) {
+    switch (`${option.valueType}:${option.validation}`) {
+      case 'array:committeeAddresses':
+        return this.renderCommitteeAddressEditor(value, id, dataAttributes);
+      case 'object:archiverVersions':
+        return this.renderArchiverVersionEditor(value, id, dataAttributes, false);
+      case 'boolean:boolean':
+        return `
+          <select id="${id}" class="form-control" ${dataAttributes} required>
+            <option value="">Select value</option>
+            <option value="true" ${value === 'true' ? 'selected' : ''}>True</option>
+            <option value="false" ${value === 'false' ? 'selected' : ''}>False</option>
+          </select>
+        `;
+      case 'string:decimalString':
+        return `<input id="${id}" class="form-control" ${dataAttributes} type="text" inputmode="decimal" maxlength="34" value="${escapeDaoFormAttribute(value)}" required />`;
+      case 'string:text':
+        return `<input id="${id}" class="form-control" ${dataAttributes} type="text" value="${escapeDaoFormAttribute(value)}" required />`;
+      case 'string:url':
+        return `<input id="${id}" class="form-control" ${dataAttributes} type="url" value="${escapeDaoFormAttribute(value)}" required />`;
+      case 'bigint:integer':
+        return `<input id="${id}" class="form-control" ${dataAttributes} type="text" inputmode="numeric" pattern="[0-9]+" value="${escapeDaoFormAttribute(value)}" required />`;
+      case 'number:integer':
+        return `<input id="${id}" class="form-control" ${dataAttributes} type="number" step="1" inputmode="numeric" min="0" value="${escapeDaoFormAttribute(value)}" required />`;
+      case 'number:decimal':
+        return `<input id="${id}" class="form-control" ${dataAttributes} type="number" step="any" inputmode="decimal" min="0" value="${escapeDaoFormAttribute(value)}" required />`;
+      default:
+        throw new Error(`Unsupported DAO parameter validation: ${option.valueType}:${option.validation}`);
+    }
+  }
+
+  renderArchiverVersionEditor(value, id, dataAttributes, readOnly) {
+    const fields = [
+      ['minVersion', 'Minimum version'],
+      ['activeVersion', 'Active version'],
+      ['latestVersion', 'Latest version'],
+    ];
+    return `<div id="${id}" class="dao-form-list" role="group" aria-label="Archiver versions" data-dao-archiver-versions>${fields.map(([key, label]) => `
+      <div class="form-group">
+        <label for="${id}-${key}">${label}</label>
+        ${readOnly
+          ? `<input id="${id}-${key}" class="form-control dao-form-current-value" type="text" value="${escapeDaoFormAttribute(value[key])}" data-dao-archiver-field="${key}" readonly />`
+          : this.renderProposedValueControl({ key, valueType: 'string', validation: 'text' }, value[key], `${id}-${key}`, `${dataAttributes} data-dao-archiver-field="${key}"`)}
+      </div>
+    `).join('')}</div>`;
+  }
+
+  validateArchiverVersions(value, valueInput) {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) {
+      throw this.createValidationError('Enter all three archiver versions', valueInput);
+    }
+    const versions = {};
+    for (const key of ['minVersion', 'activeVersion', 'latestVersion']) {
+      if (typeof value[key] !== 'string' || !value[key].trim()) {
+        const input = valueInput?.closest('[data-dao-archiver-versions]')
+          ?.querySelector(`[data-dao-archiver-field="${key}"]`);
+        throw this.createValidationError('Enter all three archiver versions', input || valueInput);
+      }
+      versions[key] = value[key].trim();
+    }
+    return versions;
+  }
+
+  renderCommitteeAddresses(value) {
+    let addresses;
+    try {
+      addresses = Array.isArray(value)
+        ? daoRepo.normalizeCommitteeAddresses(value)
+        : daoRepo.parseCommitteeAddresses(value);
+    } catch {
+      return escapeHtml(formatDaoDetailValue(value));
+    }
+    return `<span class="dao-committee-address-list" role="list">${addresses.map((address) => {
+      const displayAddress = daoRepo.toCommitteeDisplayAddress(address);
+      return `<span role="listitem"><button type="button" class="dao-committee-address"
+        data-dao-copy-address="${displayAddress}" title="Copy address" aria-label="Copy address ${displayAddress}">${displayAddress}</button></span>`;
+    }).join('')}</span>`;
+  }
+
+  renderCommitteeAddressEditor(addresses, id, dataAttributes) {
+    const rows = addresses.map((address, index) => `
+      <div class="dao-committee-address-row">
+        <input id="${id}Address${index}" class="form-control" type="text" value="${escapeDaoFormAttribute(address)}"
+          ${dataAttributes} data-dao-committee-address-index="${index}" aria-label="Committee address ${index + 1}"
+          aria-describedby="${id}Help ${id}Error" autocomplete="off" autocapitalize="none" spellcheck="false" required />
+        <button type="button" class="btn btn--secondary dao-form-remove-button" data-dao-remove-committee-address="${index}" aria-label="Remove committee address ${index + 1}" title="Remove committee address ${index + 1}">${this.renderRemoveIcon()}</button>
+      </div>
+    `).join('');
+    return `
+      <div id="${id}" class="dao-committee-address-editor" data-dao-committee-addresses ${dataAttributes}
+        role="group" aria-label="Proposed committee addresses" aria-describedby="${id}Help ${id}Error" tabindex="-1">
+        ${rows}
+        <button type="button" class="btn btn--secondary dao-form-add-button" data-dao-add-committee-address ${addresses.length >= daoRepo.maxCommitteeMembers ? 'disabled' : ''}>
+          <span class="dao-form-add-icon" aria-hidden="true"><span class="plus-glyph">+</span></span>
+          <span>Add address</span>
+        </button>
+        <p id="${id}Help" class="dao-form-help">${daoRepo.minCommitteeMembers}–${daoRepo.maxCommitteeMembers} unique addresses. The 0x prefix is optional.</p>
+        <p id="${id}Error" class="dao-committee-address-error hidden" data-dao-committee-error aria-live="polite"></p>
+      </div>
+    `;
+  }
+
+  bindCommitteeAddressCopy(container) {
+    container?.addEventListener('click', this.handleCommitteeAddressCopy);
+  }
+
+  async handleCommitteeAddressCopy(event) {
+    const button = event.target.closest('[data-dao-copy-address]');
+    if (!button) return;
+    try {
+      await navigator.clipboard.writeText(button.dataset.daoCopyAddress);
+      showToast('Address copied to clipboard', 2000, 'success');
+    } catch (error) {
+      console.error('Failed to copy:', error);
+      showToast('Failed to copy address', 0, 'error');
+    }
+  }
+
+  showCommitteeAddressError(group, error) {
+    const message = group.querySelector('[data-dao-committee-error]');
+    message.textContent = error?.message || '';
+    message.classList.toggle('hidden', !error);
+    group.setAttribute('aria-invalid', String(Boolean(error)));
+    this.getValidationHighlight(group)?.classList.toggle('dao-form-error', Boolean(error));
+    group.querySelectorAll('[data-dao-committee-address-index]').forEach((input) => {
+      input.setAttribute('aria-invalid', String(Number(input.dataset.daoCommitteeAddressIndex) === error?.addressIndex));
+    });
+  }
+
+  validateCommitteeAddressGroup(group) {
+    const change = this.options[Number(group.dataset.daoOptionIndex)].changes[Number(group.dataset.daoChangeIndex)];
+    try {
+      const addresses = daoRepo.normalizeCommitteeAddresses(change.value);
+      this.showCommitteeAddressError(group, null);
+      return { addresses, error: null };
+    } catch (error) {
+      this.showCommitteeAddressError(group, error);
+      error.validationTarget = group.querySelector(`[data-dao-committee-address-index="${error.addressIndex}"]`)
+        || group.querySelector('[data-dao-add-committee-address]');
+      return { addresses: null, error };
+    }
+  }
+
+  handleCommitteeAddressAction(button) {
+    const group = button.closest('[data-dao-committee-addresses]');
+    const change = this.options[Number(group.dataset.daoOptionIndex)].changes[Number(group.dataset.daoChangeIndex)];
+    let focusIndex;
+    if (button.matches('[data-dao-add-committee-address]')) {
+      if (change.value.length >= daoRepo.maxCommitteeMembers) return;
+      focusIndex = change.value.length;
+      change.value.push('');
+    } else {
+      const index = Number(button.dataset.daoRemoveCommitteeAddress);
+      change.value.splice(index, 1);
+      focusIndex = Math.min(index, change.value.length - 1);
+    }
+    this.discardWarningShown = false;
+    const groupId = group.id;
+    this.renderOptions();
+    const updatedGroup = document.getElementById(groupId);
+    const focusTarget = updatedGroup.querySelector(`[data-dao-committee-address-index="${focusIndex}"]`)
+      || updatedGroup.querySelector('[data-dao-add-committee-address]');
+    focusTarget.focus();
+  }
+
+  addOption() {
+    if (this.emergencySelect?.value === 'true') {
+      showToast('Emergency proposals allow one additional option', 2500, 'warning');
+      return;
+    }
+    if (this.options.length >= 9) {
+      showToast('DAO proposals can have at most 10 options', 2500, 'warning');
+      return;
+    }
+    if (this.getConfigOptions().length === 0) {
+      showToast('Current DAO config values are not loaded yet', 2500, 'warning');
+      return;
+    }
+
+    this.options.push(this.createOption());
+    this.discardWarningShown = false;
+    this.synchronizeOptions();
+    this.renderOptions();
+    PopupSelect.focus(this.optionsList?.querySelector(
+      `[data-dao-option="${this.options.length - 1}"] [data-dao-change-value]`
+    ));
+  }
+
+  addParameterChange(optionIndex) {
+    if (optionIndex !== 0) return;
+
+    const template = this.options[0];
+    if (!template) return;
+
+    const usedKeys = new Set(template.changes.map((change) => change.key));
+    const nextOption = this.getConfigOptions().find((option) => !usedKeys.has(option.key));
+    if (!nextOption) {
+      showToast('All available configs are already selected for Option 1', 2500, 'warning');
+      return;
+    }
+
+    template.changes.push(this.createChange(nextOption.key));
+    this.discardWarningShown = false;
+    this.synchronizeOptions();
+    this.renderOptions();
+    const parameterSelect = this.optionsList?.querySelector(
+      `[data-dao-option="${optionIndex}"] [data-dao-change-row]:last-child [data-dao-change-key]`
+    );
+    PopupSelect.focus(parameterSelect);
+  }
+
+  handleOptionsClick(event) {
+    const committeeButton = event.target.closest('[data-dao-add-committee-address], [data-dao-remove-committee-address]');
+    if (committeeButton) {
+      this.handleCommitteeAddressAction(committeeButton);
+      return;
+    }
+    const addChangeButton = event.target.closest('[data-dao-add-parameter-change]');
+    if (addChangeButton) {
+      this.addParameterChange(Number(addChangeButton.dataset.daoAddParameterChange));
+      return;
+    }
+
+    const removeOptionButton = event.target.closest('[data-dao-remove-option]');
+    if (removeOptionButton) {
+      this.options.splice(Number(removeOptionButton.dataset.daoRemoveOption), 1);
+      this.discardWarningShown = false;
+      this.renderOptions();
+      return;
+    }
+
+    const removeChangeButton = event.target.closest('[data-dao-remove-change]');
+    if (!removeChangeButton) return;
+
+    const [optionIndex, changeIndex] = removeChangeButton.dataset.daoRemoveChange.split(':').map(Number);
+    if (optionIndex !== 0) return;
+
+    const template = this.options[0];
+    if (!template || template.changes.length <= 1) return;
+    template.changes.splice(changeIndex, 1);
+    this.discardWarningShown = false;
+    this.synchronizeOptions();
+    this.renderOptions();
+  }
+
+  handleOptionsInput(event) {
+    const optionIndex = Number(event.target.dataset.daoOptionIndex);
+    const proposalOption = this.options[optionIndex];
+    if (!proposalOption) return;
+
+    if (event.target.matches('[data-dao-change-value]')) {
+      const change = proposalOption.changes[Number(event.target.dataset.daoChangeIndex)];
+      if (!change) return;
+
+      if (event.target.matches('[data-dao-committee-address-index]')) {
+        change.value[Number(event.target.dataset.daoCommitteeAddressIndex)] = event.target.value;
+        this.validateCommitteeAddressGroup(event.target.closest('[data-dao-committee-addresses]'));
+        return;
+      }
+      if (event.target.matches('[data-dao-archiver-field]')) {
+        change.value[event.target.dataset.daoArchiverField] = event.target.value;
+        return;
+      }
+      const option = this.getConfigOption(change.key);
+      const isDecimalInput = option.valueType === 'number' || option.validation === 'decimalString';
+      const value = isDecimalInput ? normalizeDaoParameterInput(event.target.value) : event.target.value;
+      event.target.value = value;
+      change.value = value;
+    }
+  }
+
+  handleOptionsChange(event) {
+    if (!event.target.matches('[data-dao-change-key]')) return;
+
+    const optionIndex = Number(event.target.dataset.daoOptionIndex);
+    const changeIndex = Number(event.target.dataset.daoChangeIndex);
+    if (optionIndex !== 0) return;
+
+    const proposalOption = this.options[optionIndex];
+    const change = proposalOption?.changes[changeIndex];
+    if (!change) return;
+    proposalOption.changes[changeIndex] = this.createChange(event.target.value);
+    this.synchronizeOptions();
+    this.renderOptions();
+    PopupSelect.focus(this.optionsList?.querySelector(
+      `[data-dao-change-key][data-dao-option-index="${optionIndex}"][data-dao-change-index="${changeIndex}"]`
+    ));
+  }
+
+  getIntegerValue(input, label, unit = '') {
+    const value = String(input?.value ?? '').trim();
+    const unitSuffix = unit ? ` of ${unit}` : '';
+    if (!/^\d+$/.test(value)) {
+      throw this.createValidationError(`${label} must be a non-negative whole number${unitSuffix}`, input);
+    }
+    const n = Number(value);
+    if (!Number.isSafeInteger(n)) {
+      throw this.createValidationError(`${label} is too large`, input);
+    }
+    return n;
+  }
+
+  openReviewStartPicker() {
+    dateTimePickerModal.open({
+      onDone: (timestamp) => {
+        if (timestamp === null) return;
+        if (timestamp !== this.reviewStartTimeMs) this.discardWarningShown = false;
+        this.reviewStartTimeMs = timestamp;
+        this.renderReviewStartTime();
+        this.clearValidationError(this.reviewStartButton);
+      },
+      title: 'Choose Review Start',
+      initialTimestamp: this.reviewStartTimeMs,
+      minTimestamp: getTransactionTimestamp(),
+      maxTimestamp: DAO_REVIEW_START_MAX_MS,
+      allowImmediate: true,
+      selectionFormatter: (timestamp) => {
+        const delayMs = Math.max(0, timestamp - getTransactionTimestamp());
+        return {
+          preview: `Delay: ${formatDaoDurationSummary(delayMs)}`,
+          submitLabel: `Submit: ${delayMs} ms delay`,
+        };
+      },
+      minError: 'Review start time must be in the future',
+      maxError: 'Review start time must be before the year 10000',
+    });
+  }
+
+  openGracePeriodPicker() {
+    if (!Number.isSafeInteger(this.maxGracePeriodMs) || this.maxGracePeriodMs < 0) {
+      showToast('Grace period maximum is still loading', 2500, 'warning');
+      return;
+    }
+    durationPickerModal.open({
+      title: 'Choose Grace Period',
+      initialDurationMs: this.gracePeriodMs,
+      maxDurationMs: this.maxGracePeriodMs,
+      selectionFormatter: (durationMs) => ({
+        preview: `Grace period: ${formatDurationParts(durationMs)} (${durationMs} ms)`,
+        submitLabel: `Submit: ${durationMs} ms grace period`,
+      }),
+      onDone: (durationMs) => {
+        if (durationMs === null) return;
+        if (durationMs !== this.gracePeriodMs) this.discardWarningShown = false;
+        this.gracePeriodMs = durationMs;
+        this.renderGracePeriodLimitHint();
+        this.clearValidationError(this.gracePeriodButton);
+      },
+    });
+  }
+
+  handleFormHelpClick(event) {
+    const helpButton = event.target?.closest?.('[data-dao-form-help]');
+    if (!helpButton) return;
+
+    event.preventDefault();
+    event.stopPropagation();
+    showToast(helpButton.title, 0, 'info');
+  }
+
+  renderReviewStartTime() {
+    if (!this.reviewStartButton) return;
+    const delayMs = this.reviewStartTimeMs > 0
+      ? Math.max(0, this.reviewStartTimeMs - getTransactionTimestamp())
+      : 0;
+    this.reviewStartButton.textContent = String(delayMs);
+    this.reviewStartButton.title = this.reviewStartTimeMs > 0
+      ? formatDaoTimestamp(this.reviewStartTimeMs)
+      : 'Start now';
+    if (this.reviewStartHelp) {
+      this.reviewStartHelp.textContent = `Delay: ${formatDaoDurationEstimate(delayMs)}`;
+    }
+  }
+
+  getReviewStartTimeMs() {
+    const timestamp = this.reviewStartTimeMs;
+    if (timestamp === 0) return 0;
+    if (!Number.isSafeInteger(timestamp) || Number.isNaN(new Date(timestamp).getTime())) {
+      throw this.createValidationError('Review start time must be a valid date and time', this.reviewStartButton);
+    }
+    if (timestamp < getTransactionTimestamp()) {
+      throw this.createValidationError('Review start time must be in the future', this.reviewStartButton);
+    }
+    if (timestamp > DAO_REVIEW_START_MAX_MS) {
+      throw this.createValidationError('Review start time must be before the year 10000', this.reviewStartButton);
+    }
+    return timestamp;
+  }
+
+  getMillisecondsValue(input, label, maximumMs) {
+    if (!Number.isSafeInteger(maximumMs) || maximumMs < 0) {
+      throw this.createValidationError(`${label} maximum is not loaded yet`, input);
+    }
+    const n = this.getIntegerValue(input, label, 'milliseconds');
+    if (n > maximumMs) {
+      throw this.createValidationError(`${label} must not exceed ${maximumMs} milliseconds`, input);
+    }
+    return n;
+  }
+
+  getValidatedOptions() {
+    if (this.getConfigOptions().length === 0) {
+      throw this.createValidationError('Current DAO config values are not loaded yet', this.optionsList);
+    }
+    if (this.options.length < 1 || this.options.length > 9) {
+      throw this.createValidationError('DAO proposals need 1 to 9 additional options', this.optionsList);
+    }
+    if (this.emergencySelect?.value === 'true' && this.options.length !== 1) {
+      throw this.createValidationError('Emergency proposals need exactly one additional option', this.optionsList);
+    }
+
+    const templateChanges = this.options[0].changes;
+    const changes = this.options.map((proposalOption, optionIndex) => {
+      const optionEl = this.optionsList?.querySelector(`[data-dao-option="${optionIndex}"]`);
+      const label = this.getOptionLabel(optionIndex);
+
+      if (proposalOption.changes.length === 0) {
+        throw this.createValidationError(`Add a parameter change for ${label}`, optionEl);
+      }
+      if (optionIndex > 0 && (
+        proposalOption.changes.length !== templateChanges.length
+        || proposalOption.changes.some((change, changeIndex) => change.key !== templateChanges[changeIndex].key)
+      )) {
+        throw this.createValidationError(`${label} must use the same parameters as Option 1`, optionEl);
+      }
+
+      const seenKeys = new Set();
+      const optionChanges = proposalOption.changes.map((change, changeIndex) => {
+        const keyInput = optionEl?.querySelector(
+          `[data-dao-change-key][data-dao-change-index="${changeIndex}"]`
+        );
+        const valueInput = optionEl?.querySelector(
+          `[data-dao-change-value][data-dao-change-index="${changeIndex}"]`
+        );
+        const option = this.getConfigOption(change.key);
+        if (!option) throw this.createValidationError('Select a config for every parameter change', keyInput);
+        if (seenKeys.has(option.key)) {
+          throw this.createValidationError(`Remove the duplicate ${option.label} change`, keyInput);
+        }
+        seenKeys.add(option.key);
+
+        if (option.validation === 'committeeAddresses') {
+          const group = optionEl.querySelector(`[data-dao-committee-addresses][data-dao-change-index="${changeIndex}"]`);
+          const { addresses, error } = this.validateCommitteeAddressGroup(group);
+          if (error) throw error;
+          return {
+            key: option.key,
+            value: JSON.stringify(addresses),
+            current: JSON.stringify(option.current),
+          };
+        }
+
+        if (option.validation === 'archiverVersions') {
+          return {
+            key: option.key,
+            value: JSON.stringify(this.validateArchiverVersions(change.value, valueInput)),
+            current: JSON.stringify(option.current),
+          };
+        }
+
+        const value = String(change.value || '').trim();
+        const parameterType = `${option.valueType}:${option.validation}`;
+        const numericValue = option.valueType === 'number' ? Number(value) : null;
+        if (!value) throw this.createValidationError(`Enter a proposed value for ${option.label}`, valueInput);
+        if (parameterType === 'bigint:integer' && !/^\d+$/.test(value)) {
+          throw this.createValidationError(`${option.label} must be a non-negative whole number`, valueInput);
+        }
+        if (parameterType === 'string:url') {
+          let url;
+          try {
+            url = new URL(value);
+          } catch {
+            throw this.createValidationError(`${option.label} must be an HTTP or HTTPS URL`, valueInput);
+          }
+          if (url.protocol !== 'http:' && url.protocol !== 'https:') {
+            throw this.createValidationError(`${option.label} must be an HTTP or HTTPS URL`, valueInput);
+          }
+        }
+        if (parameterType === 'boolean:boolean' && value !== 'true' && value !== 'false') {
+          throw this.createValidationError(`${option.label} must be true or false`, valueInput);
+        }
+        if (parameterType === 'number:integer' && !Number.isInteger(numericValue)) {
+          throw this.createValidationError(`${option.label} must be a whole number`, valueInput);
+        }
+        if (parameterType === 'number:integer' && (
+          numericValue < 0 || numericValue >= DAO_PARAMETER_NUMBER_LIMIT
+        )) {
+          throw this.createValidationError(
+            `${option.label} must be a non-negative whole number with up to ${DAO_PARAMETER_MAX_WHOLE_DIGITS} digits`,
+            valueInput,
+          );
+        }
+        if (parameterType === 'number:decimal' && !Number.isFinite(numericValue)) {
+          throw this.createValidationError(`${option.label} must be a number`, valueInput);
+        }
+        if (parameterType === 'number:decimal' && (
+          numericValue < 0 || numericValue >= DAO_PARAMETER_NUMBER_LIMIT
+        )) {
+          throw this.createValidationError(
+            `${option.label} must be non-negative with up to ${DAO_PARAMETER_MAX_WHOLE_DIGITS} digits before the decimal point`,
+            valueInput,
+          );
+        }
+        if (parameterType === 'string:decimalString' && !isValidDaoDecimalString(value)) {
+          throw this.createValidationError(
+            `${option.label} must be a non-negative number`,
+            valueInput,
+          );
+        }
+        if (option.key === 'stabilityFactorStr' && !/[1-9]/.test(value)) {
+          throw this.createValidationError(`${option.label} must be greater than zero`, valueInput);
+        }
+
+        return {
+          key: option.key,
+          value,
+          current: String(option.current),
+        };
+      });
+
+      return { label, changes: optionChanges };
+    });
+
+    return {
+      options: ['no', ...changes.map((proposalOption) => proposalOption.label)],
+      changes: changes.map((proposalOption) => proposalOption.changes),
+    };
+  }
+
+  getProjectValidationTarget(error) {
+    const field = error?.daoProjectField;
+    if (field === 'address') return this.projectAddressInput;
+    if (field === 'milestones') return this.projectMilestonesList;
+
+    const index = error?.daoProjectMilestoneIndex;
+    const uiId = Number.isSafeInteger(index) ? this.projectDraft?.milestones?.[index]?.uiId : '';
+    if (!uiId || !field) return null;
+
+    const milestoneElement = this.projectMilestonesList?.querySelector(
+      `[data-dao-milestone-id="${uiId}"]`
+    );
+    return milestoneElement?.querySelector(`[data-dao-milestone-field="${field}"]`)
+      || milestoneElement;
+  }
+
+  validateProjectUsdPrecision() {
+    for (const [index, milestone] of this.projectDraft.milestones.entries()) {
+      const field = ['costUsdStr', 'penaltyUsdStr', 'bonusUsdStr']
+        .find((key) => AddProposalModal.USD_EXTRA_DECIMALS.test(milestone[key]));
+      if (!field) continue;
+      const target = this.getProjectValidationTarget({ daoProjectField: field, daoProjectMilestoneIndex: index });
+      throw this.createValidationError('Enter a USD amount with up to two decimal places', target);
+    }
+  }
+
+  async handleCreate() {
+    this.clearValidationErrors();
+    const title = (this.titleInput?.value || '').trim();
+    const proposalType = (this.typeSelect?.value || '').trim();
+    const description = (this.descriptionInput?.value || '').trim();
+
+    if (!title) {
+      this.showValidationError(this.createValidationError('Please enter a title', this.titleInput));
+      return;
+    }
+    if (title.length > DAO_PROPOSAL_TITLE_MAX_LENGTH) {
+      this.showValidationError(this.createValidationError(`Title must be ${DAO_PROPOSAL_TITLE_MAX_LENGTH} characters or less`, this.titleInput));
+      return;
+    }
+    if (proposalType !== DAO_PROJECT_TYPE && !isDaoParameterProposalTypeKey(proposalType)) {
+      this.showValidationError(this.createValidationError('Please select a DAO proposal type', this.typeSelect));
+      return;
+    }
+    if (!description) {
+      this.showValidationError(this.createValidationError('Please enter a description', this.descriptionInput));
+      return;
+    }
+
+    try {
+      const reviewStartTimeMs = this.getReviewStartTimeMs();
+      const gracePeriodMs = this.gracePeriodMs;
+      if (!Number.isSafeInteger(this.maxGracePeriodMs) || this.maxGracePeriodMs < 0) {
+        throw this.createValidationError('Grace period maximum is not loaded yet', this.gracePeriodButton);
+      }
+      if (!Number.isSafeInteger(gracePeriodMs) || gracePeriodMs < 0 || gracePeriodMs > this.maxGracePeriodMs) {
+        throw this.createValidationError(`Grace period must not exceed ${this.maxGracePeriodMs} milliseconds`, this.gracePeriodButton);
+      }
+      const emergency = this.emergencySelect?.value === 'true';
+      if (!emergency && !this.proposalFeeUsdStr) {
+        throw this.createValidationError('Current DAO proposal fee is not loaded yet', this.proposalFeeInput);
+      }
+
+      if (proposalType === DAO_PROJECT_TYPE) {
+        this.validateProjectUsdPrecision();
+        const draft = buildDaoProjectProposalCreateDraft({
+          from: myAccount?.keys?.address ? longAddress(myAccount.keys.address) : '',
+          displayTitle: title,
+          description,
+          project: this.projectDraft,
+          proposalFeeUsdStr: this.proposalFeeUsdStr,
+          reviewStartTimeMs,
+          gracePeriodMs,
+          maxGracePeriodMs: this.maxGracePeriodMs,
+        });
+        confirmProposalModal.open(draft);
+        return;
+      }
+
+      const { options, changes } = this.getValidatedOptions();
+      const draft = buildDaoProposalCreateDraft({
+        from: myAccount?.keys?.address ? longAddress(myAccount.keys.address) : '',
+        displayTitle: title,
+        emergency,
+        proposalType,
+        description,
+        options,
+        changes,
+        proposalFeeUsdStr: this.proposalFeeUsdStr,
+        reviewStartTimeMs,
+        gracePeriodMs,
+        maxGracePeriodMs: this.maxGracePeriodMs,
+      });
+      confirmProposalModal.open(draft);
+    } catch (e) {
+      if (!e.validationTarget && proposalType === DAO_PROJECT_TYPE) {
+        e.validationTarget = this.getProjectValidationTarget(e);
+      }
+      this.showValidationError(e);
+    }
+  }
+}
+
+const addProposalModal = new AddProposalModal();
+
+function formatDaoDurationSummary(ms) {
+  const n = Number(ms || 0);
+  if (!n) return '0 sec (0 ms)';
+  return `${formatDaoDurationEstimate(n)} (${n} ms)`;
+}
+
+function formatDaoDurationEstimate(ms) {
+  const n = Number(ms);
+  if (!Number.isFinite(n) || n < 0) return '';
+  if (n === 0) return '0 sec';
+
+  const units = [
+    ['day', DAO_PROPOSAL_DAY_MS],
+    ['hr', 60 * 60 * 1000],
+    ['min', 60 * 1000],
+    ['sec', 1000],
+  ];
+  let remainingMs = n;
+  const parts = [];
+
+  for (const [unit, unitMs] of units) {
+    const value = Math.floor(remainingMs / unitMs);
+    if (value === 0) continue;
+    parts.push(`${value} ${unit}${unit === 'day' && value !== 1 ? 's' : ''}`);
+    remainingMs -= value * unitMs;
+    if (parts.length === 3) break;
+  }
+
+  if (parts.length === 0) return `${n} ms`;
+  return parts.join(' ');
+}
+
+function renderDaoProposalHeading(proposal) {
+  const title = formatDaoProposalTitle(proposal);
+  const proposalKind = proposal.emergency === true ? 'Emergency' : 'Standard';
+  const proposalIndicator = [
+    proposalKind,
+    getDaoTypeLabel(proposal.proposalType),
+    'proposal',
+  ].filter(Boolean).join(' ');
+  const emergencyClass = proposal.emergency === true ? ' proposal-type-indicator--emergency' : '';
+  const descriptionHtml = proposal.description
+    ? `<p class="proposal-info-description">${escapeHtml(proposal.description)}</p>`
+    : '';
+
+  return `
+    <div class="proposal-info-heading">
+      <h2 class="proposal-info-title">${escapeHtml(title)}</h2>
+      <p class="proposal-type-indicator${emergencyClass}">${escapeHtml(proposalIndicator)}</p>
+      ${descriptionHtml}
+    </div>
+  `;
+}
+
+function renderDaoProposalSection(title, rows, sectionClass = '') {
+  const rowHtml = renderDaoProposalRows(rows);
+  const className = sectionClass ? ` ${sectionClass}` : '';
+
+  return `
+    <section class="proposal-info-section${className}">
+      <h3>${escapeHtml(title)}</h3>
+      <div class="proposal-info-grid">${rowHtml}</div>
+    </section>
+  `;
+}
+
+function renderDaoProposalRows(rows) {
+  return rows
+    .map(([label, value, tone]) => {
+      const displayValue = formatDaoDetailValue(value);
+      const toneClass = tone ? ` proposal-info-row--${tone}` : '';
+
+      return `
+      <div class="proposal-info-row${toneClass}">
+        <span>${escapeHtml(label)}</span>
+        <span class="proposal-info-value">${escapeHtml(displayValue)}</span>
+      </div>
+    `;
+    })
+    .join('');
+}
+
+function renderDaoProposalOptions(proposal) {
+  const options = getDaoProposalOptionLabels(proposal);
+  const changeSets = proposal?.[proposal?.proposalType]?.changes;
+  const isProject = proposal?.proposalType === DAO_PROJECT_TYPE;
+  const optionCards = options.map((option, index) => {
+    const noChangeClass = index === 0 && !isProject ? ' proposal-option-section--no-change' : '';
+    return `
+      <div class="proposal-option-section${noChangeClass}">
+        <span class="proposal-option-label">${escapeHtml(option)}</span>
+        ${isProject
+          ? renderDaoProjectProposalOptionDetails(index)
+          : renderDaoProposalOptionDetails(index, changeSets)}
+      </div>
+    `;
+  }).join('');
+
+  return `
+    <section class="proposal-info-section">
+      <h3>Proposal Options</h3>
+      <div class="proposal-option-cards${isProject ? ' dao-project-ballot' : ''}">${optionCards}</div>
+    </section>
+  `;
+}
+
+function renderDaoProjectProposalOptionDetails(optionIndex) {
+  const description = optionIndex === 0
+    ? 'Project is not funded.'
+    : 'Approve the recipient, milestones, and maximum budget below.';
+  return `<div class="proposal-option-changes"><p class="proposal-info-muted">${description}</p></div>`;
+}
+
+function renderDaoProposalOptionDetails(optionIndex, changeSets) {
+  if (optionIndex === 0) {
+    return '<p class="proposal-info-muted"><span class="proposal-change-arrow" aria-hidden="true">&rarr;</span> No parameter changes.</p>';
+  }
+
+  const changes = Array.isArray(changeSets) ? changeSets[optionIndex - 1] : null;
+  if (!Array.isArray(changes)) {
+    return '<div class="proposal-option-changes"><p class="proposal-info-muted">Parameter changes are unavailable.</p></div>';
+  }
+  if (changes.length === 0) {
+    return '<div class="proposal-option-changes"><p class="proposal-info-muted">No parameter changes.</p></div>';
+  }
+
+  return `<div class="proposal-option-changes">${renderDaoProposalChangeRows(changes)}</div>`;
+}
+
+function renderDaoProposalChangeRows(changes) {
+  return changes
+    .map((change) => {
+      const key = change?.key || 'Unknown key';
+      const current = key === 'committeeAddresses'
+        ? addProposalModal.renderCommitteeAddresses(change.current)
+        : escapeHtml(formatDaoDetailValue(change?.current));
+      const next = key === 'committeeAddresses'
+        ? addProposalModal.renderCommitteeAddresses(change.value)
+        : escapeHtml(formatDaoDetailValue(change?.value));
+      const rowClass = key === 'committeeAddresses' ? ' proposal-change-row--committee' : '';
+      return `
+        <div class="proposal-change-row${rowClass}">
+          <span>${escapeHtml(key)}</span>
+          <div class="proposal-change-values">
+            <small><span>Current:</span><strong>${current}</strong></small>
+            <span class="proposal-change-arrow" aria-hidden="true">&rarr;</span>
+            <small><span>New:</span><strong>${next}</strong></small>
+          </div>
+        </div>
+      `;
+    })
+    .join('');
+}
+
+function renderDaoProjectMilestones(milestones) {
+  const milestoneHtml = milestones.map((milestone, index) => `
+    <article class="dao-project-review-milestone">
+      <h4><span>Milestone ${index + 1}</span><strong>${escapeHtml(milestone.title)}</strong></h4>
+      <div class="dao-project-review-copy">
+        <div>
+          <span>Description</span>
+          <p>${escapeHtml(milestone.description)}</p>
+        </div>
+        <div>
+          <span>Deliverable</span>
+          <p>${escapeHtml(milestone.deliverable)}</p>
+        </div>
+      </div>
+      <div class="proposal-info-grid">
+        ${renderDaoProposalRows([
+          ['Duration', formatDaoDurationEstimate(milestone.duration)],
+          ['Cost', formatDaoProjectDraftUsd(milestone.costUsdStr)],
+          ['Late penalty', formatDaoProjectDraftUsd(milestone.penaltyUsdStr)],
+          ['Early bonus', formatDaoProjectDraftUsd(milestone.bonusUsdStr)],
+        ])}
+      </div>
+    </article>
+  `).join('');
+
+  return `
+    <section class="proposal-info-section dao-project-review-milestones">
+      <h3>Milestones</h3>
+      <div class="dao-project-review-milestone-list">${milestoneHtml}</div>
+    </section>
+  `;
+}
+
+function formatDaoProjectDraftUsd(value, unit = ' USD') {
+  const [whole, fraction = ''] = value.split('.');
+  return `${whole}.${fraction.padEnd(2, '0')}${unit}`;
+}
+
+function formatDaoProjectUsd(value) {
+  return value === null ? 'Unavailable' : `${value} USD`;
+}
+
+function formatDaoProjectDeliverySpeed(speed) {
+  if (speed === 'early') return 'Early';
+  if (speed === 'late') return 'Late';
+  return speed === 'ontime' ? 'On time' : 'Unavailable';
+}
+
+function getDaoProjectStatusTone(status) {
+  if (status === 'completed') return 'accept';
+  if (status === 'terminated') return 'rejected';
+  return '';
+}
+
+function renderDaoProjectInfoMilestones(
+  project,
+  proposalState,
+  showRuntimeStatus,
+  lifecycleActions,
+  renderLifecycleAction,
+) {
+  if (project.milestones.length === 0) {
+    return `
+      <section class="proposal-info-section dao-project-info-milestones">
+        <h3>Milestones</h3>
+        <div class="dao-project-info-notice dao-project-info-notice--unavailable" role="status">
+          <strong>Milestones unavailable</strong>
+          <span>This proposal does not include readable milestone data.</span>
+        </div>
+      </section>
+    `;
+  }
+
+  const milestoneHtml = project.milestones.map((milestone, index) => {
+    const milestoneNumber = index + 1;
+    const milestoneActions = lifecycleActions
+      .map((action, actionIndex) => ({ action, actionIndex }))
+      .filter(({ action }) => (
+        action.milestoneNumber === milestoneNumber
+        && shouldRenderDaoLifecycleAction(action)
+      ));
+    const title = formatDaoDetailValue(milestone.title);
+    const description = formatDaoDetailValue(milestone.description);
+    const deliverable = formatDaoDetailValue(milestone.deliverable);
+    const statusLabel = milestone.status?.label || 'Unavailable';
+    const statusTone = getDaoProjectStatusTone(milestone.status?.key);
+    const isDefaultOpen = shouldOpenDaoProjectMilestoneByDefault(project, proposalState, index);
+    const pendingPayout = milestone.status?.key === 'completed' && milestone.paidWei === 0n
+      ? getDaoProjectMilestonePayout(project, milestone)
+      : null;
+
+    return `
+      <div class="dao-project-info-milestone-group">
+        <details class="dao-project-review-milestone dao-project-info-milestone"${isDefaultOpen ? ' open' : ''}>
+          <summary>
+            <span class="dao-project-info-milestone-heading">
+              <span>Milestone ${milestoneNumber}</span>
+              <strong>${escapeHtml(title)}</strong>
+            </span>
+            <span class="dao-project-info-milestone-status">${escapeHtml(statusLabel)}</span>
+          </summary>
+          <div class="dao-project-info-milestone-content">
+            <div class="dao-project-review-copy">
+              <div>
+                <span>Description</span>
+                <p>${escapeHtml(description)}</p>
+              </div>
+              <div>
+                <span>Deliverable</span>
+                <p>${escapeHtml(deliverable)}</p>
+              </div>
+            </div>
+            <div class="proposal-info-grid" aria-label="Milestone ${milestoneNumber} terms">
+              ${renderDaoProposalRows([
+                ['Duration', milestone.durationMs === null ? null : formatDaoDurationEstimate(milestone.durationMs)],
+                ['Cost', formatDaoProjectUsd(milestone.costUsdStr)],
+                ['Late penalty', formatDaoProjectUsd(milestone.penaltyUsdStr)],
+                ['Early bonus', formatDaoProjectUsd(milestone.bonusUsdStr)],
+              ])}
+            </div>
+            ${showRuntimeStatus ? `
+            <div class="proposal-info-grid dao-project-info-runtime" aria-label="Milestone ${milestoneNumber} runtime status">
+              ${renderDaoProposalRows([
+                ['Milestone status', statusLabel, statusTone],
+                ['Started', milestone.startTime === null ? null : formatDaoDetailTimestamp(milestone.startTime)],
+                ['Ended', milestone.endTime === null ? null : formatDaoDetailTimestamp(milestone.endTime)],
+                ['Proposed time', milestone.proposedTime === null ? null : formatDaoDetailTimestamp(milestone.proposedTime)],
+                ['Time endorsements', String(milestone.endorsedTime.length)],
+                ['Termination votes', String(milestone.terminateVotes.length)],
+                ['Paid amount', milestone.paidWei === null ? null : formatDaoLibWei(milestone.paidWei)],
+                ...(pendingPayout ? [
+                  ['Expected payout', formatDaoLibWei(pendingPayout.amountWei)],
+                  ['Delivery timing', formatDaoProjectDeliverySpeed(pendingPayout.speed)],
+                ] : []),
+              ])}
+            </div>
+            ` : ''}
+          </div>
+        </details>
+        ${milestoneActions.length > 0 ? `
+        <section class="dao-project-milestone-actions" aria-label="Milestone ${milestoneNumber} actions">
+          <h5>Milestone actions</h5>
+          ${milestoneActions
+            .map(({ action, actionIndex }) => renderLifecycleAction(action, actionIndex))
+            .join('')}
+        </section>
+        ` : ''}
+      </div>
+    `;
+  }).join('');
+
+  return `
+    <section class="proposal-info-section dao-project-info-milestones">
+      <h3>Milestones</h3>
+      <div class="dao-project-review-milestone-list">${milestoneHtml}</div>
+    </section>
+  `;
+}
+
+function renderDaoProjectRecipientChangeSection(proposal) {
+  const project = getDaoProjectPresentation(proposal);
+  if (
+    project.kind !== 'available'
+    || !shouldShowDaoProjectRuntime(project)
+    || !project.proposedAddress
+  ) {
+    return '';
+  }
+
+  return renderDaoProposalSection('Pending Contractor Change', [
+    ['Proposed recipient', project.proposedAddress],
+    [
+      'Endorsements',
+      `${project.endorsedAddress.length} of ${getDaoProjectRequiredEndorsements(proposal, false)} required`,
+    ],
+  ], 'dao-project-info-recipient-change');
+}
+
+function renderDaoProjectProposalInfo(
+  proposal,
+  proposalState,
+  lifecycleActions,
+  renderLifecycleAction,
+) {
+  const project = getDaoProjectPresentation(proposal);
+  if (project.kind === 'unavailable') {
+    return `
+      <section class="proposal-info-section dao-project-info">
+        <h3>Project Details</h3>
+        <div class="dao-project-info-notice dao-project-info-notice--unavailable" role="status">
+          <strong>Project details unavailable</strong>
+          <span>${escapeHtml(project.message)}</span>
+        </div>
+      </section>
+    `;
+  }
+
+  const partialNotice = project.completeness === 'partial'
+    ? `
+      <div class="dao-project-info-notice dao-project-info-notice--partial" role="status">
+        <strong>Some project details are unavailable</strong>
+        <span>Available fields are shown below. ${project.issueCount} ${project.issueCount === 1 ? 'field needs' : 'fields need'} backend confirmation.</span>
+      </div>
+    `
+    : '';
+  const budget = project.budget;
+  const showRuntimeStatus = shouldShowDaoProjectRuntime(project);
+
+  return [
+    partialNotice,
+    renderDaoProposalSection('Project Funding', [
+      ['Recipient', project.address],
+      ['Base cost', budget ? `${budget.baseCostUsdStr} USD` : null],
+      ['Maximum bonuses', budget ? `${budget.maximumBonusUsdStr} USD` : null],
+      ['Maximum authorized', budget ? `${budget.maximumAuthorizedUsdStr} USD` : null],
+      ...(showRuntimeStatus ? [
+        ['Treasury balance', project.balanceWei === null ? null : formatDaoLibWei(project.balanceWei)],
+        ['Fixed USD/LIB rate', project.rateUsdStr === null ? null : `${project.rateUsdStr} USD/LIB`],
+        ['Started', project.startTime === null ? null : formatDaoDetailTimestamp(project.startTime)],
+        ['Ended', project.endTime === null ? null : formatDaoDetailTimestamp(project.endTime)],
+      ] : []),
+    ], 'dao-project-info-funding'),
+    renderDaoProjectInfoMilestones(
+      project,
+      proposalState,
+      showRuntimeStatus,
+      lifecycleActions,
+      renderLifecycleAction,
+    ),
+  ].filter(Boolean).join('');
+}
+
+class ConfirmProposalModal {
+  load() {
+    this.modal = document.getElementById('confirmProposalModal');
+    addProposalModal.bindCommitteeAddressCopy(this.modal);
+    this.closeButton = document.getElementById('closeConfirmProposalModal');
+    this.title = document.getElementById('confirmProposalModalTitle');
+    this.backButton = document.getElementById('backConfirmProposal');
+    this.signButton = document.getElementById('signConfirmProposal');
+    this.content = document.getElementById('confirmProposalContent');
+    this.currentDraft = null;
+    this.isSubmitting = false;
+    this.signButtonLabel = this.signButton?.textContent || 'Sign Proposal';
+
+    if (this.closeButton) this.closeButton.addEventListener('click', () => this.close());
+    if (this.backButton) this.backButton.addEventListener('click', () => this.close());
+    if (this.signButton) this.signButton.addEventListener('click', () => this.handleSign());
+  }
+
+  open(draft) {
+    this.currentDraft = draft;
+    this.setSubmitting(false);
+    this.render();
+    openModal(this.modal);
+    enterFullscreen();
+  }
+
+  close() {
+    if (this.isSubmitting) return;
     this.modal.classList.remove('active');
     enterFullscreen();
   }
@@ -2774,165 +5573,1142 @@ class AddProposalModal {
     return this.modal.classList.contains('active');
   }
 
-  renderTypeFields() {
-    if (!this.typeFieldsContainer) return;
-    const typeKey = this.typeSelect?.value || 'treasury_project';
-
-    // Minimal, mock-only dynamic fields.
-    if (typeKey === 'treasury_project' || typeKey === 'treasury_mint') {
-      this.typeFieldsContainer.innerHTML = `
-        <div class="form-group">
-          <label for="addProposalAddress">Address</label>
-          <input id="addProposalAddress" class="form-control" type="text" maxlength="128" placeholder="Destination address" />
-        </div>
-        <div class="form-group">
-          <label for="addProposalAmount">Amount</label>
-          <input id="addProposalAmount" class="form-control" type="number" min="0" step="0.0001" placeholder="0" />
-        </div>
-      `;
-      return;
+  setSubmitting(isSubmitting) {
+    this.isSubmitting = Boolean(isSubmitting);
+    if (this.closeButton) this.closeButton.disabled = this.isSubmitting;
+    if (this.backButton) this.backButton.disabled = this.isSubmitting;
+    if (this.signButton) {
+      this.signButton.disabled = this.isSubmitting;
+      this.signButton.textContent = this.isSubmitting ? 'Signing...' : this.signButtonLabel;
     }
-
-    if (typeKey === 'params_governance') {
-      this.typeFieldsContainer.innerHTML = `
-        <div class="form-group">
-          <label for="addProposalVotingThreshold">Voting Threshold</label>
-          <input id="addProposalVotingThreshold" class="form-control" type="text" maxlength="20" placeholder="e.g. 60%" />
-        </div>
-        <div class="form-group">
-          <label for="addProposalVotingEligibility">Voting Eligibility</label>
-          <input id="addProposalVotingEligibility" class="form-control" type="text" maxlength="120" placeholder="e.g. validators + stakers" />
-        </div>
-      `;
-      return;
-    }
-
-    if (typeKey === 'params_economic') {
-      this.typeFieldsContainer.innerHTML = `
-        <div class="form-group">
-          <label for="addProposalMinTxFee">Min Tx Fee</label>
-          <input id="addProposalMinTxFee" class="form-control" type="text" maxlength="24" placeholder="e.g. 0.001" />
-        </div>
-        <div class="form-group">
-          <label for="addProposalNodeRewards">Node Rewards</label>
-          <input id="addProposalNodeRewards" class="form-control" type="text" maxlength="24" placeholder="e.g. unchanged" />
-        </div>
-        <div class="form-group">
-          <label for="addProposalValidatorPenalty">Validator Penalty</label>
-          <input id="addProposalValidatorPenalty" class="form-control" type="text" maxlength="24" placeholder="e.g. 50" />
-        </div>
-      `;
-      return;
-    }
-
-    // params_protocol
-    this.typeFieldsContainer.innerHTML = `
-      <div class="form-group">
-        <label for="addProposalMinActiveNodes">Min Active Nodes</label>
-        <input id="addProposalMinActiveNodes" class="form-control" type="number" min="0" step="1" placeholder="e.g. 100" />
-      </div>
-      <div class="form-group">
-        <label for="addProposalMaxActiveNodes">Max Active Nodes</label>
-        <input id="addProposalMaxActiveNodes" class="form-control" type="number" min="0" step="1" placeholder="e.g. 250" />
-      </div>
-      <div class="form-group">
-        <label for="addProposalMinValidatorVersion">Min Validator Version</label>
-        <input id="addProposalMinValidatorVersion" class="form-control" type="text" maxlength="40" placeholder="e.g. 1.2.3" />
-      </div>
-    `;
   }
 
-  async handleCreate() {
-    const title = (this.titleInput?.value || '').trim();
-    const summary = (this.summaryInput?.value || '').trim();
-    const typeKey = (this.typeSelect?.value || '').trim();
-
-    if (!title) {
-      showToast('Please enter a title', 2000, 'warning');
+  async handleSign() {
+    if (this.isSubmitting) return;
+    if (!this.currentDraft?.transaction?.from) {
+      showToast('Proposal draft is unavailable', 3000, 'warning');
       return;
     }
-    if (!summary) {
-      showToast('Please enter a summary', 2000, 'warning');
+    if (hasPendingDaoProposalCreation(this.currentDraft.transaction.from)) {
+      showToast('Wait for your pending proposal to confirm before creating another.', 3000, 'info');
       return;
     }
 
-    if (!typeKey) {
-      showToast('Please select a type', 2000, 'warning');
-      return;
-    }
-
-    const fields = {};
-    // Collect dynamic fields if present.
-    const addrEl = document.getElementById('addProposalAddress');
-    const amtEl = document.getElementById('addProposalAmount');
-    const thrEl = document.getElementById('addProposalVotingThreshold');
-    const eligEl = document.getElementById('addProposalVotingEligibility');
-    const feeEl = document.getElementById('addProposalMinTxFee');
-    const rewardsEl = document.getElementById('addProposalNodeRewards');
-    const penEl = document.getElementById('addProposalValidatorPenalty');
-    const minNodesEl = document.getElementById('addProposalMinActiveNodes');
-    const maxNodesEl = document.getElementById('addProposalMaxActiveNodes');
-    const minVerEl = document.getElementById('addProposalMinValidatorVersion');
-
-    if (addrEl?.value) fields.address = addrEl.value.trim();
-    if (amtEl?.value) fields.amount = amtEl.value;
-    if (thrEl?.value) fields.votingThreshold = thrEl.value.trim();
-    if (eligEl?.value) fields.votingEligibility = eligEl.value.trim();
-    if (feeEl?.value) fields.minTxFee = feeEl.value.trim();
-    if (rewardsEl?.value) fields.nodeRewards = rewardsEl.value.trim();
-    if (penEl?.value) fields.validatorPenalty = penEl.value.trim();
-    if (minNodesEl?.value) fields.minActiveNodes = Number(minNodesEl.value);
-    if (maxNodesEl?.value) fields.maxActiveNodes = Number(maxNodesEl.value);
-    if (minVerEl?.value) fields.minValidatorVersion = minVerEl.value.trim();
+    this.setSubmitting(true);
+    let loadingToastId = showToast('Submitting proposal...', 0, 'loading');
 
     try {
-      await daoRepo.createProposal({
-        title,
-        summary,
-        type: typeKey,
-        fields,
-        createdBy: myAccount?.username || myAccount?.address || 'unknown',
+      const { proposalFeeUsdStr, maxGracePeriodMs, proposalDurations } = await addProposalModal.loadDaoProposalDefaults({ refresh: true });
+      const refreshedProposalFeeUsdStr = this.currentDraft.transaction.emergency ? '0' : proposalFeeUsdStr;
+      if (refreshedProposalFeeUsdStr !== this.currentDraft.proposalFeeUsdStr) {
+        this.currentDraft = {
+          ...this.currentDraft,
+          proposalFeeUsdStr: refreshedProposalFeeUsdStr,
+        };
+        this.render();
+        showToast('Proposal fee changed. Review the updated amount and sign again.', 4000, 'info');
+        return;
+      }
+      const result = await daoRepo.createProposal({
+        draft: this.currentDraft,
+        timestamp: getTransactionTimestamp(),
+        networkId: network?.netid || '',
+        maxGracePeriodMs,
+        proposalDurations,
+        submitTransaction: async (transaction) => {
+          if (!myAccount?.keys) throw new Error('Wallet keys unavailable');
+          const txid = await signObj(transaction, myAccount.keys);
+          return injectTx(transaction, txid);
+        },
       });
-    } catch (e) {
-      console.warn('Failed to create proposal:', e);
-      showToast(e?.message || 'Failed to create proposal', 2500, 'error');
+
+      if (!result.ok) {
+        if (loadingToastId) {
+          hideToast(loadingToastId);
+          loadingToastId = null;
+        }
+        const message = result.response
+          ? 'Proposal was not submitted. You can retry or go back to edit.'
+          : result.error || 'Proposal submission failed';
+        showToast(message, 3000, 'warning');
+        return;
+      }
+
+      const pendingProposal = myData?.pending?.find(
+        (pendingTx) => pendingTx.txid === result.response?.txid
+      );
+      if (pendingProposal) {
+        Object.assign(pendingProposal, {
+          proposalStoreId: result.proposalStoreId,
+          proposalId: result.transaction?.proposalId || '',
+          proposalNumber: result.proposalNumber,
+          from: result.transaction?.from || '',
+          action: '',
+        });
+      }
+      if (daoModal.isActive()) daoModal.render();
+
+      if (loadingToastId) {
+        hideToast(loadingToastId);
+        loadingToastId = null;
+      }
+      this.setSubmitting(false);
+      this.close();
+      addProposalModal.forceClose();
+      showToast('Proposal submitted—pending confirmation', 4000, 'info');
+    } catch (error) {
+      console.warn('Failed to submit DAO proposal:', error);
+      if (loadingToastId) {
+        hideToast(loadingToastId);
+        loadingToastId = null;
+      }
+      showToast(error?.message || 'Proposal submission failed', 3000, 'warning');
+    } finally {
+      if (loadingToastId) hideToast(loadingToastId);
+      if (this.isActive()) this.setSubmitting(false);
+    }
+  }
+
+  render() {
+    if (!this.content) return;
+    const draft = this.currentDraft;
+    if (draft?.transaction?.proposalType === DAO_PROJECT_TYPE) {
+      this.renderProjectProposal(draft);
+      return;
+    }
+    if (!draft?.transaction?.from) {
+      this.setTitle('Review Proposal');
+      this.content.innerHTML = '<section class="proposal-info-section"><h3>Review Proposal</h3><p class="proposal-info-muted">Proposal draft is unavailable.</p></section>';
       return;
     }
 
-    this.close();
-    // Ensure DAO modal shows the new proposal (Discussion by default for new proposals)
-    daoModal.selectedStateKey = 'discussion';
-    daoModal.selectedGroupKey = 'active';
-    if (!daoModal.isActive()) daoModal.open();
-    else daoModal.render();
+    const tx = draft.transaction;
+    const reviewDelayIfSubmittedNowMs = draft.reviewStartTimeMs > 0
+      ? Math.max(0, draft.reviewStartTimeMs - getTransactionTimestamp())
+      : 0;
+    this.setTitle('Review Proposal');
+    this.content.innerHTML = [
+      renderDaoProposalHeading(tx),
+      renderDaoProposalOptions(tx),
+      renderDaoProposalSection('Overview', [
+        ['Type', getDaoTypeLabel(tx.proposalType)],
+        ['Proposal fee', `${draft.proposalFeeUsdStr || '0'} USD`],
+        ['Initial state', 'Review after submission'],
+      ]),
+      renderDaoProposalSection('Review Timeline', [
+        ['Scheduled review start', draft.reviewStartTimeMs
+          ? formatDaoTimestamp(draft.reviewStartTimeMs)
+          : 'Start now'],
+        ['Time until start if submitted now', formatDaoDurationSummary(reviewDelayIfSubmittedNowMs)],
+        ['Grace period', formatDaoDurationSummary(tx.gracePeriod)],
+      ]),
+      '<p class="proposal-info-muted">The proposal fee is derived from DAO params and seeds the voter reward pool for regular proposals. Signing submits this proposal for review.</p>',
+    ].join('');
+  }
 
-    showToast('Proposal submitted (Discussion)', 2000, 'success');
+  renderProjectProposal(draft) {
+    const proposal = draft.transaction;
+    const project = proposal?.project;
+    if (!project) {
+      this.setTitle('Review Project Proposal');
+      this.content.innerHTML = '<section class="proposal-info-section"><h3>Review Project Proposal</h3><p class="proposal-info-muted">Project proposal is unavailable.</p></section>';
+      return;
+    }
+
+    const budget = getDaoProjectBudgetSummary(project.milestones);
+    const reviewDelayIfSubmittedNowMs = draft.reviewStartTimeMs > 0
+      ? Math.max(0, draft.reviewStartTimeMs - getTransactionTimestamp())
+      : 0;
+    this.setTitle('Review Project Proposal');
+    this.content.innerHTML = [
+      renderDaoProposalHeading(proposal),
+      renderDaoProposalOptions(proposal),
+      renderDaoProposalSection('Project Funding', [
+        ['Recipient', normalizeDaoAddress(project.address)],
+        ['Base cost', formatDaoProjectDraftUsd(budget.baseCostUsdStr)],
+        ['Maximum bonuses', formatDaoProjectDraftUsd(budget.maximumBonusUsdStr)],
+        ['Maximum authorized', formatDaoProjectDraftUsd(budget.maximumAuthorizedUsdStr)],
+      ], 'dao-project-review-funding'),
+      renderDaoProjectMilestones(project.milestones),
+      renderDaoProposalSection('Overview', [
+        ['Type', getDaoTypeLabel(proposal.proposalType)],
+        ['Proposal fee', `${draft.proposalFeeUsdStr || '0'} USD`],
+        ['Initial state', 'Review after submission'],
+      ]),
+      renderDaoProposalSection('Review Timeline', [
+        ['Scheduled review start', draft.reviewStartTimeMs
+          ? formatDaoTimestamp(draft.reviewStartTimeMs)
+          : 'Start now'],
+        ['Time until start if submitted now', formatDaoDurationSummary(reviewDelayIfSubmittedNowMs)],
+        ['Grace period', formatDaoDurationSummary(proposal.gracePeriod)],
+      ]),
+      '<p class="proposal-info-muted">The proposal fee is derived from DAO params and seeds the voter reward pool. Signing submits this project proposal for review.</p>',
+    ].join('');
+  }
+
+  setTitle(title) {
+    if (this.title) this.title.textContent = title || 'Review Proposal';
   }
 }
 
-const addProposalModal = new AddProposalModal();
+const confirmProposalModal = new ConfirmProposalModal();
+
+const DAO_CUSTOM_WITHHOLD_REASON = 'custom';
+const DAO_WITHHOLD_REASON_OPTIONS = [
+  { value: 'Missing information', label: 'Missing information' },
+  { value: 'Invalid parameter change', label: 'Invalid parameter change' },
+  { value: 'Unsafe or risky change', label: 'Unsafe or risky change' },
+  { value: 'Duplicate or already addressed', label: 'Duplicate or already addressed' },
+  { value: DAO_CUSTOM_WITHHOLD_REASON, label: 'Custom reason' },
+];
+const DAO_WITHHOLD_REASON_MAX_LENGTH = 1000;
+const DAO_VOTE_WEIGHT_MAX = 1_000_000;
+const DAO_VOTE_WEIGHT_PRECISION = 1_000_000_000_000;
+const DAO_VOTE_WEIGHT_PRECISION_BIGINT = 1_000_000_000_000n;
+const DAO_CLAIM_REWARD_PRECISION = 10n ** 18n;
+const DAO_VOTE_HELP = {
+  timeFactor: 'Voting earlier gives more voting power. It does not change your LIB spend.',
+  votingPower: 'Voting power is the normalized weight from your LIB spend and timing. Final weight can shift slightly if the transaction lands later or network pricing changes before validation.',
+  weight: 'Weight is a ratio. 1 / 1 splits evenly; 3 / 1 gives 75% / 25%.',
+  voteThreshold: 'Minimum wallet balance required to vote on this proposal.',
+  minimumSpend: 'Base LIB spend for a valid vote. Choose a whole-number multiple of it when voting.',
+};
+
+function getDaoCurrentAccountAddress() {
+  return myAccount?.keys?.address ? longAddress(myAccount.keys.address) : '';
+}
+
+function hasPendingDaoProposalCreation(from = getDaoCurrentAccountAddress()) {
+  if (!from || !Array.isArray(myData?.pending)) return false;
+  return myData.pending.some((pendingTx) => (
+    pendingTx?.type === DAO_PROPOSAL_CREATE_TYPE && pendingTx.from === from
+  ));
+}
+
+function getDaoProposalReviewWindow(proposal, now = getTransactionTimestamp()) {
+  const timeline = getDaoProposalTimeline(proposal);
+  if (!timeline) {
+    return {
+      start: 0,
+      end: 0,
+      label: 'Review timing unavailable',
+      canCommitteeVote: false,
+      canFinalizeReviewResult: false,
+    };
+  }
+
+  const start = timeline.reviewStart;
+  const end = timeline.reviewEnd;
+  if (now < start) {
+    return {
+      start,
+      end,
+      label: 'Review has not started',
+      canCommitteeVote: false,
+      canFinalizeReviewResult: false,
+    };
+  }
+  if (now <= end) {
+    return {
+      start,
+      end,
+      label: 'In committee review',
+      canCommitteeVote: true,
+      canFinalizeReviewResult: false,
+    };
+  }
+  return {
+    start,
+    end,
+    label: 'Review window ended',
+    canCommitteeVote: false,
+    canFinalizeReviewResult: true,
+  };
+}
+
+function getDaoProposalVotingWindow(proposal, now = getTransactionTimestamp()) {
+  const timeline = getDaoProposalTimeline(proposal);
+  if (!timeline) {
+    return {
+      start: 0,
+      end: 0,
+      label: 'Voting timing unavailable',
+      canPreviewVote: false,
+      timeMultiplier: null,
+    };
+  }
+
+  const start = timeline.votingStart;
+  const end = timeline.votingEnd;
+  if (now < start) {
+    return {
+      start,
+      end,
+      label: 'Voting has not started',
+      canPreviewVote: false,
+      timeMultiplier: 1,
+    };
+  }
+  if (now <= end) {
+    return {
+      start,
+      end,
+      label: 'Voting open',
+      canPreviewVote: true,
+      timeMultiplier: getDaoVoteTimeMultiplier(now, start, end),
+    };
+  }
+  return {
+    start,
+    end,
+    label: 'Voting ended',
+    canPreviewVote: false,
+    timeMultiplier: 0,
+  };
+}
+
+function getDaoVoteTimeMultiplier(now, start, end) {
+  const halfDuration = (end - start) / 2;
+  if (!Number.isFinite(halfDuration) || halfDuration <= 0) return 1;
+  if (now - start <= halfDuration) return 1;
+  return Math.max(0, (end - now) / halfDuration);
+}
+
+function formatDaoDetailTimestamp(ts) {
+  const formatted = formatDaoTimestamp(ts);
+  return formatted ? formatted.replace(', ', '\n') : 'Unavailable';
+}
+
+function formatDaoCompactTimestamp(ts) {
+  const n = Number(ts || 0);
+  if (!n) return '';
+  try {
+    return new Date(n).toLocaleString(undefined, {
+      month: 'short',
+      day: 'numeric',
+      hour: 'numeric',
+      minute: '2-digit',
+    });
+  } catch {
+    return '';
+  }
+}
+
+function formatDaoShortNumber(value, decimals = 6) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return 'Unavailable';
+  return Number(n.toFixed(decimals)).toLocaleString(undefined, { maximumFractionDigits: decimals });
+}
+
+function formatDaoScaledBigInt(value, scale, decimals = 3) {
+  if (typeof value !== 'bigint' || typeof scale !== 'bigint' || scale <= 0n) return null;
+  const sign = value < 0n ? '-' : '';
+  const absValue = value < 0n ? -value : value;
+  const factor = 10n ** BigInt(Math.max(0, decimals));
+  const rounded = (absValue * factor + (scale / 2n)) / scale;
+  const whole = rounded / factor;
+  const fraction = rounded % factor;
+  const wholeText = whole.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+  if (decimals <= 0 || fraction === 0n) return `${sign}${wholeText}`;
+  const fractionText = fraction.toString().padStart(decimals, '0').replace(/0+$/, '');
+  return `${sign}${wholeText}.${fractionText}`;
+}
+
+function formatDaoVoteWeightUnits(value, suffix) {
+  const bigintValue = parseDaoUnsignedBigInt(value);
+  if (bigintValue === null) return 'Unavailable';
+  const formatted = formatDaoScaledBigInt(bigintValue, DAO_VOTE_WEIGHT_PRECISION_BIGINT, 3);
+  return formatted === null ? 'Unavailable' : `${formatted} ${suffix}`;
+}
+
+function formatDaoVotingPower(value) {
+  return formatDaoVoteWeightUnits(value, 'power');
+}
+
+function formatDaoEstimatedVotingPower(value) {
+  const formatted = formatDaoVotingPower(value);
+  return formatted === 'Unavailable' ? formatted : `~${formatted}`;
+}
+
+function formatDaoPercent(value) {
+  return `${formatDaoShortNumber(value * 100, 1)}%`;
+}
+
+function formatDaoLibWei(value) {
+  const weiValue = parseDaoUnsignedBigInt(value);
+  if (weiValue === null) return 'Unavailable';
+  return `${formatDaoShortNumber(EthNum.toStr(weiValue))} LIB`;
+}
+
+function formatDaoRewardAmount(value) {
+  return value === null ? 'Unavailable' : formatDaoLibWei(value);
+}
+
+function formatDaoBigIntPercent(part, total) {
+  if (typeof part !== 'bigint' || typeof total !== 'bigint' || total <= 0n) return '0%';
+  const tenths = (part * 1000n + total / 2n) / total;
+  const whole = tenths / 10n;
+  const fraction = tenths % 10n;
+  return fraction === 0n ? `${whole}%` : `${whole}.${fraction}%`;
+}
+
+function getDaoVoteTotals(proposal) {
+  const totalVote = proposal.totalVote;
+  if (totalVote.length === 0) return [];
+
+  const options = getDaoProposalOptionLabels(proposal);
+  const rowCount = Math.max(options.length, totalVote.length);
+  return Array.from({ length: rowCount }, (_, index) => ({
+    index,
+    option: options[index] || `Option ${index + 1}`,
+    total: parseDaoUnsignedBigInt(totalVote[index]) ?? 0n,
+  }));
+}
+
+function isDaoFinalResultState(state) {
+  return state === 'accepted'
+    || state === 'rejected'
+    || state === 'applied'
+    || state === 'canceled'
+    || state === 'executing'
+    || state === 'completed'
+    || state === 'terminated';
+}
+
+function isDaoFinalizedState(state) {
+  return state === 'withheld' || isDaoFinalResultState(state);
+}
+
+function getDaoFinalOutcome(proposal) {
+  const state = getEffectiveDaoState(proposal);
+  const label = getDaoStateLabel(state) || state || 'Unavailable';
+  const tone = state === 'withheld' || state === 'rejected' ? 'rejected' : 'accepted';
+  return { label, tone };
+}
+
+function getDaoCommitteeReview(proposal) {
+  const committeeVotes = Array.isArray(proposal?.committeeVotes) ? proposal.committeeVotes : [];
+  const committeeAddresses = Array.isArray(proposal?.committeeAddresses) ? proposal.committeeAddresses : [];
+  const committeeAddressSet = new Set(committeeAddresses);
+  const votes = [];
+  let acceptCount = 0;
+  let withholdCount = 0;
+
+  for (const vote of committeeVotes) {
+    if (!vote || !committeeAddressSet.has(vote.memberAddress)) continue;
+    if (vote.vote !== 'accept' && vote.vote !== 'withhold') {
+      console.warn('Skipping unknown committee vote:', vote.vote);
+      continue;
+    }
+    votes.push(vote);
+    if (vote.vote === 'accept') {
+      acceptCount += 1;
+    } else {
+      withholdCount += 1;
+    }
+  }
+
+  return {
+    acceptCount,
+    committeeAddresses,
+    committeeAddressSet,
+    votes,
+    withholdCount,
+  };
+}
+
+function getDaoCommitteeReviewResultSummary(proposal) {
+  const state = getEffectiveDaoState(proposal);
+  if (state !== 'withheld' && !(proposal?.emergency && isDaoFinalResultState(state))) return null;
+
+  const committeeReview = getDaoCommitteeReview(proposal);
+  const outcome = getDaoFinalOutcome(proposal);
+
+  return {
+    acceptCount: committeeReview.acceptCount,
+    committeeSize: committeeReview.committeeAddresses.length,
+    headline: outcome.label,
+    source: 'committee',
+    tone: outcome.tone,
+    withholdCount: committeeReview.withholdCount,
+  };
+}
+
+function getDaoVoteResultSummary(proposal) {
+  const result = getDaoFinalVoteResult(proposal);
+  if (!result) return null;
+  const totals = getDaoVoteTotals(proposal);
+  const winner = totals.find((row) => row.index === result.winnerIndex) || null;
+  const { outcome, tone, totalWeight } = result;
+
+  return { headline: outcome, outcome, source: 'vote', tone, totalWeight, totals, winner };
+}
+
+function getDaoProposalResultSummary(proposal) {
+  return getDaoCommitteeReviewResultSummary(proposal) || getDaoVoteResultSummary(proposal);
+}
+
+function getDaoVoterEntries(proposal) {
+  if (!Array.isArray(proposal?.voterList)) return [];
+  return proposal.voterList
+    .map((entry) => ({
+      address: normalizeDaoAddress(entry?.address),
+      timestamp: Number(entry?.timestamp || 0),
+    }))
+    .filter((entry) => entry.address && Number.isFinite(entry.timestamp) && entry.timestamp > 0);
+}
+
+function getDaoProposalApplyWindow(proposal, now = getTransactionTimestamp()) {
+  if (proposal?.emergency) {
+    return { eligibleAt: null, isReady: true };
+  }
+
+  const timeline = getDaoProposalTimeline(proposal);
+  if (!timeline) {
+    return { eligibleAt: null, isReady: false };
+  }
+
+  const eligibleAt = timeline.applyEligibleAt;
+  return { eligibleAt, isReady: now >= eligibleAt };
+}
+
+function isDaoParameterProposalType(proposal) {
+  const type = String(proposal?.proposalType || '').toLowerCase();
+  return type === 'governance' || type === 'economic' || type === 'protocol';
+}
+
+function isDaoProposalCommitteeMember(proposal, currentAddress) {
+  const normalizedAddress = normalizeDaoAddress(currentAddress);
+  if (!normalizedAddress || !Array.isArray(proposal?.committeeAddresses)) return false;
+  return proposal.committeeAddresses.some((address) => normalizeDaoAddress(address) === normalizedAddress);
+}
+
+function getDaoApplyParametersLifecycleAction(help, canSubmit, rowPreviewLabel = '') {
+  const action = {
+    kind: 'apply_parameters',
+    title: 'Apply parameters',
+    help,
+    buttonLabel: 'Apply parameters',
+    loadingLabel: 'Applying parameters...',
+    canSubmit,
+  };
+  if (rowPreviewLabel) action.rowPreviewLabel = rowPreviewLabel;
+  return action;
+}
+
+function getDaoProposalApplyLifecycleAction(
+  proposal,
+  currentAddress = getDaoCurrentAccountAddress(),
+  now = getTransactionTimestamp(),
+) {
+  if (getEffectiveDaoState(proposal) !== 'accepted') return null;
+  if (proposal?.proposalType === DAO_PROJECT_TYPE) return null;
+
+  if (!isDaoParameterProposalType(proposal)) {
+    return getDaoApplyParametersLifecycleAction(
+      'This proposal type does not support parameter application.',
+      false,
+    );
+  }
+
+  if (proposal?.emergency && !isDaoProposalCommitteeMember(proposal, currentAddress)) {
+    return getDaoApplyParametersLifecycleAction(
+      'Emergency proposal parameters can only be applied by a proposal committee member.',
+      false,
+    );
+  }
+
+  const applyWindow = getDaoProposalApplyWindow(proposal, now);
+  if (!applyWindow.isReady) {
+    const eligibleAt = applyWindow.eligibleAt ? formatDaoTimestamp(applyWindow.eligibleAt) : '';
+    return getDaoApplyParametersLifecycleAction(
+      eligibleAt
+        ? `Apply becomes available after the grace period ends: ${eligibleAt}.`
+        : 'Apply timing is unavailable until the proposal includes grace-period timing.',
+      false,
+      formatDaoReadyAtLabel(applyWindow.eligibleAt, now),
+    );
+  }
+
+  return getDaoApplyParametersLifecycleAction(
+    'This proposal is ready to apply. Submit the transaction to apply the accepted parameter changes.',
+    true,
+    'Ready to apply',
+  );
+}
+
+function getDaoProjectStartLifecycleAction(
+  proposal,
+  currentAddress = getDaoCurrentAccountAddress(),
+  now = getTransactionTimestamp(),
+) {
+  if (getEffectiveDaoState(proposal) !== 'accepted') return null;
+  if (proposal?.proposalType !== DAO_PROJECT_TYPE) return null;
+
+  const action = {
+    kind: 'project_start',
+    title: 'Start project',
+    buttonLabel: 'Start project',
+    loadingLabel: 'Starting project...',
+    canSubmit: false,
+  };
+  if (!isDaoProposalCommitteeMember(proposal, currentAddress)) {
+    return {
+      ...action,
+      help: 'Only a proposal committee member can start this project.',
+    };
+  }
+
+  const applyWindow = getDaoProposalApplyWindow(proposal, now);
+  if (!applyWindow.isReady) {
+    const eligibleAt = applyWindow.eligibleAt ? formatDaoTimestamp(applyWindow.eligibleAt) : '';
+    return {
+      ...action,
+      help: eligibleAt
+        ? `Project start becomes available after the grace period ends: ${eligibleAt}.`
+        : 'Project start timing is unavailable until the proposal includes grace-period timing.',
+      rowPreviewLabel: formatDaoReadyAtLabel(applyWindow.eligibleAt, now),
+    };
+  }
+
+  return {
+    ...action,
+    help: 'Starting this project mints its approved budget into escrow at the current network rate.',
+    rowPreviewLabel: 'Ready to start',
+    canSubmit: true,
+  };
+}
+
+function isDaoProjectContractor(project, currentAddress) {
+  const normalizedAddress = normalizeDaoAddress(currentAddress);
+  return Boolean(normalizedAddress && normalizedAddress === project?.address);
+}
+
+function getDaoProjectRequiredEndorsements(proposal, contractorMayPropose) {
+  const committeeSize = Array.isArray(proposal?.committeeAddresses)
+    ? proposal.committeeAddresses.length
+    : 0;
+  const reachable = committeeSize + (contractorMayPropose ? 1 : 0);
+  return Math.min(3, Math.max(reachable, 1));
+}
+
+function getDaoProjectMilestoneTimeAction({
+  proposal,
+  project,
+  milestone,
+  milestoneNumber,
+  kind,
+  currentAddress,
+}) {
+  const isStart = kind === 'project_milestone_start';
+  const verb = isStart ? 'start' : 'completion';
+  const title = isStart ? 'Start' : 'Complete';
+  const hasProposedTime = milestone.proposedTime !== null;
+  const isCommitteeMember = isDaoProposalCommitteeMember(proposal, currentAddress);
+  const isContractor = isDaoProjectContractor(project, currentAddress);
+  const hasEndorsed = milestone.endorsedTime.includes(normalizeDaoAddress(currentAddress));
+  const endorsementCount = milestone.endorsedTime.length;
+  const requiredEndorsements = getDaoProjectRequiredEndorsements(proposal, true);
+  const action = {
+    kind,
+    title: `${title} milestone ${milestoneNumber}`,
+    milestoneNumber,
+    proposesCurrentTime: !hasProposedTime,
+    expectedProposedTime: milestone.proposedTime,
+    canSubmit: false,
+  };
+
+  if (!hasProposedTime) {
+    return {
+      ...action,
+      help: isCommitteeMember || isContractor
+        ? `Propose the current time as milestone ${milestoneNumber}'s ${verb} time. ${requiredEndorsements} total endorsements are required.`
+        : 'Only a proposal committee member or the contractor can propose this time.',
+      buttonLabel: `Propose ${verb} now`,
+      loadingLabel: `Proposing milestone ${verb}...`,
+      canSubmit: isCommitteeMember || isContractor,
+    };
+  }
+
+  const proposedTimeLabel = formatDaoTimestamp(milestone.proposedTime) || 'the proposed time';
+  let help = `Endorse ${proposedTimeLabel} as milestone ${milestoneNumber}'s ${verb} time. ${endorsementCount} of ${requiredEndorsements} endorsements have been submitted.`;
+  if (!isCommitteeMember) {
+    help = 'Only a proposal committee member can endorse the proposed time.';
+  } else if (hasEndorsed) {
+    help = 'You already endorsed the proposed time.';
+  }
+  return {
+    ...action,
+    help,
+    buttonLabel: `Endorse proposed ${verb}`,
+    loadingLabel: `Endorsing milestone ${verb}...`,
+    canSubmit: isCommitteeMember && !hasEndorsed,
+  };
+}
+
+function getDaoProjectMilestoneLifecycleActions(proposal, currentAddress) {
+  if (getEffectiveDaoState(proposal) !== 'executing') return [];
+
+  const project = getDaoProjectPresentation(proposal);
+  if (project.kind !== 'available') return [];
+
+  const actions = [];
+  const executingMilestones = project.milestones
+    .map((milestone, index) => ({ milestone, index }))
+    .filter(({ milestone }) => milestone.status?.key === 'executing');
+  if (executingMilestones.length === 1) {
+    const { milestone, index } = executingMilestones[0];
+    actions.push(getDaoProjectMilestoneTimeAction({
+      proposal,
+      project,
+      milestone,
+      milestoneNumber: index + 1,
+      kind: 'project_milestone_end',
+      currentAddress,
+    }));
+  }
+
+  const nextPendingIndex = project.milestones.findIndex(
+    (milestone) => milestone.status?.key === 'pending',
+  );
+  const canStartNextMilestone = nextPendingIndex >= 0
+    && project.milestones.slice(0, nextPendingIndex).every((milestone) => (
+      milestone.status?.key === 'completed' || milestone.status?.key === 'terminated'
+    ));
+  if (canStartNextMilestone) {
+    actions.push(getDaoProjectMilestoneTimeAction({
+      proposal,
+      project,
+      milestone: project.milestones[nextPendingIndex],
+      milestoneNumber: nextPendingIndex + 1,
+      kind: 'project_milestone_start',
+      currentAddress,
+    }));
+  }
+
+  if (!isDaoProposalCommitteeMember(proposal, currentAddress)) return actions;
+
+  const requiredTerminationVotes = getDaoProjectRequiredEndorsements(proposal, false);
+  const normalizedCurrentAddress = normalizeDaoAddress(currentAddress);
+  for (const [index, milestone] of project.milestones.entries()) {
+    if (milestone.status?.key !== 'pending' && milestone.status?.key !== 'executing') continue;
+
+    const milestoneNumber = index + 1;
+    const alreadyVoted = milestone.terminateVotes.some(
+      (vote) => vote.address === normalizedCurrentAddress,
+    );
+    actions.push({
+      kind: 'project_milestone_terminate',
+      title: `Terminate milestone ${milestoneNumber}`,
+      help: alreadyVoted
+        ? 'You already voted to terminate this milestone.'
+        : `${milestone.terminateVotes.length} of ${requiredTerminationVotes} committee termination votes have been submitted.`,
+      buttonLabel: 'Submit termination vote',
+      loadingLabel: 'Submitting termination vote...',
+      milestoneNumber,
+      reasonRequired: !alreadyVoted,
+      canSubmit: !alreadyVoted,
+    });
+  }
+  return actions;
+}
+
+function getDaoProjectMilestoneClaimActions(proposal, currentAddress) {
+  const state = getEffectiveDaoState(proposal);
+  if (state !== 'executing' && state !== 'completed' && state !== 'terminated') return [];
+
+  const project = getDaoProjectPresentation(proposal);
+  if (project.kind !== 'available' || !isDaoProjectContractor(project, currentAddress)) return [];
+
+  return project.milestones.flatMap((milestone, index) => {
+    if (milestone.status?.key !== 'completed' || milestone.paidWei !== 0n) return [];
+
+    const milestoneNumber = index + 1;
+    const payout = getDaoProjectMilestonePayout(project, milestone);
+    const hasSufficientBalance = payout !== null
+      && project.balanceWei !== null
+      && payout.amountWei <= project.balanceWei;
+    let help;
+    if (!payout) {
+      help = 'Payout details are unavailable until the completed milestone data is refreshed.';
+    } else if (project.balanceWei === null) {
+      help = 'The project balance is unavailable. Refresh the proposal before claiming.';
+    } else if (payout.amountWei > project.balanceWei) {
+      help = 'The calculated payout exceeds the project balance. Refresh the proposal before retrying.';
+    } else {
+      help = `Claim ${formatDaoLibWei(payout.amountWei)} for ${formatDaoProjectDeliverySpeed(payout.speed).toLowerCase()} delivery.`;
+    }
+
+    return [{
+      kind: 'project_milestone_claim',
+      title: `Claim milestone ${milestoneNumber}`,
+      help,
+      buttonLabel: 'Claim milestone payment',
+      loadingLabel: 'Claiming milestone payment...',
+      milestoneNumber,
+      canSubmit: hasSufficientBalance,
+    }];
+  });
+}
+
+function getDaoProjectAddressChangeActions(proposal, project, currentAddress) {
+  const state = getEffectiveDaoState(proposal);
+  const hasRemainingBalance = project.balanceWei !== null && project.balanceWei > 0n;
+  const canChangeAddress = state === 'executing'
+    || ((state === 'completed' || state === 'terminated') && hasRemainingBalance);
+  if (!canChangeAddress) return [];
+
+  const pendingAddress = project.proposedAddress;
+  const normalizedCurrentAddress = normalizeDaoAddress(currentAddress);
+  const requiredEndorsements = getDaoProjectRequiredEndorsements(proposal, false);
+  const proposeAction = {
+    kind: 'project_change_address',
+    title: pendingAddress ? 'Replace proposed contractor' : 'Change contractor address',
+    help: pendingAddress
+      ? `Propose a different contractor address. This replaces ${pendingAddress} and restarts its endorsements.`
+      : `Propose a new contractor address. ${requiredEndorsements} committee endorsements are required.`,
+    buttonLabel: pendingAddress ? 'Propose replacement address' : 'Propose contractor address',
+    loadingLabel: 'Proposing contractor address...',
+    addressRequired: true,
+    currentContractorAddress: project.address,
+    pendingContractorAddress: pendingAddress,
+    canSubmit: true,
+  };
+  if (!pendingAddress) return [proposeAction];
+
+  const hasEndorsed = project.endorsedAddress.includes(normalizedCurrentAddress);
+  return [{
+    kind: 'project_change_address',
+    title: 'Endorse contractor address',
+    help: hasEndorsed
+      ? `You already endorsed ${pendingAddress}.`
+      : `Endorse ${pendingAddress}. ${project.endorsedAddress.length} of ${requiredEndorsements} committee endorsements have been submitted.`,
+    buttonLabel: 'Endorse proposed address',
+    loadingLabel: 'Endorsing contractor address...',
+    currentContractorAddress: project.address,
+    pendingContractorAddress: pendingAddress,
+    canSubmit: !hasEndorsed,
+  }, proposeAction];
+}
+
+function getDaoProjectBalanceReclaimHelp(project, reclaimableAt, canReclaim) {
+  if (reclaimableAt === null) {
+    return 'The project end time is unavailable. Refresh the proposal before reclaiming its balance.';
+  }
+  if (canReclaim) {
+    return `Reclaim the remaining ${formatDaoLibWei(project.balanceWei)} from project escrow.`;
+  }
+  return `The contractor can claim earned payments until ${formatDaoTimestamp(reclaimableAt)}.`;
+}
+
+function getDaoProjectCloseoutActions(proposal, currentAddress, now) {
+  if (!isDaoProposalCommitteeMember(proposal, currentAddress)) return [];
+
+  const project = getDaoProjectPresentation(proposal);
+  if (project.kind !== 'available') return [];
+
+  const state = getEffectiveDaoState(proposal);
+  const actions = getDaoProjectAddressChangeActions(proposal, project, currentAddress);
+  const allMilestonesFinished = project.milestones.every((milestone) => (
+    milestone.status?.key === 'completed' || milestone.status?.key === 'terminated'
+  ));
+  if (state === 'executing' && allMilestonesFinished) {
+    actions.push({
+      kind: 'project_end',
+      title: 'End project',
+      help: 'All milestones are finished. End the project and retain only completed, unpaid milestone payouts in escrow.',
+      buttonLabel: 'End project',
+      loadingLabel: 'Ending project...',
+      canSubmit: true,
+    });
+  }
+
+  const isEnded = state === 'completed' || state === 'terminated';
+  if (!isEnded || project.balanceWei === null || project.balanceWei <= 0n) return actions;
+
+  const reclaimableAt = project.endTime === null
+    ? null
+    : project.endTime + DAO_PROJECT_RECLAIM_DELAY_MS;
+  const canReclaim = reclaimableAt !== null && now >= reclaimableAt;
+  actions.push({
+    kind: 'project_reclaim_balance',
+    title: 'Reclaim project balance',
+    help: getDaoProjectBalanceReclaimHelp(project, reclaimableAt, canReclaim),
+    buttonLabel: 'Reclaim remaining balance',
+    loadingLabel: 'Reclaiming project balance...',
+    canSubmit: canReclaim,
+  });
+  return actions;
+}
+
+function isDaoProjectLifecycleAction(action) {
+  return action.kind.startsWith('project_');
+}
+
+function shouldRenderDaoLifecycleAction(action) {
+  return !isDaoProjectLifecycleAction(action) || action.canSubmit !== false;
+}
+
+function formatDaoClaimWindowLabel(claimWindow, now) {
+  if (!claimWindow.start || !claimWindow.end) return 'Unavailable';
+  const start = formatDaoTimestamp(claimWindow.start) || 'Unavailable';
+  const end = formatDaoTimestamp(claimWindow.end) || 'Unavailable';
+  if (now < claimWindow.start) return `Opens ${start}\nEnds ${end}`;
+  if (now <= claimWindow.end) return `Open until ${end}`;
+  return `Ended ${end}`;
+}
+
+function getDaoClaimRewardEstimate({ pool, claimed, voterEntries, voterIndex, votingStart, votingDuration }) {
+  if (pool <= 0n || claimed >= pool || voterIndex < 0 || voterEntries.length === 0) return null;
+  if (!Number.isFinite(votingStart) || !Number.isFinite(votingDuration) || votingDuration <= 0) return null;
+
+  const voter = voterEntries[voterIndex];
+  const previousTimestamp = voterIndex === 0 ? votingStart : voterEntries[voterIndex - 1]?.timestamp;
+  if (!Number.isFinite(voter?.timestamp) || !Number.isFinite(previousTimestamp)) return null;
+
+  const timeDelta = BigInt(Math.max(0, Math.trunc(voter.timestamp - previousTimestamp)));
+  const duration = BigInt(Math.trunc(votingDuration));
+  const voterCount = BigInt(voterEntries.length);
+  const timePart = (timeDelta * DAO_CLAIM_REWARD_PRECISION) / duration;
+  const equalPart = DAO_CLAIM_REWARD_PRECISION / voterCount;
+  let reward = (pool * (timePart + equalPart)) / (2n * DAO_CLAIM_REWARD_PRECISION);
+  const remaining = pool > claimed ? pool - claimed : 0n;
+  if (reward > remaining) reward = remaining;
+  return reward;
+}
+
+function getDaoProposalRewardSummary(
+  proposal,
+  currentAddress = getDaoCurrentAccountAddress(),
+  now = getTransactionTimestamp(),
+) {
+  const state = getEffectiveDaoState(proposal);
+  const isRewardState = state === 'withheld' || isDaoFinalResultState(state);
+  if (!isRewardState) return null;
+
+  const pool = parseDaoUnsignedBigInt(proposal?.voterRewardPool);
+  const claimed = parseDaoUnsignedBigInt(proposal?.claimedReward);
+  const initialBurned = parseDaoUnsignedBigInt(proposal?.initialBurnedReward);
+  const finalBurned = parseDaoUnsignedBigInt(proposal?.finalBurnedReward);
+  const voterEntries = getDaoVoterEntries(proposal);
+  const hasRewardData = (
+    pool !== null ||
+    claimed !== null ||
+    initialBurned !== null ||
+    finalBurned !== null ||
+    voterEntries.length > 0 ||
+    proposal?.claimList?.length > 0
+  );
+  if (!hasRewardData) return null;
+
+  const safePool = pool ?? 0n;
+  const safeClaimed = claimed ?? 0n;
+  const claimWindow = getDaoProposalClaimWindow(proposal);
+  const normalizedAddress = normalizeDaoAddress(currentAddress);
+  const voterIndex = normalizedAddress ? voterEntries.findIndex((entry) => entry.address === normalizedAddress) : -1;
+  const claimStatus = getDaoRewardClaimStatus(proposal, normalizedAddress, now);
+  const claimEstimate = claimStatus === 'Already claimed'
+    ? null
+    : getDaoClaimRewardEstimate({
+        pool: safePool,
+        claimed: safeClaimed,
+        voterEntries,
+        voterIndex,
+        votingStart: claimWindow.votingStart,
+        votingDuration: claimWindow.votingDuration,
+      });
+  const unclaimed = pool !== null && claimed !== null
+    ? safePool > safeClaimed ? safePool - safeClaimed : 0n
+    : null;
+
+  return {
+    claimEstimate,
+    claimStatus,
+    claimWindowLabel: formatDaoClaimWindowLabel(claimWindow, now),
+    claimed,
+    finalBurned,
+    initialBurned,
+    pool,
+    unclaimed,
+    statusTone: claimStatus === 'Claimable' ? 'accept' : '',
+  };
+}
+
+function getDaoProposalLifecycleActions(
+  proposal,
+  rewardSummary,
+  currentAddress = getDaoCurrentAccountAddress(),
+  now = getTransactionTimestamp(),
+) {
+  const state = getEffectiveDaoState(proposal);
+
+  if (state === 'voting') {
+    const votingWindow = getDaoProposalVotingWindow(proposal, now);
+    if (votingWindow.end && now > votingWindow.end) {
+      const pendingFinalizationOutcome = getDaoPendingFinalizationOutcome(proposal, now);
+      return [{
+        kind: 'vote_result',
+        title: 'Vote result',
+        help: pendingFinalizationOutcome?.message
+          || 'Voting has ended. Finalize the vote result to move this proposal to accepted or rejected.',
+        buttonLabel: 'Finalize vote result',
+        loadingLabel: 'Finalizing vote result...',
+      }];
+    }
+    return [];
+  }
+
+  if (!isDaoFinalResultState(state)) return [];
+
+  const actions = [];
+  const claimWindow = getDaoProposalClaimWindow(proposal);
+  const pool = parseDaoUnsignedBigInt(proposal?.voterRewardPool) ?? 0n;
+  const claimed = parseDaoUnsignedBigInt(proposal?.claimedReward) ?? 0n;
+  const unclaimed = pool > claimed ? pool - claimed : 0n;
+
+  if (claimWindow.end && now > claimWindow.end && unclaimed > 0n) {
+    actions.push({
+      kind: 'burn_reward',
+      title: 'Reward burn',
+      help: 'The claim window has ended. Burn the unclaimed reward pool so the proposal accounting is finalized.',
+      buttonLabel: 'Burn unclaimed reward',
+      loadingLabel: 'Burning reward...',
+    });
+  }
+
+  if (
+    claimWindow.start &&
+    claimWindow.end &&
+    now >= claimWindow.start &&
+    now <= claimWindow.end &&
+    unclaimed > 0n &&
+    rewardSummary?.claimStatus === 'Claimable'
+  ) {
+    actions.push({
+      kind: 'claim_reward',
+      title: 'Reward claim',
+      help: rewardSummary.claimEstimate === null
+        ? 'Your reward is claimable. Submit the claim and refresh proposal accounting.'
+        : `Your estimated claim is ${formatDaoLibWei(rewardSummary.claimEstimate)}. Submit the claim and refresh proposal accounting.`,
+      buttonLabel: 'Claim reward',
+      loadingLabel: 'Claiming reward...',
+    });
+  }
+
+  const applyAction = getDaoProposalApplyLifecycleAction(proposal, currentAddress, now);
+  if (applyAction) actions.push(applyAction);
+  const projectStartAction = getDaoProjectStartLifecycleAction(proposal, currentAddress, now);
+  if (projectStartAction) actions.push(projectStartAction);
+  actions.push(...getDaoProjectMilestoneLifecycleActions(proposal, currentAddress));
+  actions.push(...getDaoProjectMilestoneClaimActions(proposal, currentAddress));
+  actions.push(...getDaoProjectCloseoutActions(proposal, currentAddress, now));
+  return actions;
+}
+
+function formatDaoDetailValue(value) {
+  if (value === undefined || value === null || value === '') return 'Unavailable';
+  if (typeof value === 'bigint') return value.toString();
+  if (Array.isArray(value)) return value.map(formatDaoDetailValue).join(', ');
+  if (typeof value === 'object') return stringify(value);
+  return String(value);
+}
+
+function parseDaoVoteSpendMultiple(value) {
+  const text = String(value || '').trim();
+  if (!/^\d+$/.test(text)) return null;
+  const multiple = Number(text);
+  return Number.isSafeInteger(multiple) && multiple > 0 ? multiple : null;
+}
+
+function getDaoUsdAsLibWei(usdValue) {
+  const usdText = String(usdValue ?? '').trim();
+  const stabilityText = String(parameters?.current?.stabilityFactorStr ?? '').trim();
+  try {
+    return EthNum.usdToWei(usdText, stabilityText);
+  } catch {
+    return null;
+  }
+}
+
+// Snapshotted proposal USD rule → LIB display. null means the requirement does not apply.
+function formatDaoProposalVoteRequirementLib(usdValue) {
+  if (!(Number(usdValue || 0) > 0)) return null;
+  const weiAmount = getDaoUsdAsLibWei(usdValue);
+  if (weiAmount === null) return 'Unavailable';
+  return formatDaoLibWei(weiAmount);
+}
+
+function floorDaoVoteWeightEstimate(value) {
+  const n = Number(value);
+  if (!Number.isFinite(n) || n < 0) return null;
+  try {
+    return BigInt(Math.floor(n));
+  } catch {
+    return null;
+  }
+}
 
 class ProposalInfoModal {
   load() {
     this.modal = document.getElementById('proposalInfoModal');
+    addProposalModal.bindCommitteeAddressCopy(this.modal);
     this.closeButton = document.getElementById('closeProposalInfoModal');
-    this.numberEl = document.getElementById('proposalInfoNumber');
-    this.titleEl = document.getElementById('proposalInfoTitle');
-    this.typeEl = document.getElementById('proposalInfoType');
-    this.metaEl = document.getElementById('proposalInfoMeta');
-    this.summaryEl = document.getElementById('proposalInfoSummary');
-    this.fieldsEl = document.getElementById('proposalInfoFields');
-    this.voteSection = document.getElementById('proposalVoteSection');
-    this.voteYesBtn = document.getElementById('proposalVoteYes');
-    this.voteNoBtn = document.getElementById('proposalVoteNo');
-    this.voteCountsEl = document.getElementById('proposalVoteCounts');
+    this.title = document.getElementById('proposalInfoModalTitle');
+    this.content = document.getElementById('proposalInfoContent');
+    this.detailsContent = document.getElementById('proposalDetailsContent');
+    this.committeeActionSection = document.getElementById('proposalCommitteeActionSection');
+    this.committeeActionHelp = document.getElementById('proposalCommitteeActionHelp');
+    this.acceptButton = document.getElementById('proposalCommitteeAccept');
+    this.withholdButton = document.getElementById('proposalCommitteeWithhold');
+    this.withholdFields = document.getElementById('proposalWithholdFields');
+    this.withholdReasonSelect = document.getElementById('proposalWithholdReason');
+    this.customReasonGroup = document.getElementById('proposalWithholdCustomGroup');
+    this.customReasonInput = document.getElementById('proposalWithholdCustomReason');
+    this.submitButton = document.getElementById('proposalCommitteeSubmit');
+    this.reviewResultSection = document.getElementById('proposalReviewResultSection');
+    this.reviewResultHelp = document.getElementById('proposalReviewResultHelp');
+    this.reviewResultButton = document.getElementById('proposalReviewResultSubmit');
+    this.lifecycleActionSection = document.getElementById('proposalLifecycleActionSection');
+    this.voteActionSection = document.getElementById('proposalVoteActionSection');
+    this.voteActionHelp = document.getElementById('proposalVoteActionHelp');
+    this.voteOptions = document.getElementById('proposalVoteOptions');
+    this.voteSpendMultipleInput = document.getElementById('proposalVoteSpendMultiple');
+    this.voteMinimumSpendLabel = document.getElementById('proposalVoteMinimumSpend');
+    this.votePreview = document.getElementById('proposalVotePreview');
+    this.voteSubmitButton = document.getElementById('proposalVoteSubmit');
 
     this._currentProposalId = null;
+    this.committeeChoice = 'accept';
+    this.currentCommitteeVote = '';
+    this.voteWeights = [];
+    this.voteSpendMultiple = '1';
+    this.isSubmitting = false;
+    this.canSubmitCommitteeReview = false;
+    this.canSubmitReviewResult = false;
+    this.currentLifecycleActions = [];
+    this.submittingLifecycleAction = null;
+    this.canSubmitVote = false;
+    this.submitButtonLabel = this.submitButton?.textContent || 'Submit review';
+    this.reviewResultButtonLabel = this.reviewResultButton?.textContent || 'Finalize review result';
+    this.voteSubmitButtonLabel = this.voteSubmitButton?.textContent || 'Submit vote';
 
     if (this.closeButton) this.closeButton.addEventListener('click', () => this.close());
+    if (this.acceptButton) this.acceptButton.addEventListener('click', () => this.handleCommitteeChoiceClick('accept'));
+    if (this.withholdButton) this.withholdButton.addEventListener('click', () => this.handleCommitteeChoiceClick('withhold'));
+    if (this.withholdReasonSelect) this.withholdReasonSelect.addEventListener('change', () => this.handleWithholdReasonChange());
+    if (this.submitButton) this.submitButton.addEventListener('click', () => this.handleCommitteeSubmit());
+    if (this.reviewResultButton) this.reviewResultButton.addEventListener('click', () => this.handleReviewResultSubmit());
+    if (this.modal) this.modal.addEventListener('click', (event) => this.handleLifecycleActionClick(event));
+    if (this.voteActionSection) this.voteActionSection.addEventListener('click', (event) => this.handleVoteHelpClick(event));
+    if (this.voteSpendMultipleInput) this.voteSpendMultipleInput.addEventListener('input', () => this.handleVoteSpendMultipleInput());
+    if (this.voteOptions) this.voteOptions.addEventListener('input', (event) => this.handleVoteWeightInput(event));
+    if (this.voteSubmitButton) this.voteSubmitButton.addEventListener('click', () => this.handleVoteSubmit());
 
-    if (this.voteYesBtn) this.voteYesBtn.addEventListener('click', () => this.castVote('yes'));
-    if (this.voteNoBtn) this.voteNoBtn.addEventListener('click', () => this.castVote('no'));
+    if (this.withholdReasonSelect) {
+      this.withholdReasonSelect.innerHTML = DAO_WITHHOLD_REASON_OPTIONS
+        .map((option) => `<option value="${escapeDaoFormAttribute(option.value)}">${escapeHtml(option.label)}</option>`)
+        .join('');
+    }
   }
 
   open(proposalId) {
@@ -2942,8 +6718,9 @@ class ProposalInfoModal {
   async _open(proposalId) {
     this._currentProposalId = proposalId;
 
-    this.modal.classList.add('active');
+    openModal(this.modal);
     enterFullscreen();
+    this.renderLoading();
 
     let p = null;
     try {
@@ -2954,96 +6731,1797 @@ class ProposalInfoModal {
     }
 
     if (!p) {
-      if (this.numberEl) this.numberEl.textContent = '';
-      if (this.titleEl) this.titleEl.textContent = 'Proposal not found';
-      if (this.typeEl) this.typeEl.textContent = '';
-      if (this.metaEl) this.metaEl.textContent = '';
-      if (this.summaryEl) this.summaryEl.textContent = '';
-      if (this.fieldsEl) this.fieldsEl.innerHTML = '';
-      if (this.voteSection) this.voteSection.style.display = 'none';
+      this.renderNotFound();
       return;
     }
 
-    const uiState = getDaoStateLabel(getEffectiveDaoState({ state: p.state, stateEnteredAt: p.state_changed, createdAt: p.created }));
-    const entered = formatDaoTimestamp(p.state_changed || p.created);
-    const createdBy = p.createdBy ? ` · by ${p.createdBy}` : '';
-    const typeLabel = getDaoTypeLabel(p.type);
+    this.setSubmitting(false);
+    this.committeeChoice = 'accept';
+    this.resetVoteState(p);
+    this.renderProposal(p);
+  }
 
-    if (this.numberEl) this.numberEl.textContent = p.number ? `Proposal #${p.number}` : 'Proposal';
-    if (this.titleEl) this.titleEl.textContent = p.title || 'Untitled Proposal';
-    if (this.typeEl) this.typeEl.textContent = typeLabel ? `Type: ${typeLabel}` : '';
-    if (this.metaEl) this.metaEl.textContent = `${uiState} · ${entered}${createdBy}`;
-    if (this.summaryEl) this.summaryEl.textContent = p.summary || '';
+  renderLoading() {
+    this.setTitle('Loading proposal');
+    if (this.content) {
+      this.content.innerHTML = '<section class="proposal-info-section"><h3>Proposal</h3><p class="proposal-info-muted" role="status">Loading proposal details…</p></section>';
+    }
+    if (this.detailsContent) this.detailsContent.innerHTML = '';
+    this.hideCommitteeActions();
+    this.hideReviewResultAction();
+    this.hideLifecycleAction();
+    this.hideVoteActions();
+  }
 
-    if (this.fieldsEl) {
-      const entries = Object.entries(p.fields || {}).filter(([, v]) => v !== undefined && v !== null && String(v).length > 0);
-      if (entries.length === 0) {
-        this.fieldsEl.innerHTML = '';
+  renderNotFound() {
+    this.setTitle('Proposal not found');
+    if (this.content) {
+      this.content.innerHTML = '<section class="proposal-info-section"><h3>Proposal not found</h3><p class="proposal-info-muted">The proposal data is unavailable.</p></section>';
+    }
+    if (this.detailsContent) {
+      this.detailsContent.innerHTML = '';
+    }
+    this.hideCommitteeActions();
+    this.hideReviewResultAction();
+    this.hideLifecycleAction();
+    this.hideVoteActions();
+  }
+
+  renderProposal(proposal) {
+    const now = getTransactionTimestamp();
+    const state = getEffectiveDaoState(proposal);
+    this.setTitle(getDaoProposalInfoStateLabel(proposal));
+    const reviewWindow = getDaoProposalReviewWindow(proposal, now);
+    const committeeReview = getDaoCommitteeReview(proposal);
+    const { committeeAddresses, committeeAddressSet, votes } = committeeReview;
+    const currentAddress = getDaoCurrentAccountAddress();
+    const currentVote = votes.find((vote) => vote.memberAddress === currentAddress) || null;
+    const capabilities = this.getReviewCapabilities({
+      state,
+      reviewWindow,
+      currentAddress,
+      committeeAddressSet,
+    });
+    const isProjectProposal = proposal.proposalType === DAO_PROJECT_TYPE;
+    const proposalOptionsSection = renderDaoProposalOptions(proposal);
+    const resultSummary = getDaoProposalResultSummary(proposal);
+    const proposalResultsSection = this.renderProposalResults(
+      resultSummary,
+      committeeReview,
+      currentAddress,
+    );
+    const rewardSummary = getDaoProposalRewardSummary(proposal, currentAddress);
+    const lifecycleActions = getDaoProposalLifecycleActions(proposal, rewardSummary, currentAddress, now);
+    const projectRecipientChangeSection = isProjectProposal
+      ? renderDaoProjectRecipientChangeSection(proposal)
+      : '';
+    const projectProposalInfoSection = isProjectProposal
+      ? renderDaoProjectProposalInfo(
+          proposal,
+          state,
+          lifecycleActions,
+          (action, index) => this.renderLifecycleAction(action, index),
+        )
+      : '';
+    const pendingFinalizationOutcome = getDaoPendingFinalizationOutcome(proposal, now);
+    const committeeReviewSection = state === 'review'
+      ? renderDaoProposalSection('Committee Review', [
+        ['Committee size', committeeAddresses.length ? String(committeeAddresses.length) : 'Unavailable'],
+        ['Next state', this.getNextStateHint(
+          proposal,
+          reviewWindow,
+          committeeReview,
+          pendingFinalizationOutcome
+        )],
+      ])
+      : '';
+    if (this.content) {
+      const voteDisclosure = this.content.querySelector('.proposal-user-vote-section');
+      const voteSummaryFocused = voteDisclosure?.firstElementChild.matches(':focus');
+      this.content.innerHTML = [
+        renderDaoProposalHeading(proposal),
+        projectProposalInfoSection,
+        isProjectProposal ? '' : proposalOptionsSection,
+        state === 'voting' ? this.renderCurrentVoteTotals(proposal) : '',
+        isProjectProposal ? '' : proposalResultsSection,
+        `<div class="proposal-user-vote-slot">${this.renderUserVote(proposal, currentAddress, voteDisclosure?.open)}</div>`,
+        state === 'review'
+          ? this.renderCommitteeReviewStatus(committeeReview, reviewWindow, currentAddress)
+          : '',
+      ].filter(Boolean).join('');
+      if (voteSummaryFocused) {
+        this.content.querySelector('.proposal-user-vote-heading')?.focus({ preventScroll: true });
+      }
+    }
+    if (this.detailsContent) {
+      this.detailsContent.innerHTML = this.renderProposalDetails({
+        proposal,
+        state,
+        reviewWindow,
+        rewardSummary,
+        committeeReviewSection,
+        projectProposalSections: isProjectProposal
+          ? [proposalOptionsSection, proposalResultsSection]
+          : [],
+      });
+    }
+
+    if (state === 'review') {
+      this.renderCommitteeActions({ capabilities, reviewWindow, currentVote, state });
+      this.renderReviewResultAction({
+        capabilities,
+        reviewWindow,
+        proposal,
+        committeeReview,
+        pendingFinalizationOutcome,
+      });
+    } else {
+      this.hideCommitteeActions();
+      this.hideReviewResultAction();
+    }
+    this.renderLifecycleActions(lifecycleActions, projectRecipientChangeSection);
+    this.renderVoteActions(proposal, state);
+  }
+
+  getReviewCapabilities({ state, reviewWindow, currentAddress, committeeAddressSet }) {
+    const isCommitteeMember = Boolean(currentAddress && committeeAddressSet.has(currentAddress));
+    const canCommitteeVote = state === 'review' && reviewWindow.canCommitteeVote && isCommitteeMember;
+    const canFinalizeReviewResult = Boolean(currentAddress) && state === 'review' && reviewWindow.canFinalizeReviewResult;
+
+    return { isCommitteeMember, canCommitteeVote, canFinalizeReviewResult };
+  }
+
+  renderCurrentVoteTotals(proposal) {
+    const votingWindow = getDaoProposalVotingWindow(proposal);
+    const totals = this.getCurrentVoteTotalRows(proposal);
+    if (totals.length === 0) return '';
+
+    const totalWeight = totals.reduce((sum, row) => sum + row.total, 0n);
+    const winnerIndex = totalWeight > 0n
+      ? totals.reduce((winner, row, index) => (row.total > totals[winner].total ? index : winner), 0)
+      : -1;
+    const meter = this.renderVoteResultMeter(totals, totalWeight, winnerIndex, 'Current vote breakdown');
+    const deadlineText = formatDaoCompactTimestamp(votingWindow.end);
+    const votingEnded = votingWindow.label === 'Voting ended';
+    const deadlinePrefix = votingEnded ? 'Vote ended' : 'Voting ends';
+    const deadlineClass = votingEnded ? ' proposal-vote-current-deadline--ended' : '';
+
+    return `
+      <section class="proposal-info-section proposal-vote-current-section">
+        <div class="proposal-vote-current-heading">
+          <h3>Current Vote</h3>
+          ${deadlineText ? `<span class="proposal-vote-current-deadline${deadlineClass}" title="${escapeDaoFormAttribute(`${deadlinePrefix}: ${formatDaoTimestamp(votingWindow.end)}`)}">${escapeHtml(`${deadlinePrefix}: ${deadlineText}`)}</span>` : ''}
+        </div>
+        ${meter}
+      </section>
+    `;
+  }
+
+  // Shows only the signed-in account's own vote: locally saved casts when present,
+  // otherwise a neutral "Vote recorded" when the proposal's voterList proves it voted.
+  renderUserVote(proposal, currentAddress, expanded = true) {
+    const summary = getDaoUserVoteSummary({
+      proposal,
+      address: currentAddress,
+      casts: daoProposalVoteTracker.getCasts(proposal.number),
+    });
+    if (summary.kind === DAO_USER_VOTE_SUMMARY_KINDS.NONE) return '';
+
+    const disclosure = `<details class="proposal-info-section proposal-user-vote-section"${expanded ? ' open' : ''}>`;
+
+    if (summary.kind === DAO_USER_VOTE_SUMMARY_KINDS.VOTED) {
+      return `
+        ${disclosure}
+          <summary class="proposal-user-vote-heading"><span>Your vote</span></summary>
+          <div class="proposal-user-vote-body">
+            <div class="proposal-user-vote-message">Vote recorded</div>
+            <p class="proposal-user-vote-note">The network confirms this account voted. The option allocation and spend were not saved on this device.</p>
+          </div>
+        </details>
+      `;
+    }
+
+    const hasMultipleCasts = summary.casts.length > 1;
+    const totalSpend = summary.casts
+      .filter((cast) => cast.status !== DAO_USER_VOTE_CAST_STATUSES.FAILED)
+      .reduce((total, cast) => total + cast.spend, 0n);
+    const cards = summary.casts.map((cast, index) => {
+      const castLabel = hasMultipleCasts ? `Vote ${index + 1}` : 'Vote';
+      const castTime = formatDaoCompactTimestamp(cast.timestamp);
+      const statusLabel = cast.status[0].toUpperCase() + cast.status.slice(1);
+      const isFailed = cast.status === DAO_USER_VOTE_CAST_STATUSES.FAILED;
+      const hasPower = cast.totalPower !== null;
+      const rows = cast.rows.map((row) => {
+        const percent = hasPower ? formatDaoPercent(row.share) : '';
+        const amount = hasPower ? formatDaoVotingPower(row.power) : formatDaoLibWei(row.allocation);
+        const label = `${row.option}: ${percent ? `${percent}, ` : ''}${amount}`;
+        return `
+          <div class="proposal-user-vote-row" title="${escapeDaoFormAttribute(label)}" aria-label="${escapeDaoFormAttribute(label)}">
+            <span>${escapeHtml(row.option)}</span>
+            ${hasPower ? `<span>${escapeHtml(percent)}</span>` : ''}
+            <strong>${escapeHtml(amount)}</strong>
+          </div>
+        `;
+      }).join('');
+      const powerRow = hasPower
+        ? `<div class="proposal-user-vote-total"><span>Voting power</span><strong>${escapeHtml(formatDaoVotingPower(cast.totalPower))}</strong></div>`
+        : '';
+      const spendRow = hasMultipleCasts || isFailed
+        ? `<div class="proposal-user-vote-total"><span>${isFailed ? 'Attempted' : 'Spend'}</span><strong>${escapeHtml(formatDaoLibWei(cast.spend))}</strong></div>`
+        : '';
+
+      return `
+        <div class="proposal-user-vote-card"${hasPower ? ' data-has-power' : ''} role="group" aria-label="${escapeDaoFormAttribute(`${castLabel}${castTime ? `, ${castTime}` : ''}, ${statusLabel}`)}">
+          <div class="proposal-user-vote-card-heading">
+            <div class="proposal-user-vote-card-meta">
+              <span>${escapeHtml(castTime ? `${castLabel} · ${castTime}` : castLabel)}</span>
+              <span class="proposal-user-vote-status">${escapeHtml(statusLabel)}</span>
+            </div>
+          </div>
+          <div class="proposal-user-vote-row proposal-user-vote-columns" aria-hidden="true">
+            <span>Option</span>
+            ${hasPower ? '<span>Share</span>' : ''}
+            <span>${hasPower ? 'Power' : 'LIB'}</span>
+          </div>
+          ${rows}
+          ${spendRow || powerRow ? `<div class="proposal-user-vote-totals">${spendRow}${powerRow}</div>` : ''}
+        </div>
+      `;
+    }).join('');
+
+    return `
+      ${disclosure}
+        <summary class="proposal-user-vote-heading">
+          <span>Your vote</span>
+          <span class="proposal-user-vote-spend">Spent <strong>${escapeHtml(formatDaoLibWei(totalSpend))}</strong></span>
+        </summary>
+        <div class="proposal-user-vote-body">${cards}</div>
+      </details>
+    `;
+  }
+
+  // Re-renders only the Your vote slot of the open modal, e.g. right after a
+  // submitted cast is saved, without rebuilding the rest of the proposal view.
+  refreshUserVote(proposal) {
+    try {
+      const slot = this.content?.querySelector('.proposal-user-vote-slot');
+      if (!slot || !proposal) return;
+      const disclosure = slot.querySelector('.proposal-user-vote-section');
+      const summaryFocused = disclosure?.firstElementChild.matches(':focus');
+      slot.innerHTML = this.renderUserVote(proposal, getDaoCurrentAccountAddress(), disclosure?.open);
+      if (summaryFocused) {
+        slot.querySelector('.proposal-user-vote-heading')?.focus({ preventScroll: true });
+      }
+    } catch (error) {
+      // The vote is already submitted and saved; a display problem must not read as a failed vote.
+      console.warn('Failed to refresh the saved vote view:', error);
+    }
+  }
+
+  getCurrentVoteTotalRows(proposal) {
+    const options = getDaoProposalOptionLabels(proposal);
+    const totalVote = proposal.totalVote;
+    return options.map((option, index) => ({
+      option,
+      total: parseDaoUnsignedBigInt(totalVote[index]) ?? 0n,
+    }));
+  }
+
+  renderVoteResultMeter(totals, totalWeight, winnerPosition, ariaLabel) {
+    const labels = totals.map((row, position) => {
+      const power = formatDaoVotingPower(row.total);
+      const displayPower = power.endsWith(' power') ? power.slice(0, -6) : power;
+      const percent = formatDaoBigIntPercent(row.total, totalWeight);
+      const labelPosition = position === 0 ? 'start' : position === totals.length - 1 ? 'end' : 'center';
+      const label = `${row.option}: ${percent}, ${power}`;
+      return `
+        <div
+          class="proposal-result-meter-label proposal-result-meter-label--${labelPosition} proposal-result-meter-label--palette-${position % 6}${position === winnerPosition ? ' proposal-result-meter-label--winner' : ''}"
+          title="${escapeDaoFormAttribute(label)}"
+          aria-label="${escapeDaoFormAttribute(label)}"
+        >
+          <span>${escapeHtml(row.option)}</span>
+          <small>${escapeHtml(percent)} (${escapeHtml(displayPower)})</small>
+        </div>
+      `;
+    }).join('');
+    const bars = totals.map((row, position) => {
+      const style = `--result-segment-units: ${this.getResultSegmentUnits(row.total, totalWeight)};`;
+      return `
+        <span
+          class="proposal-result-meter-segment proposal-result-meter-segment--palette-${position % 6}${row.total === 0n ? ' proposal-result-meter-segment--empty' : ''}"
+          style="${escapeDaoFormAttribute(style)}"
+        ></span>
+      `;
+    }).join('');
+
+    return `
+      <div class="proposal-result-meter" aria-label="${escapeDaoFormAttribute(ariaLabel)}">
+        <div class="proposal-result-meter-labels">${labels}</div>
+        <div class="proposal-result-meter-track" aria-hidden="true">${bars}</div>
+      </div>
+    `;
+  }
+
+  renderCommitteeResultMeter(rows, ariaLabel, winnerTone = '') {
+    const labels = rows
+      .map((row, index) => {
+        const position = index === 0 ? 'start' : 'end';
+        const winnerClass = row.tone === winnerTone ? ' proposal-result-meter-label--winner' : '';
+
+        return `
+          <div
+            class="proposal-result-meter-label proposal-result-meter-label--${position} proposal-result-meter-label--${row.tone}${winnerClass}"
+            title="${escapeDaoFormAttribute(row.title)}"
+            aria-label="${escapeDaoFormAttribute(row.title)}"
+          >
+            <span>${escapeHtml(row.label)}</span>
+            <small>${escapeHtml(row.valueLabel)}</small>
+          </div>
+        `;
+      })
+      .join('');
+    const segments = rows
+      .map((row) => {
+        const emptyClass = row.isEmpty ? ' proposal-result-meter-segment--empty' : '';
+
+        return `
+          <span
+            class="proposal-result-meter-segment proposal-result-meter-segment--${row.tone}${emptyClass}"
+            style="--result-segment-units: ${row.units};"
+          ></span>
+        `;
+      })
+      .join('');
+
+    return `
+      <div class="proposal-result-meter" aria-label="${escapeDaoFormAttribute(ariaLabel)}">
+        <div class="proposal-result-meter-labels">${labels}</div>
+        <div class="proposal-result-meter-track" aria-hidden="true">${segments}</div>
+      </div>
+    `;
+  }
+
+  renderCommitteeReviewStatus(committeeReview, reviewWindow, currentAddress) {
+    const { acceptCount, withholdCount } = committeeReview;
+    const rows = this.getCommitteeTallyRows(acceptCount, withholdCount);
+    const deadlineText = formatDaoCompactTimestamp(reviewWindow.end);
+
+    return `
+      <section class="proposal-info-section proposal-vote-current-section">
+        <div class="proposal-vote-current-heading">
+          <h3>Committee Review</h3>
+          ${deadlineText ? `<span title="${escapeDaoFormAttribute(`Review ends: ${formatDaoTimestamp(reviewWindow.end)}`)}">${escapeHtml(`Review ends: ${deadlineText}`)}</span>` : ''}
+        </div>
+        ${this.renderCommitteeResultMeter(rows, 'Committee review vote totals')}
+        ${this.renderCommitteeVoteList(committeeReview, currentAddress)}
+      </section>
+    `;
+  }
+
+  getCommitteeTallyRows(acceptCount, withholdCount) {
+    const submittedCount = acceptCount + withholdCount;
+    return [
+      { count: acceptCount, label: 'Accept', tone: 'accept' },
+      { count: withholdCount, label: 'Withhold', tone: 'withhold' },
+    ].map((row) => {
+      const countLabel = `${row.count} ${row.count === 1 ? 'vote' : 'votes'}`;
+      const percent = this.formatCountPercent(row.count, submittedCount);
+      const valueLabel = submittedCount > 0 ? `${percent} (${countLabel})` : countLabel;
+      return {
+        ...row,
+        units: this.getCountSegmentUnits(row.count, submittedCount),
+        isEmpty: row.count === 0,
+        title: `${row.label}: ${valueLabel}`,
+        valueLabel,
+      };
+    });
+  }
+
+  renderCommitteeVoteList(committeeReview, currentAddress) {
+    const { votes } = committeeReview;
+    if (votes.length === 0) return '';
+
+    const { usernames, netidAccounts } = signInModal.getSignInUsernames();
+    const storedUsernamesByAddress = new Map();
+
+    for (const username of usernames) {
+      const address = normalizeDaoAddress(netidAccounts.usernames[username]?.address);
+      if (address) storedUsernamesByAddress.set(address, username);
+    }
+
+    const normalizedCurrentAddress = normalizeDaoAddress(currentAddress);
+    assert(normalizedCurrentAddress, 'Proposal modal requires a valid account address');
+    const rows = votes
+      .map((vote) => {
+        const address = normalizeDaoAddress(vote.memberAddress);
+        assert(address, 'Committee vote requires a valid member address');
+
+        const contact = address === normalizedCurrentAddress
+          ? myAccount
+          : myData.contacts[address];
+        const displayContact = {
+          ...contact,
+          username: contact?.username || storedUsernamesByAddress.get(address) || 'Unknown',
+          address,
+        };
+        const youLabel = address === normalizedCurrentAddress ? ' (you)' : '';
+        return `
+          <li class="proposal-committee-vote-row">
+            <span class="proposal-committee-vote-address">
+              <strong>${escapeHtml(`${getContactDisplayName(displayContact)}${youLabel}`)}</strong>
+              <small>${escapeHtml(`${address.slice(0, 4)}…${address.slice(-4)}`)}</small>
+            </span>
+            <span class="proposal-committee-vote-choice proposal-committee-vote-choice--${vote.vote}">${escapeHtml(this.formatCommitteeVote(vote))}</span>
+          </li>
+        `;
+      })
+      .join('');
+
+    return `
+      <div class="proposal-committee-votes">
+        <h4>Committee votes</h4>
+        <ul class="proposal-committee-vote-list">${rows}</ul>
+      </div>
+    `;
+  }
+
+  renderProposalResults(result, committeeReview, currentAddress) {
+    if (!result) return '';
+    if (result.source === 'committee') {
+      return this.renderCommitteeResults(result, committeeReview, currentAddress);
+    }
+
+    const winnerLabel = result.winner?.option || 'Unavailable';
+    const totalLabel = result.totalWeight > 0n ? formatDaoVotingPower(result.totalWeight) : 'No votes yet';
+    const winnerPosition = result.totals.findIndex((row) => row.index === result.winner?.index);
+    const meter = this.renderVoteResultMeter(
+      result.totals,
+      result.totalWeight,
+      winnerPosition,
+      'Vote result breakdown'
+    );
+
+    return `
+      <section class="proposal-info-section">
+        <h3>Results</h3>
+        <div class="proposal-result-overview">
+          <div class="proposal-result-card">
+            <span>Winner</span>
+            <span class="proposal-result-value">${escapeHtml(winnerLabel)}</span>
+          </div>
+          <div class="proposal-result-card">
+            <span>Total voting power</span>
+            <span class="proposal-result-value">${escapeHtml(totalLabel)}</span>
+          </div>
+        </div>
+        ${meter}
+      </section>
+    `;
+  }
+
+  renderCommitteeResults(result, committeeReview, currentAddress) {
+    const acceptCount = Number(result.acceptCount || 0);
+    const withholdCount = Number(result.withholdCount || 0);
+    const committeeSize = Number(result.committeeSize || 0);
+    const committeeSizeLabel = committeeSize > 0 ? String(committeeSize) : 'Unavailable';
+    let winnerTone = '';
+    if (result.tone === 'accepted') {
+      winnerTone = 'accept';
+    } else if (result.tone === 'rejected') {
+      winnerTone = 'withhold';
+    }
+    const rows = this.getCommitteeTallyRows(acceptCount, withholdCount);
+    const meter = this.renderCommitteeResultMeter(rows, 'Committee result breakdown', winnerTone);
+
+    return `
+      <section class="proposal-info-section">
+        <h3>Results</h3>
+        <div class="proposal-result-overview">
+          <div class="proposal-result-card">
+            <span>Outcome</span>
+            <span class="proposal-result-value">${escapeHtml(result.headline || 'Unavailable')}</span>
+          </div>
+          <div class="proposal-result-card">
+            <span>Committee size</span>
+            <span class="proposal-result-value">${escapeHtml(committeeSizeLabel)}</span>
+          </div>
+        </div>
+        ${meter}
+        ${this.renderCommitteeVoteList(committeeReview, currentAddress)}
+      </section>
+    `;
+  }
+
+  getResultSegmentUnits(part, total) {
+    if (typeof part !== 'bigint' || typeof total !== 'bigint' || total <= 0n) return 1;
+    const units = Number((part * 1000n + total / 2n) / total);
+    return Math.max(1, units);
+  }
+
+  getCountSegmentUnits(part, total) {
+    if (!Number.isFinite(part) || !Number.isFinite(total) || total <= 0) return 1;
+    if (part <= 0) return 0;
+    return Math.max(1, Math.round((part / total) * 1000));
+  }
+
+  formatCountPercent(part, total) {
+    if (!Number.isFinite(part) || !Number.isFinite(total) || total <= 0) return '0%';
+    return formatDaoPercent(part / total);
+  }
+
+  renderProposalRewards(reward) {
+    if (!reward) return '';
+    return renderDaoProposalSection('Rewards', [
+      ['Claim status', reward.claimStatus, reward.statusTone],
+      ['Claim estimate', reward.claimEstimate === null ? 'Unavailable' : formatDaoLibWei(reward.claimEstimate), reward.statusTone],
+      ['Claim window', reward.claimWindowLabel],
+      ['Reward pool', formatDaoRewardAmount(reward.pool)],
+      ['Claimed', formatDaoRewardAmount(reward.claimed)],
+      ['Unclaimed pool', formatDaoRewardAmount(reward.unclaimed)],
+      ['Initial burn', formatDaoRewardAmount(reward.initialBurned)],
+      ['Final burn', formatDaoRewardAmount(reward.finalBurned)],
+    ]);
+  }
+
+  renderProposalDetails({
+    proposal,
+    state,
+    reviewWindow,
+    rewardSummary,
+    committeeReviewSection,
+    projectProposalSections,
+  }) {
+    const sections = [
+      ...projectProposalSections,
+      renderDaoProposalSection('Overview', [
+        ['Number', proposal.number ? `#${proposal.number}` : 'Unavailable'],
+        ['Type', getDaoTypeLabel(proposal.proposalType) || 'Unavailable'],
+        ['Status', getDaoStateLabel(state) || state],
+        ['Created', formatDaoDetailTimestamp(proposal.created)],
+        ['Updated', formatDaoDetailTimestamp(proposal.state_changed)],
+      ]),
+      renderDaoProposalSection('Review Timeline', [
+        ['Window state', reviewWindow.label],
+        ['Review starts', formatDaoDetailTimestamp(reviewWindow.start)],
+        ['Review ends', formatDaoDetailTimestamp(reviewWindow.end)],
+      ]),
+      committeeReviewSection,
+      this.renderProposalRewards(rewardSummary),
+    ].filter(Boolean);
+
+    return `
+      <details class="proposal-more">
+        <summary>
+          <span class="proposal-more-title">Show proposal details</span>
+          <span class="proposal-more-note">${escapeHtml(this.getProposalDetailsSummary(
+            proposal,
+            state,
+            rewardSummary,
+          ))}</span>
+        </summary>
+        <div class="proposal-more-content">${sections.join('')}</div>
+      </details>
+    `;
+  }
+
+  getProposalDetailsSummary(proposal, state, rewardSummary) {
+    const parts = proposal.proposalType === DAO_PROJECT_TYPE
+      ? ['Proposal options', 'results', 'overview', 'review timeline']
+      : ['Overview', 'review timeline'];
+    if (state === 'review') parts.push('committee review');
+    if (rewardSummary) parts.push('reward accounting');
+    return parts.join(', ');
+  }
+
+  setTitle(title) {
+    if (this.title) this.title.textContent = title || 'Proposal';
+  }
+
+  formatCommitteeVote(vote) {
+    if (vote.vote === 'accept') return 'Accept';
+    const reason = String(vote.withheldReason || '').trim();
+    if (!reason) return 'Withhold';
+    return `Withhold - ${reason}`;
+  }
+
+  getReviewFinalizedState(proposal, { acceptCount, withholdCount }) {
+    if (withholdCount > acceptCount) return 'Withheld';
+    return proposal.emergency ? 'Accepted' : 'Voting';
+  }
+
+  getNextStateHint(proposal, reviewWindow, committeeReview, pendingFinalizationOutcome) {
+    const { acceptCount, withholdCount } = committeeReview;
+    if (proposal.status && proposal.status !== 'review') return getDaoStateLabel(proposal.status) || proposal.status;
+    if (reviewWindow.canFinalizeReviewResult) {
+      const nextState = pendingFinalizationOutcome?.nextState
+        ? getDaoStateLabel(pendingFinalizationOutcome.nextState)
+        : this.getReviewFinalizedState(proposal, committeeReview);
+      return `${nextState} if finalized`;
+    }
+    if (withholdCount > acceptCount) return 'Likely withheld after review result';
+    if (acceptCount > withholdCount) return proposal.emergency ? 'Accepted if finalized' : 'Voting if finalized';
+    return 'Waiting for committee review';
+  }
+
+  renderCommitteeActions({ capabilities, reviewWindow, currentVote, state }) {
+    if (!this.committeeActionSection) return;
+    if (!capabilities.isCommitteeMember || capabilities.canFinalizeReviewResult) {
+      this.hideCommitteeActions();
+      return;
+    }
+
+    this.committeeActionSection.classList.remove('hidden');
+    this.currentCommitteeVote = currentVote?.vote || '';
+    this.setCommitteeChoice(this.getDefaultCommitteeChoice(currentVote));
+
+    this.canSubmitCommitteeReview = state === 'review' && capabilities.canCommitteeVote;
+    this.updateSubmitButtons();
+    this.setCommitteeActionHelp(state, reviewWindow);
+  }
+
+  getDefaultCommitteeChoice(currentVote) {
+    if (currentVote?.vote === 'accept') return 'withhold';
+    return 'accept';
+  }
+
+  hideCommitteeActions() {
+    this.canSubmitCommitteeReview = false;
+    this.currentCommitteeVote = '';
+    this.committeeActionSection?.classList.add('hidden');
+    this.updateSubmitButtons();
+  }
+
+  renderReviewResultAction({
+    capabilities,
+    reviewWindow,
+    proposal,
+    committeeReview,
+    pendingFinalizationOutcome,
+  }) {
+    if (!this.reviewResultSection) return;
+    if (!capabilities.canFinalizeReviewResult) {
+      this.hideReviewResultAction();
+      return;
+    }
+
+    this.canSubmitReviewResult = true;
+    this.reviewResultSection.classList.remove('hidden');
+    if (this.reviewResultHelp) {
+      if (this.isDaoActionPending(DAO_ACTION_TYPES.COMMITTEE_RESULT)) {
+        this.reviewResultHelp.textContent = getDaoTransactionMessage(DAO_ACTION_TYPES.COMMITTEE_RESULT, 'pending');
       } else {
-        this.fieldsEl.innerHTML = entries
-          .map(([k, v]) => {
-            const key = escapeHtml(String(k));
-            const val = escapeHtml(String(v));
-            return `<div><span style="color: var(--secondary-text-color)">${key}</span>: ${val}</div>`;
-          })
-          .join('');
+        this.reviewResultHelp.textContent = pendingFinalizationOutcome?.message
+          || `${reviewWindow.label}. Finalize the review result to move this proposal to ${this.getReviewFinalizedState(proposal, committeeReview)}.`;
+      }
+    }
+    this.updateSubmitButtons();
+  }
+
+  hideReviewResultAction() {
+    this.canSubmitReviewResult = false;
+    this.reviewResultSection?.classList.add('hidden');
+    this.updateSubmitButtons();
+  }
+
+  renderLifecycleAction(action, index) {
+    const actionType = getDaoTypeForLifecycleKind(action.kind);
+    const isPending = Boolean(actionType && this.isDaoActionPending(actionType));
+    const help = isPending ? getDaoTransactionMessage(actionType, 'pending') : action.help;
+    const button = `
+      <button
+        type="button"
+        class="btn btn--primary btn--pill btn--full"
+        data-lifecycle-action-index="${index}"
+      >${escapeHtml(action.buttonLabel)}</button>
+    `;
+    if (!isDaoProjectLifecycleAction(action)) {
+      return `
+        <div class="proposal-lifecycle-action proposal-lifecycle-action--static">
+          <div class="proposal-committee-actions-header">
+            <h3>${escapeHtml(action.title)}</h3>
+            <p>${escapeHtml(help)}</p>
+          </div>
+          ${button}
+        </div>
+      `;
+    }
+
+    const reasonField = action.reasonRequired
+      ? `
+        <div class="form-group">
+          <label for="proposalLifecycleReason${index}">Termination reason</label>
+          <textarea
+            id="proposalLifecycleReason${index}"
+            class="form-control"
+            rows="3"
+            maxlength="${DAO_PROJECT_TERMINATION_REASON_MAX_LENGTH}"
+            data-lifecycle-action-reason="${index}"
+            placeholder="Explain why this milestone should be terminated"
+          ></textarea>
+        </div>`
+      : '';
+    const addressField = action.addressRequired
+      ? `
+        <div class="form-group">
+          <label for="proposalLifecycleAddress${index}">New contractor address</label>
+          <input
+            id="proposalLifecycleAddress${index}"
+            class="form-control"
+            type="text"
+            inputmode="text"
+            maxlength="66"
+            autocomplete="off"
+            spellcheck="false"
+            data-lifecycle-action-address="${index}"
+            placeholder="Enter a Liberdus address"
+          >
+        </div>`
+      : '';
+    const isMilestoneClaim = action.kind === 'project_milestone_claim';
+
+    return `
+      <details class="proposal-lifecycle-action${isMilestoneClaim ? ' proposal-lifecycle-action--claim' : ''}"${isMilestoneClaim ? ' open' : ''}>
+        <summary>
+          <span>${escapeHtml(action.title)}</span>
+        </summary>
+        <div class="proposal-lifecycle-action-content">
+          <p>${escapeHtml(help)}</p>
+          ${reasonField}
+          ${addressField}
+          ${button}
+        </div>
+      </details>
+    `;
+  }
+
+  renderLifecycleActions(actions, projectRecipientChangeSection) {
+    this.currentLifecycleActions = actions;
+    if (!this.lifecycleActionSection) return;
+
+    const standaloneActions = actions
+      .map((action, index) => ({ action, index }))
+      .filter(({ action }) => (
+        !Number.isInteger(action.milestoneNumber)
+        && shouldRenderDaoLifecycleAction(action)
+      ));
+    const proposalActions = standaloneActions.filter(
+      ({ action }) => !isDaoProjectLifecycleAction(action),
+    );
+    const projectActions = standaloneActions.filter(
+      ({ action }) => isDaoProjectLifecycleAction(action),
+    );
+    const renderActionGroup = (title, groupActions) => groupActions.length > 0
+      ? `
+        <div class="proposal-lifecycle-action-group">
+          <h3>${title}</h3>
+          ${groupActions
+            .map(({ action, index }) => this.renderLifecycleAction(action, index))
+            .join('')}
+        </div>
+      `
+      : '';
+    const content = [
+      renderActionGroup('Proposal actions', proposalActions),
+      projectRecipientChangeSection,
+      renderActionGroup('Project actions', projectActions),
+    ].filter(Boolean).join('');
+
+    if (!content) {
+      this.lifecycleActionSection.innerHTML = '';
+      this.lifecycleActionSection.classList.add('hidden');
+    } else {
+      this.lifecycleActionSection.innerHTML = content;
+      this.lifecycleActionSection.classList.remove('hidden');
+    }
+    this.updateSubmitButtons();
+  }
+
+  hideLifecycleAction() {
+    this.currentLifecycleActions = [];
+    this.submittingLifecycleAction = null;
+    if (this.lifecycleActionSection) {
+      this.lifecycleActionSection.innerHTML = '';
+      this.lifecycleActionSection.classList.add('hidden');
+    }
+    this.updateSubmitButtons();
+  }
+
+  resetVoteState(proposal) {
+    const options = getDaoProposalOptionLabels(proposal);
+    this.voteWeights = options.map(() => 0);
+    this.voteSpendMultiple = '1';
+    if (this.voteSpendMultipleInput) this.voteSpendMultipleInput.value = '1';
+  }
+
+  renderVoteActions(proposal, state) {
+    if (!this.voteActionSection) return;
+    if (state !== 'voting') {
+      this.hideVoteActions();
+      return;
+    }
+
+    const votingWindow = getDaoProposalVotingWindow(proposal);
+    if (!votingWindow.canPreviewVote) {
+      this.hideVoteActions();
+      return;
+    }
+
+    const options = getDaoProposalOptionLabels(proposal);
+    if (this.voteWeights.length !== options.length) {
+      this.voteWeights = options.map(() => 0);
+    }
+
+    this.voteActionSection.classList.remove('hidden');
+    if (this.voteActionHelp) {
+      this.voteActionHelp.textContent = this.isDaoActionPending(DAO_ACTION_TYPES.VOTE)
+        ? getDaoTransactionMessage(DAO_ACTION_TYPES.VOTE, 'pending')
+        : 'Allocate option weights and choose a minimum-spend multiple to preview voting power.';
+    }
+    if (this.voteSubmitButton) {
+      this.voteSubmitButton.textContent = this.voteSubmitButtonLabel;
+    }
+    if (this.voteSpendMultipleInput) {
+      this.voteSpendMultipleInput.value = this.voteSpendMultiple;
+    }
+    if (this.voteMinimumSpendLabel) {
+      const minimumSpend = formatDaoProposalVoteRequirementLib(proposal.minimumSpendUsdStr);
+      this.voteMinimumSpendLabel.textContent = minimumSpend === null
+        ? '× minimum spend'
+        : `× ${minimumSpend} minimum spend`;
+    }
+    if (this.voteOptions) {
+      const totalWeight = this.getVoteWeightsTotal();
+      this.voteOptions.innerHTML = `
+        <div class="proposal-vote-options-header">
+          <span>Option</span>
+          <span>%</span>
+          <span class="proposal-vote-weight-label">
+            Weight
+            <button
+              type="button"
+              class="toll-info-icon proposal-vote-help"
+              data-icon="info"
+              data-vote-help
+              title="${escapeDaoFormAttribute(DAO_VOTE_HELP.weight)}"
+              aria-label="About weight"
+            ></button>
+          </span>
+        </div>
+        ${options.map((option, index) => this.renderVoteOption(option, index, totalWeight)).join('')}
+        ${this.renderVoteRequirements(proposal)}
+      `;
+    }
+
+    this.updateVotePreview(proposal);
+  }
+
+  hideVoteActions() {
+    this.canSubmitVote = false;
+    this.voteActionSection?.classList.add('hidden');
+    this.updateSubmitButtons();
+  }
+
+  renderVoteRequirements(proposal) {
+    const rows = [
+      {
+        help: DAO_VOTE_HELP.voteThreshold,
+        label: 'Vote Threshold',
+        value: formatDaoProposalVoteRequirementLib(proposal.voteThresholdUsdStr),
+      },
+      {
+        help: DAO_VOTE_HELP.minimumSpend,
+        label: 'Minimum Spend',
+        value: formatDaoProposalVoteRequirementLib(proposal.minimumSpendUsdStr),
+      },
+    ].filter((row) => row.value !== null);
+
+    if (rows.length === 0) return '';
+
+    return `
+      <div class="proposal-vote-requirements" aria-label="Vote requirements">
+        ${rows.map((row) => `
+          <span class="proposal-vote-requirement-label">
+            ${escapeHtml(row.label)}
+            <button
+              type="button"
+              class="toll-info-icon proposal-vote-help"
+              data-icon="info"
+              data-vote-help
+              title="${escapeDaoFormAttribute(row.help)}"
+              aria-label="${escapeDaoFormAttribute(`About ${row.label}`)}"
+            ></button>
+          </span>
+          <span class="proposal-vote-requirement-value">${escapeHtml(row.value)}</span>
+        `).join('')}
+      </div>
+    `;
+  }
+
+  handleVoteHelpClick(event) {
+    const helpButton = event.target?.closest?.('[data-vote-help]');
+    if (!helpButton) return;
+
+    event.preventDefault();
+    event.stopPropagation();
+    showToast(helpButton.title, 0, 'info');
+  }
+
+  renderVoteOption(option, index, totalWeight) {
+    const weight = this.voteWeights[index] || 0;
+    return `
+      <label class="proposal-vote-option">
+        <span>${escapeHtml(option)}</span>
+        <span
+          class="proposal-vote-weight-percent"
+          data-vote-weight-percent="${index}"
+          aria-label="${escapeDaoFormAttribute(`${option} percent`)}"
+        >${escapeHtml(this.formatCountPercent(weight, totalWeight))}</span>
+        <input
+          type="number"
+          class="form-control"
+          min="0"
+          max="${DAO_VOTE_WEIGHT_MAX}"
+          step="1"
+          inputmode="numeric"
+          placeholder="0"
+          aria-label="${escapeDaoFormAttribute(`${option} weight`)}"
+          data-vote-option-index="${index}"
+          value="${escapeDaoFormAttribute(String(weight))}"
+        >
+      </label>
+    `;
+  }
+
+  handleVoteWeightInput(event) {
+    const input = event.target?.closest?.('input[data-vote-option-index]');
+    if (!input) return;
+    const index = Number(input.dataset.voteOptionIndex);
+    if (!Number.isInteger(index) || index < 0 || index >= this.voteWeights.length) return;
+    this.voteWeights[index] = this.normalizeVoteWeight(input.value);
+    input.value = String(this.voteWeights[index]);
+    this.updateVoteWeightPercents();
+    this.updateVotePreview(this.getCurrentProposal());
+  }
+
+  updateVoteWeightPercents() {
+    const percentEls = this.voteOptions?.querySelectorAll('[data-vote-weight-percent]');
+    if (!percentEls?.length) return;
+
+    const totalWeight = this.getVoteWeightsTotal();
+    for (const el of percentEls) {
+      const index = Number(el.dataset.voteWeightPercent);
+      if (!Number.isInteger(index) || index < 0 || index >= this.voteWeights.length) continue;
+      el.textContent = this.formatCountPercent(this.voteWeights[index] || 0, totalWeight);
+    }
+  }
+
+  getVoteWeightsTotal() {
+    return this.voteWeights.reduce((sum, weight) => sum + weight, 0);
+  }
+
+  handleVoteSpendMultipleInput() {
+    this.voteSpendMultiple = String(this.voteSpendMultipleInput?.value || '');
+    this.updateVotePreview(this.getCurrentProposal());
+  }
+
+  normalizeVoteWeight(value) {
+    const n = Number(value);
+    if (!Number.isSafeInteger(n) || n < 0) return 0;
+    return Math.min(n, DAO_VOTE_WEIGHT_MAX);
+  }
+
+  hasStartedVoteInput() {
+    return this.voteWeights.some((weight) => weight > 0);
+  }
+
+  updateVotePreview(proposal) {
+    if (!this.votePreview || !proposal) {
+      this.canSubmitVote = false;
+      this.updateSubmitButtons();
+      return;
+    }
+
+    const submission = this.getVoteSubmission(proposal);
+    this.votePreview.classList.toggle('proposal-vote-preview--idle', !this.hasStartedVoteInput());
+    if (!submission.ok) {
+      this.canSubmitVote = false;
+      this.updateSubmitButtons();
+      this.votePreview.classList.add('proposal-vote-preview--message');
+      this.votePreview.innerHTML = this.renderVotePreviewMessage(submission.message, submission.tone);
+      return;
+    }
+
+    this.canSubmitVote = true;
+    this.updateSubmitButtons();
+
+    const estimate = this.getVoteWeightEstimate(proposal, submission);
+    if (!estimate.ok) {
+      this.votePreview.classList.add('proposal-vote-preview--message');
+      this.votePreview.innerHTML = this.renderVotePreviewMessage(`${estimate.message} You can still submit; final weight is calculated by the network.`, 'muted');
+      return;
+    }
+    this.votePreview.classList.remove('proposal-vote-preview--message');
+
+    const optionRows = getDaoProposalOptionLabels(proposal)
+      .map((option, index) => {
+        const weight = this.voteWeights[index] || 0;
+        const share = weight / submission.totalWeight;
+        const applied = estimate.optionAppliedWeights[index] ?? 0n;
+        return `
+          <div class="proposal-vote-preview-row">
+            <span>${escapeHtml(formatDaoPercent(share))}</span>
+            <span>${escapeHtml(option)}</span>
+            <strong>${escapeHtml(formatDaoEstimatedVotingPower(applied))}</strong>
+          </div>
+        `;
+      })
+      .join('');
+
+    this.votePreview.innerHTML = `
+      <div class="proposal-vote-preview-total">
+        <span>Spend</span>
+        <strong>${escapeHtml(formatDaoLibWei(submission.spendWei))}</strong>
+      </div>
+      <div class="proposal-vote-preview-total">
+        <span>
+          Time factor
+          <button
+            type="button"
+            class="toll-info-icon proposal-vote-help"
+            data-icon="info"
+            data-vote-help
+            title="${escapeDaoFormAttribute(DAO_VOTE_HELP.timeFactor)}"
+            aria-label="About time factor"
+          ></button>
+        </span>
+        <strong>${escapeHtml(formatDaoPercent(estimate.timeMultiplier))}</strong>
+      </div>
+      <div class="proposal-vote-preview-total">
+        <span>
+          Estimated voting power
+          <button
+            type="button"
+            class="toll-info-icon proposal-vote-help"
+            data-icon="info"
+            data-vote-help
+            title="${escapeDaoFormAttribute(DAO_VOTE_HELP.votingPower)}"
+            aria-label="About estimated voting power"
+          ></button>
+        </span>
+        <strong>${escapeHtml(formatDaoEstimatedVotingPower(estimate.totalAppliedWeight))}</strong>
+      </div>
+      <div class="proposal-vote-preview-options">${optionRows}</div>
+    `;
+  }
+
+  getVoteSubmission(proposal) {
+    const timestamp = getTransactionTimestamp();
+    const validation = this.getVotePreviewValidation(proposal, timestamp);
+    if (!validation.ok) {
+      return { ok: false, message: validation.message, tone: 'warning' };
+    }
+
+    return {
+      ...validation,
+      timestamp,
+    };
+  }
+
+  getVotePreviewValidation(proposal, timestamp) {
+    if (getEffectiveDaoState(proposal) !== 'voting') {
+      return { ok: false, message: 'Voting is only available while the proposal is in voting status.' };
+    }
+    if (!myAccount?.keys?.address) {
+      return { ok: false, message: 'Wallet address unavailable.' };
+    }
+
+    const totalWeight = this.getVoteWeightsTotal();
+    if (totalWeight <= 0) {
+      return { ok: false, message: 'Enter at least one positive option weight.' };
+    }
+
+    const spendMultiple = parseDaoVoteSpendMultiple(this.voteSpendMultiple);
+    if (spendMultiple === null) {
+      return { ok: false, message: 'Enter a positive whole-number spend multiple.' };
+    }
+
+    const minimumSpendWei = getDaoUsdAsLibWei(proposal.minimumSpendUsdStr);
+    if (minimumSpendWei === null || minimumSpendWei <= 0n) {
+      return { ok: false, message: 'Minimum spend is unavailable until network pricing is loaded.' };
+    }
+    const spendWei = minimumSpendWei * BigInt(spendMultiple);
+
+    const votingWindow = getDaoProposalVotingWindow(proposal, timestamp);
+    if (!votingWindow.canPreviewVote) {
+      return { ok: false, message: votingWindow.label };
+    }
+
+    const balanceWei = getLibBalanceWei();
+    const feeWei = getTransactionFeeWei({ allowNull: true }) || 0n;
+    if (balanceWei < spendWei + feeWei) {
+      return { ok: false, message: `Balance is below spend plus fee. Available: ${formatDaoLibWei(balanceWei)}.` };
+    }
+
+    const thresholdUsd = Number(proposal.voteThresholdUsdStr || 0);
+    if (thresholdUsd > 0) {
+      const thresholdWei = getDaoUsdAsLibWei(proposal.voteThresholdUsdStr);
+      if (thresholdWei === null) {
+        return { ok: false, message: 'Vote threshold is unavailable until network pricing is loaded.' };
+      }
+      if (balanceWei < thresholdWei) {
+        return { ok: false, message: `Wallet balance must be at least ${formatDaoLibWei(thresholdWei)} to vote. Current balance: ${formatDaoLibWei(balanceWei)}.` };
       }
     }
 
-    this.renderVotingSection(p);
+    return { ok: true, minimumSpendWei, spendMultiple, spendWei, totalWeight };
   }
 
-  renderVotingSection(p) {
-    if (!this.voteSection) return;
-    const effective = getEffectiveDaoState({ state: p.state, stateEnteredAt: p.state_changed, createdAt: p.created });
-    const showVoting = effective === 'voting';
-    this.voteSection.style.display = showVoting ? 'block' : 'none';
-    if (!showVoting) return;
-
-    const voterId = getDaoVoterId();
-    const votes = p.votes || { yes: 0, no: 0, by: {} };
-    const myVote = votes.by?.[voterId] || '';
-
-    if (this.voteCountsEl) this.voteCountsEl.textContent = `Yes: ${votes.yes || 0} · No: ${votes.no || 0}`;
-
-    if (this.voteYesBtn) {
-      this.voteYesBtn.classList.toggle('btn--primary', myVote === 'yes');
-      this.voteYesBtn.classList.toggle('btn--secondary', myVote !== 'yes');
+  getVoteWeightEstimate(proposal, {
+    minimumSpendWei,
+    spendWei,
+    totalWeight,
+    timestamp,
+  }) {
+    const voteExponent = Number(proposal.voteExponent);
+    const votingWindow = getDaoProposalVotingWindow(proposal, timestamp);
+    if (
+      !Number.isFinite(voteExponent) ||
+      votingWindow.timeMultiplier === null
+    ) {
+      return { ok: false, message: 'Applied-weight estimate is unavailable until proposal voting parameters are loaded.' };
     }
-    if (this.voteNoBtn) {
-      this.voteNoBtn.classList.toggle('btn--primary', myVote === 'no');
-      this.voteNoBtn.classList.toggle('btn--secondary', myVote !== 'no');
+
+    if (totalWeight <= 0) {
+      return { ok: false, message: 'Applied-weight estimate is unavailable for these inputs.' };
     }
-  }
 
-  async castVote(choice) {
-    if (!this._currentProposalId) return;
+    const spendLib = Number(EthNum.toStr(spendWei));
+    const minimumSpendLib = Number(EthNum.toStr(minimumSpendWei));
+    const spendBoost = Math.pow(spendLib / minimumSpendLib, voteExponent);
+    const baseAppliedWeight = spendLib * spendBoost * votingWindow.timeMultiplier * DAO_VOTE_WEIGHT_PRECISION / totalWeight;
+    if (!Number.isFinite(baseAppliedWeight) || baseAppliedWeight <= 0) {
+      return { ok: false, message: 'Applied-weight estimate is unavailable for these inputs.' };
+    }
 
-    const voterId = getDaoVoterId();
-    const result = await daoRepo.castVote({
-      proposalId: this._currentProposalId,
-      voterId,
-      choice,
+    const optionAppliedWeights = this.voteWeights.map((weight) => {
+      if (weight <= 0) return 0n;
+      return floorDaoVoteWeightEstimate(baseAppliedWeight * weight);
     });
+    if (optionAppliedWeights.some((weight) => weight === null)) {
+      return { ok: false, message: 'Applied-weight estimate is unavailable for these inputs.' };
+    }
 
-    if (!result?.ok) {
-      showToast(result?.error || 'Failed to vote', 2000, 'warning');
+    const totalAppliedWeight = optionAppliedWeights.reduce((sum, weight) => sum + weight, 0n);
+    if (totalAppliedWeight <= 0n) {
+      return { ok: false, message: 'Applied-weight estimate is too small to affect vote totals.' };
+    }
+
+    return {
+      ok: true,
+      totalAppliedWeight,
+      optionAppliedWeights,
+      timeMultiplier: votingWindow.timeMultiplier,
+    };
+  }
+
+  renderVotePreviewMessage(message, tone) {
+    return `<div class="proposal-vote-preview-message proposal-vote-preview-message--${tone}">${escapeHtml(message)}</div>`;
+  }
+
+  getCurrentProposal() {
+    return this._currentProposalId ? daoRepo.getProposalById(this._currentProposalId) : null;
+  }
+
+  isDaoActionPending(type) {
+    return hasPendingDaoAction(
+      myData?.pending,
+      type,
+      this._currentProposalId,
+      getDaoCurrentAccountAddress(),
+    );
+  }
+
+  recordAcceptedDaoAction(result, proposal) {
+    const pendingAction = myData.pending.find(
+      (pendingTx) => pendingTx.txid === result.response.txid
+    );
+    assert(pendingAction, `Accepted DAO transaction missing pending entry: ${result.response.txid}`);
+    assert(this._currentProposalId, 'Accepted DAO transaction missing proposal store ID');
+    Object.assign(pendingAction, {
+      proposalStoreId: this._currentProposalId,
+      proposalId: proposal.accountId,
+      proposalNumber: proposal.number,
+      from: result.transaction.from,
+      networkId: result.transaction.networkId,
+    });
+    return pendingAction;
+  }
+
+  async submitDaoTransaction(transaction) {
+    if (!myAccount?.keys) throw new Error('Wallet keys unavailable');
+    const txid = await signObj(transaction, myAccount.keys);
+    return injectTx(transaction, txid);
+  }
+
+  setSubmitting(isSubmitting) {
+    this.isSubmitting = Boolean(isSubmitting);
+    if (this.closeButton) this.closeButton.disabled = this.isSubmitting;
+    this.updateSubmitButtons();
+  }
+
+  updateSubmitButtons() {
+    const pendingLabel = 'Pending confirmation...';
+    const pendingCommittee = this.isDaoActionPending(DAO_ACTION_TYPES.COMMITTEE_VOTE);
+    const pendingReviewResult = this.isDaoActionPending(DAO_ACTION_TYPES.COMMITTEE_RESULT);
+    const pendingVote = this.isDaoActionPending(DAO_ACTION_TYPES.VOTE);
+    const disableCommittee = this.isSubmitting || !this.canSubmitCommitteeReview || pendingCommittee;
+    const isSameVote = Boolean(this.currentCommitteeVote && this.committeeChoice === this.currentCommitteeVote);
+    const disableResult = this.isSubmitting || !this.canSubmitReviewResult || pendingReviewResult;
+    const disableVote = this.isSubmitting || !this.canSubmitVote || pendingVote;
+
+    if (this.acceptButton) this.acceptButton.disabled = disableCommittee || this.currentCommitteeVote === 'accept';
+    if (this.withholdButton) this.withholdButton.disabled = disableCommittee || this.currentCommitteeVote === 'withhold';
+    if (this.withholdReasonSelect) {
+      this.withholdReasonSelect.disabled = disableCommittee || isSameVote;
+      PopupSelect.sync(this.withholdReasonSelect);
+    }
+    if (this.customReasonInput) this.customReasonInput.disabled = disableCommittee || isSameVote;
+    if (this.submitButton) {
+      this.submitButton.disabled = disableCommittee || isSameVote;
+      this.submitButton.textContent = this.submitButtonLabel;
+      if (this.isSubmitting && this.canSubmitCommitteeReview) {
+        this.submitButton.textContent = 'Submitting...';
+      }
+      if (pendingCommittee) this.submitButton.textContent = pendingLabel;
+    }
+    if (this.reviewResultButton) {
+      this.reviewResultButton.disabled = disableResult;
+      this.reviewResultButton.textContent = this.reviewResultButtonLabel;
+      if (this.isSubmitting && this.canSubmitReviewResult) {
+        this.reviewResultButton.textContent = 'Finalizing...';
+      }
+      if (pendingReviewResult) this.reviewResultButton.textContent = pendingLabel;
+    }
+    for (const button of this.modal?.querySelectorAll('button[data-lifecycle-action-index]') || []) {
+      const action = this.currentLifecycleActions[Number(button.dataset.lifecycleActionIndex)];
+      const actionType = getDaoTypeForLifecycleKind(action?.kind);
+      const pendingLifecycle = Boolean(actionType && this.isDaoActionPending(actionType));
+      const isSubmittingAction = this.isSubmitting && action === this.submittingLifecycleAction;
+      const canSubmitLifecycle = action?.canSubmit !== false;
+      const isDisabled = this.isSubmitting || !action || !canSubmitLifecycle || pendingLifecycle;
+      button.disabled = isDisabled;
+      button.textContent = action?.buttonLabel || '';
+      if (isSubmittingAction) button.textContent = action.loadingLabel;
+      if (pendingLifecycle) button.textContent = pendingLabel;
+      const reasonInput = this.modal?.querySelector(
+        `[data-lifecycle-action-reason="${button.dataset.lifecycleActionIndex}"]`,
+      );
+      if (reasonInput) reasonInput.disabled = isDisabled;
+      const addressInput = this.modal?.querySelector(
+        `[data-lifecycle-action-address="${button.dataset.lifecycleActionIndex}"]`,
+      );
+      if (addressInput) addressInput.disabled = isDisabled;
+    }
+    if (this.voteSubmitButton) {
+      this.voteSubmitButton.disabled = disableVote;
+      this.voteSubmitButton.textContent = this.voteSubmitButtonLabel;
+      if (this.isSubmitting && this.canSubmitVote) {
+        this.voteSubmitButton.textContent = 'Submitting...';
+      }
+      if (pendingVote) this.voteSubmitButton.textContent = 'Submitted';
+    }
+    if (this.voteSpendMultipleInput) this.voteSpendMultipleInput.disabled = this.isSubmitting || pendingVote;
+    if (this.voteOptions) {
+      for (const input of this.voteOptions.querySelectorAll('input[data-vote-option-index]')) {
+        input.disabled = this.isSubmitting || pendingVote;
+      }
+    }
+  }
+
+  handleCommitteeChoiceClick(choice) {
+    if (this.isSubmitting || !this.canSubmitCommitteeReview) return;
+    if (this.isDaoActionPending(DAO_ACTION_TYPES.COMMITTEE_VOTE)) return;
+    if (choice === this.currentCommitteeVote) return;
+    this.setCommitteeChoice(choice);
+    this.scrollToCommitteeActionBottom();
+  }
+
+  setCommitteeChoice(choice) {
+    this.committeeChoice = choice === 'withhold' ? 'withhold' : 'accept';
+    const isWithhold = this.committeeChoice === 'withhold';
+    this.acceptButton?.classList.toggle('proposal-decision-option--selected', !isWithhold);
+    this.acceptButton?.setAttribute('aria-checked', String(!isWithhold));
+    this.withholdButton?.classList.toggle('proposal-decision-option--selected', isWithhold);
+    this.withholdButton?.setAttribute('aria-checked', String(isWithhold));
+    this.withholdFields?.classList.toggle('hidden', !isWithhold);
+    this.renderWithholdReasonInput();
+    this.updateSubmitButtons();
+    this.setCommitteeActionHelp();
+  }
+
+  setCommitteeActionHelp(state, reviewWindow) {
+    if (!this.committeeActionHelp) return;
+    if (this.isDaoActionPending(DAO_ACTION_TYPES.COMMITTEE_VOTE)) {
+      this.committeeActionHelp.textContent = getDaoTransactionMessage(DAO_ACTION_TYPES.COMMITTEE_VOTE, 'pending');
+      return;
+    }
+    if (!this.canSubmitCommitteeReview) {
+      this.committeeActionHelp.textContent = state === 'review'
+        ? `${reviewWindow?.label || 'Committee review unavailable'}. Committee review submission is unavailable.`
+        : 'Committee review is only available while the proposal is in review.';
+      return;
+    }
+    if (this.currentCommitteeVote && this.committeeChoice === this.currentCommitteeVote) {
+      const nextChoice = this.currentCommitteeVote === 'accept' ? 'withhold' : 'accept';
+      this.committeeActionHelp.textContent = `You already submitted ${this.formatCommitteeChoice(this.currentCommitteeVote)}. Choose ${this.formatCommitteeChoice(nextChoice)} to change your review decision.`;
+      return;
+    }
+    this.committeeActionHelp.textContent = 'Choose a review decision, then submit.';
+  }
+
+  formatCommitteeChoice(choice) {
+    return choice === 'withhold' ? 'Withhold' : 'Accept';
+  }
+
+  handleWithholdReasonChange() {
+    this.renderWithholdReasonInput();
+    if (this.isCustomWithholdReason() && !this.customReasonInput?.disabled) {
+      this.customReasonInput?.focus({ preventScroll: true });
+      this.scrollToCommitteeActionBottom();
+    }
+  }
+
+  renderWithholdReasonInput() {
+    this.customReasonGroup?.classList.toggle('hidden', !this.isCustomWithholdReason());
+  }
+
+  isCustomWithholdReason() {
+    return this.withholdReasonSelect?.value === DAO_CUSTOM_WITHHOLD_REASON;
+  }
+
+  scrollToCommitteeActionBottom() {
+    requestAnimationFrame(() => {
+      (this.submitButton || this.committeeActionSection)?.scrollIntoView({ behavior: 'smooth', block: 'end' });
+    });
+  }
+
+  getWithholdReason() {
+    return this.isCustomWithholdReason()
+      ? String(this.customReasonInput?.value || '').trim()
+      : String(this.withholdReasonSelect?.value || '').trim();
+  }
+
+  async handleCommitteeSubmit() {
+    if (this.isSubmitting || !this.canSubmitCommitteeReview) return;
+    if (this.isDaoActionPending(DAO_ACTION_TYPES.COMMITTEE_VOTE)) {
+      showToast(getDaoTransactionMessage(DAO_ACTION_TYPES.COMMITTEE_VOTE, 'pending'), 2500, 'info');
+      return;
+    }
+    if (this.currentCommitteeVote && this.committeeChoice === this.currentCommitteeVote) {
+      showToast(`You already submitted ${this.formatCommitteeChoice(this.currentCommitteeVote)}`, 2500, 'info');
       return;
     }
 
-    // Re-render this modal and the list counts.
-    this.open(this._currentProposalId);
-    if (daoModal?.isActive?.()) daoModal.render();
+    const proposal = this.getCurrentProposal();
+    if (!proposal) {
+      showToast('Proposal data is unavailable', 2500, 'warning');
+      return;
+    }
+    if (!myAccount?.keys?.address) {
+      showToast('Wallet keys unavailable', 2500, 'warning');
+      return;
+    }
+
+    let withheldReason;
+    if (this.committeeChoice === 'withhold') {
+      withheldReason = this.getWithholdReason();
+      if (!withheldReason) {
+        showToast('Choose a withhold reason', 2500, 'warning');
+        return;
+      }
+      if (withheldReason.length > DAO_WITHHOLD_REASON_MAX_LENGTH) {
+        showToast('Withhold reason must be 1000 characters or less', 2500, 'warning');
+        return;
+      }
+    }
+
+    const reviewWindow = getDaoProposalReviewWindow(proposal);
+    if (!reviewWindow.canCommitteeVote) {
+      showToast(reviewWindow.label, 2500, 'warning');
+      this.renderProposal(proposal);
+      return;
+    }
+
+    const decision = this.formatCommitteeChoice(this.committeeChoice);
+    if (!window.confirm(`Submit review decision: ${decision}?`)) return;
+
+    this.setSubmitting(true);
+    const loadingToastId = showToast('Submitting committee review...', 0, 'loading');
+
+    try {
+      const result = await daoRepo.submitCommitteeVote({
+        from: getDaoCurrentAccountAddress(),
+        proposal,
+        vote: this.committeeChoice,
+        withheldReason,
+        timestamp: getTransactionTimestamp(),
+        networkId: network?.netid || '',
+        submitTransaction: (transaction) => this.submitDaoTransaction(transaction),
+      });
+
+      if (!result.ok) {
+        showToast(result.error || 'Committee review submission failed', 3000, 'warning');
+        return;
+      }
+
+      this.recordAcceptedDaoAction(result, proposal);
+      showToast(getDaoTransactionMessage(DAO_ACTION_TYPES.COMMITTEE_VOTE, 'pending'), 4000, 'info');
+      this.updateSubmitButtons();
+      this.setCommitteeActionHelp();
+    } catch (error) {
+      console.warn('Failed to submit committee review:', error);
+      showToast(error?.message || 'Committee review submission failed', 3000, 'warning');
+    } finally {
+      if (loadingToastId) hideToast(loadingToastId);
+      this.setSubmitting(false);
+    }
+  }
+
+  async handleReviewResultSubmit() {
+    if (this.isSubmitting || !this.canSubmitReviewResult) return;
+    if (this.isDaoActionPending(DAO_ACTION_TYPES.COMMITTEE_RESULT)) {
+      showToast(getDaoTransactionMessage(DAO_ACTION_TYPES.COMMITTEE_RESULT, 'pending'), 2500, 'info');
+      return;
+    }
+
+    const proposal = this.getCurrentProposal();
+    if (!proposal) {
+      showToast('Proposal data is unavailable', 2500, 'warning');
+      return;
+    }
+    if (!myAccount?.keys?.address) {
+      showToast('Wallet keys unavailable', 2500, 'warning');
+      return;
+    }
+
+    this.setSubmitting(true);
+    const loadingToastId = showToast('Finalizing review result...', 0, 'loading');
+
+    try {
+      const result = await daoRepo.finalizeCommitteeResult({
+        from: getDaoCurrentAccountAddress(),
+        proposal,
+        timestamp: getTransactionTimestamp(),
+        networkId: network?.netid || '',
+        submitTransaction: (transaction) => this.submitDaoTransaction(transaction),
+      });
+
+      if (!result.ok) {
+        showToast(result.error || 'Review result finalization failed', 3000, 'warning');
+        return;
+      }
+
+      this.recordAcceptedDaoAction(result, proposal);
+      showToast(getDaoTransactionMessage(DAO_ACTION_TYPES.COMMITTEE_RESULT, 'pending'), 4000, 'info');
+      this.updateSubmitButtons();
+    } catch (error) {
+      console.warn('Failed to finalize review result:', error);
+      showToast(error?.message || 'Review result finalization failed', 3000, 'warning');
+    } finally {
+      if (loadingToastId) hideToast(loadingToastId);
+      this.setSubmitting(false);
+    }
+  }
+
+  handleLifecycleActionClick(event) {
+    const button = event.target?.closest?.('button[data-lifecycle-action-index]');
+    if (!button || !this.modal?.contains(button)) return;
+
+    const action = this.currentLifecycleActions[Number(button.dataset.lifecycleActionIndex)];
+    this.handleLifecycleActionSubmit(action);
+  }
+
+  async refreshProjectActionProposal(action, proposal) {
+    const currentAddress = getDaoCurrentAccountAddress();
+    const networkId = network?.netid || '';
+    const proposalId = this._currentProposalId;
+    const refreshed = await daoRepo.refreshProposal(proposal.number);
+    if (currentAddress !== getDaoCurrentAccountAddress()
+      || networkId !== (network?.netid || '')
+      || proposalId !== this._currentProposalId
+      || !this.modal.classList.contains('active')) {
+      throw new Error('Account or proposal changed. Reopen the proposal before submitting.');
+    }
+    if (!refreshed) {
+      throw new Error('Could not refresh the proposal. Try again before submitting.');
+    }
+
+    if (action.kind === 'project_change_address') {
+      const refreshedAction = getDaoProjectCloseoutActions(refreshed, currentAddress, getTransactionTimestamp())
+        .find((candidate) => candidate.kind === action.kind
+          && candidate.addressRequired === action.addressRequired);
+      if (!refreshedAction?.canSubmit
+        || refreshedAction.currentContractorAddress !== action.currentContractorAddress
+        || refreshedAction.pendingContractorAddress !== action.pendingContractorAddress) {
+        this.renderProposal(refreshed);
+        throw new Error('Contractor address changed. Review the updated proposal before submitting.');
+      }
+      return refreshed;
+    }
+
+    const refreshedAction = getDaoProjectMilestoneLifecycleActions(refreshed, currentAddress)
+      .find((candidate) => candidate.kind === action.kind
+        && candidate.milestoneNumber === action.milestoneNumber);
+    if (!refreshedAction?.canSubmit
+      || refreshedAction.proposesCurrentTime !== action.proposesCurrentTime
+      || refreshedAction.expectedProposedTime !== action.expectedProposedTime) {
+      this.renderProposal(refreshed);
+      throw new Error('Milestone changed. Review the updated proposal before submitting.');
+    }
+    return refreshed;
+  }
+
+  async handleLifecycleActionSubmit(action) {
+    if (this.isSubmitting || !action || action.canSubmit === false) return;
+
+    const actionType = getDaoTypeForLifecycleKind(action.kind);
+    if (!actionType) {
+      showToast(`Unknown DAO lifecycle action: ${action.kind}`, 3000, 'warning');
+      return;
+    }
+    if (this.isDaoActionPending(actionType)) {
+      showToast(getDaoTransactionMessage(actionType, 'pending'), 2500, 'info');
+      return;
+    }
+
+    let proposal = this.getCurrentProposal();
+    if (!proposal) {
+      showToast('Proposal data is unavailable', 2500, 'warning');
+      return;
+    }
+    if (!myAccount?.keys?.address) {
+      showToast('Wallet keys unavailable', 2500, 'warning');
+      return;
+    }
+
+    const actionIndex = this.currentLifecycleActions.indexOf(action);
+    const reasonInput = this.modal?.querySelector(
+      `[data-lifecycle-action-reason="${actionIndex}"]`,
+    );
+    const addressInput = this.modal?.querySelector(
+      `[data-lifecycle-action-address="${actionIndex}"]`,
+    );
+    const reason = String(reasonInput?.value || '').trim();
+    if (action.reasonRequired && !reason) {
+      showToast('Enter a milestone termination reason', 2500, 'warning');
+      reasonInput?.focus();
+      return;
+    }
+    if (reason.length > DAO_PROJECT_TERMINATION_REASON_MAX_LENGTH) {
+      showToast(`Milestone termination reason must be ${DAO_PROJECT_TERMINATION_REASON_MAX_LENGTH} characters or less`, 2500, 'warning');
+      reasonInput?.focus();
+      return;
+    }
+    const proposedAddress = action.addressRequired
+      ? normalizeDaoAddress(addressInput?.value)
+      : '';
+    if (action.addressRequired && !proposedAddress) {
+      showToast('Enter a valid Liberdus contractor address', 2500, 'warning');
+      addressInput?.focus();
+      return;
+    }
+    if (proposedAddress === action.currentContractorAddress) {
+      showToast('Enter an address different from the current contractor', 2500, 'warning');
+      addressInput?.focus();
+      return;
+    }
+    if (proposedAddress === action.pendingContractorAddress) {
+      showToast('That contractor address is already proposed', 2500, 'warning');
+      addressInput?.focus();
+      return;
+    }
+    if (action.kind === 'project_milestone_terminate'
+      && !window.confirm(`Submit a vote to terminate milestone ${action.milestoneNumber}?`)) return;
+    if (action.kind === 'project_change_address' && action.addressRequired
+      && !window.confirm(`Propose ${proposedAddress} as the new project contractor?`)) return;
+    if (action.kind === 'project_end'
+      && !window.confirm('End this project and release funds not owed for completed milestones?')) return;
+    if (action.kind === 'project_reclaim_balance'
+      && !window.confirm('Reclaim this project’s remaining balance? Unclaimed contractor payments will no longer be available.')) return;
+
+    this.submittingLifecycleAction = action;
+    this.setSubmitting(true);
+    const loadingToastId = showToast(action.loadingLabel, 0, 'loading');
+
+    try {
+      if (action.kind === 'project_milestone_start'
+        || action.kind === 'project_milestone_end'
+        || action.kind === 'project_change_address') {
+        proposal = await this.refreshProjectActionProposal(action, proposal);
+        if (this.isDaoActionPending(actionType)) {
+          showToast(getDaoTransactionMessage(actionType, 'pending'), 2500, 'info');
+          return;
+        }
+      }
+      const request = {
+        from: getDaoCurrentAccountAddress(),
+        proposal,
+        timestamp: getTransactionTimestamp(),
+        networkId: network?.netid || '',
+        submitTransaction: (transaction) => this.submitDaoTransaction(transaction),
+      };
+      if (action.proposesCurrentTime) request.proposedTime = request.timestamp;
+      if (action.proposesCurrentTime === false) request.expectedProposedTime = action.expectedProposedTime;
+      if (action.milestoneNumber) request.milestoneNumber = action.milestoneNumber;
+      if (action.reasonRequired) request.reason = reason;
+      if (action.addressRequired) request.proposedAddress = proposedAddress;
+      if (action.kind === 'project_change_address' && !action.addressRequired) {
+        request.expectedProposedAddress = action.pendingContractorAddress;
+      }
+      let result;
+      switch (action.kind) {
+        case 'vote_result':
+          result = await daoRepo.finalizeVoteResult(request);
+          break;
+        case 'claim_reward':
+          result = await daoRepo.claimReward(request);
+          break;
+        case 'burn_reward':
+          result = await daoRepo.burnReward(request);
+          break;
+        case 'apply_parameters':
+          result = await daoRepo.applyParameters(request);
+          break;
+        case 'project_start':
+          result = await daoRepo.startProject(request);
+          break;
+        case 'project_milestone_start':
+          result = await daoRepo.startProjectMilestone(request);
+          break;
+        case 'project_milestone_end':
+          result = await daoRepo.endProjectMilestone(request);
+          break;
+        case 'project_milestone_terminate':
+          result = await daoRepo.terminateProjectMilestone(request);
+          break;
+        case 'project_milestone_claim':
+          result = await daoRepo.claimProjectMilestone(request);
+          break;
+        case 'project_change_address':
+          result = await daoRepo.changeProjectAddress(request);
+          break;
+        case 'project_end':
+          result = await daoRepo.endProject(request);
+          break;
+        case 'project_reclaim_balance':
+          result = await daoRepo.reclaimProjectBalance(request);
+          break;
+        default:
+          throw new Error(`Unknown DAO lifecycle action: ${action.kind}`);
+      }
+
+      if (!result.ok) {
+        showToast(result.error || `${action.title} failed`, 3000, 'warning');
+        return;
+      }
+
+      this.recordAcceptedDaoAction(result, proposal);
+      showToast(getDaoTransactionMessage(actionType, 'pending'), 4000, 'info');
+      this.updateSubmitButtons();
+    } catch (error) {
+      console.warn('Failed to submit DAO lifecycle action:', error);
+      showToast(error?.message || `${action.title} failed`, 3000, 'warning');
+    } finally {
+      if (loadingToastId) hideToast(loadingToastId);
+      this.submittingLifecycleAction = null;
+      this.setSubmitting(false);
+    }
+  }
+
+  async handleVoteSubmit() {
+    if (this.isSubmitting || !this.canSubmitVote) return;
+    if (this.isDaoActionPending(DAO_ACTION_TYPES.VOTE)) {
+      showToast(getDaoTransactionMessage(DAO_ACTION_TYPES.VOTE, 'pending'), 2500, 'info');
+      return;
+    }
+
+    const proposal = this.getCurrentProposal();
+    if (!proposal) {
+      showToast('Proposal data is unavailable', 2500, 'warning');
+      return;
+    }
+    if (!myAccount?.keys?.address) {
+      showToast('Wallet keys unavailable', 2500, 'warning');
+      return;
+    }
+
+    let submission = this.getVoteSubmission(proposal);
+    if (!submission.ok) {
+      showToast(submission.message, 3000, 'warning');
+      this.renderProposal(proposal);
+      return;
+    }
+
+    const confirmedSpendWei = submission.spendWei;
+    if (!window.confirm(`Submit this vote and spend ${EthNum.toStr(confirmedSpendWei)} LIB?`)) return;
+
+    submission = this.getVoteSubmission(proposal);
+    if (!submission.ok) {
+      showToast(submission.message, 3000, 'warning');
+      this.renderProposal(proposal);
+      return;
+    }
+    if (submission.spendWei !== confirmedSpendWei) {
+      showToast('Minimum spend changed. Review the updated amount before submitting.', 3000, 'info');
+      this.renderProposal(proposal);
+      return;
+    }
+
+    this.setSubmitting(true);
+    const loadingToastId = showToast('Submitting vote...', 0, 'loading');
+
+    try {
+      const result = await daoRepo.castVote({
+        from: getDaoCurrentAccountAddress(),
+        proposal,
+        weights: this.voteWeights.slice(),
+        spend: submission.spendWei,
+        timestamp: submission.timestamp,
+        networkId: network?.netid || '',
+        submitTransaction: (transaction) => this.submitDaoTransaction(transaction),
+      });
+
+      if (!result.ok) {
+        showToast(result.error || 'Vote submission failed', 3000, 'warning');
+        return;
+      }
+
+      const pendingAction = this.recordAcceptedDaoAction(result, proposal);
+      const reminderSchedule = getDaoVoteReminderSchedule(proposal);
+      assert(reminderSchedule, 'Accepted DAO vote missing reminder schedule');
+      Object.assign(pendingAction, reminderSchedule);
+      daoProposalVoteTracker.recordSubmittedVote({
+        proposalNumber: proposal.number,
+        txid: result.response.txid,
+        weights: result.transaction.weights,
+        spend: result.transaction.spend,
+        timestamp: result.transaction.timestamp,
+      });
+      saveState();
+      this.refreshUserVote(proposal);
+      showToast(getDaoTransactionMessage(DAO_ACTION_TYPES.VOTE, 'pending'), 4000, 'info');
+      this.updateSubmitButtons();
+    } catch (error) {
+      console.warn('Failed to submit vote:', error);
+      showToast(error?.message || 'Vote submission failed', 3000, 'warning');
+    } finally {
+      if (loadingToastId) hideToast(loadingToastId);
+      this.setSubmitting(false);
+    }
   }
 
   close() {
+    if (this.isSubmitting) return;
     this.modal.classList.remove('active');
     enterFullscreen();
+    daoModal.restoreListFocus();
   }
 
-  isActive() {
-    return this.modal.classList.contains('active');
+  refreshIfOpen(proposalId, { resetVoteForm = false, voteOnly = false } = {}) {
+    if (!this.modal.classList.contains('active') || this._currentProposalId !== proposalId) return;
+
+    const proposal = this.getCurrentProposal();
+    if (voteOnly) {
+      this.refreshUserVote(proposal);
+    } else if (proposal) {
+      if (resetVoteForm) this.resetVoteState(proposal);
+      this.renderProposal(proposal);
+    } else {
+      this.renderNotFound();
+    }
   }
+
 }
 
 const proposalInfoModal = new ProposalInfoModal();
@@ -3067,7 +8545,7 @@ class SettingsModal {
     this.chatSettingsButton.addEventListener('click', () => chatSettingsModal.open());
 
     this.profileButton = document.getElementById('openAccountForm');
-    this.profileButton.addEventListener('click', () => myProfileModal.open());
+    this.profileButton.addEventListener('click', () => accountModal.open());
     
     this.tollButton = document.getElementById('openToll');
     this.tollButton.addEventListener('click', () => tollModal.open());
@@ -3076,7 +8554,7 @@ class SettingsModal {
     this.lockButton.addEventListener('click', () => lockModal.open());
     
     this.backupButton = document.getElementById('openBackupForm');
-    this.backupButton.addEventListener('click', () => backupAccountModal.open());
+    this.backupButton.addEventListener('click', () => backupModal.open());
     
     this.removeButton = document.getElementById('openRemoveAccount');
     this.removeButton.addEventListener('click', () => removeAccountModal.open());
@@ -3091,20 +8569,8 @@ class SettingsModal {
     this.signOutHeaderButton.addEventListener('click', settingsWrappedSignOut);
   }
 
-  enableSignOutButtonWithDelay() {
-    // Disable button initially
-    this.signOutHeaderButton.classList.remove('active');
-    // Re-enable after modal animation completes (300ms) + small buffer to prevent accidental double-taps
-    setTimeout(() => {
-      if (this.isActive()) {
-        this.signOutHeaderButton.classList.add('active');
-      }
-    }, 400); // 400ms = modal animation (300ms) + 100ms buffer
-  }
-
   open() {
-    this.modal.classList.add('active');
-    this.enableSignOutButtonWithDelay();
+    openModal(this.modal);
     enterFullscreen();
   }
 
@@ -3138,7 +8604,7 @@ class ChatSettingsModal {
     this.fontSizeSlider = document.getElementById('chatSettingsFontSizeSlider');
     this.saveButton = document.getElementById('saveChatSettingsButton');
 
-    this.closeButton.addEventListener('click', () => this.handleClose());
+    this.closeButton.addEventListener('click', () => this.close());
     this.fontSizeSlider.addEventListener('input', () => this.handleSliderInput());
     this.saveButton.addEventListener('click', () => this.save());
 
@@ -3154,7 +8620,7 @@ class ChatSettingsModal {
     this.warningShown = false;
     this.setSliderValue(this.draftFontSizePx);
     this.updatePreview();
-    this.modal.classList.add('active');
+    openModal(this.modal);
   }
 
   handleSliderInput() {
@@ -3169,12 +8635,12 @@ class ChatSettingsModal {
     localStorage.setItem(this.storageKey, String(this.savedFontSizePx));
     this.applyChatFontSize();
     this.warningShown = false;
-    this.close();
+    this.forceClose();
   }
 
   updatePreview() {
-    this.preview.style.setProperty('--chat-settings-preview-message-font-size', this.draftFontSizePx + 'px');
-    this.preview.style.setProperty('--chat-settings-preview-message-meta-font-size', this.metaFontSizePx(this.draftFontSizePx) + 'px');
+    this.preview.style.setProperty('--chat-message-font-size', this.draftFontSizePx + 'px');
+    this.preview.style.setProperty('--chat-message-meta-font-size', this.metaFontSizePx(this.draftFontSizePx) + 'px');
   }
 
   setSliderValue(value) {
@@ -3217,17 +8683,17 @@ class ChatSettingsModal {
     return this.draftFontSizePx !== this.savedFontSizePx;
   }
 
-  handleClose() {
+  close() {
     if (this.hasUnsavedChanges() && !this.warningShown) {
       this.warningShown = true;
       showToast('Press back again to discard changes.', 5000, 'warning');
       return;
     }
 
-    this.close();
+    this.forceClose();
   }
 
-  close() {
+  forceClose() {
     this.modal.classList.remove('active');
     this.draftFontSizePx = this.savedFontSizePx;
     this.warningShown = false;
@@ -3271,7 +8737,7 @@ class ManageContactsModal {
    */
   open() {
     this.clearFile();
-    this.modal.classList.add('active');
+    openModal(this.modal);
     enterFullscreen();
   }
 
@@ -3391,7 +8857,7 @@ class SecretModal {
   }
 
   open() {
-    this.modal.classList.add('active');
+    openModal(this.modal);
     enterFullscreen();
     this.resetSecretState();
   }
@@ -3507,12 +8973,7 @@ function createNewContact(addr, username, friendStatus = 1, tolledDepositToastSh
 
 class ScanQRModal {
   constructor() {
-    this.fillFunction = null;
-    this.camera = {
-      stream: null,
-      scanning: false,
-      scanInterval: null
-    };
+    this.session = null;
   }
 
   load() {
@@ -3525,31 +8986,43 @@ class ScanQRModal {
     this.closeButton.addEventListener('click', () => { this.close(); });
   }
 
-  open() {
-    this.modal.classList.add('active');
-    this.startCamera();
+  open(fill, onCancel, background) {
+    if (!openModal(this.modal)) return false;
+    const session = this.session = { fill, onCancel, background, stream: null, scanInterval: null };
+    if (background) {
+      background.inert = true;
+      this.closeButton.focus({ preventScroll: true });
+    }
+    void this.startCamera(session);
+    return true;
   }
 
-  close() {
+  close(decodedText) {
+    const session = this.session;
+    this.session = null;
     this.modal.classList.remove('active');
-    this.stopCamera();
+    if (!session) return;
+    clearInterval(session.scanInterval);
+    this.video.onloadedmetadata = null;
+    this.video.onerror = null;
+    session.stream?.getTracks().forEach((track) => track.stop());
+    this.video.srcObject = null;
+    if (session.background) session.background.inert = false;
+    if (decodedText) session.fill(decodedText);
+    else session.onCancel?.();
   }
 
-  async startCamera() {
+  async startCamera(session) {
     try {
       // First check if camera API is supported
       if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
         throw new Error('Camera API is not supported in this browser');
       }
 
-      // Stop any existing stream
-      if (this.camera.stream) {
-        this.stopCamera();
-      }
-
       // Request camera access with specific error handling
+      let stream;
       try {
-        this.camera.stream = await navigator.mediaDevices.getUserMedia({
+        stream = await navigator.mediaDevices.getUserMedia({
           video: {
             facingMode: 'environment', // Use back camera
             width: { ideal: 1280 },
@@ -3561,7 +9034,6 @@ class ScanQRModal {
         // Handle specific getUserMedia errors
         switch (mediaError.name) {
           case 'NotAllowedError':
-            this.close();
             throw new Error(
               'Camera access was denied. Please check your device settings and grant permission to use the camera.'
             );
@@ -3578,53 +9050,38 @@ class ScanQRModal {
         }
       }
 
-      // Connect the camera stream to the video element
-      this.video.srcObject = this.camera.stream;
+      if (this.session !== session) {
+        stream.getTracks().forEach((track) => track.stop());
+        return;
+      }
+      session.stream = stream;
       this.video.setAttribute('playsinline', true); // required for iOS Safari
 
-      // When video is ready to play
+      const reportPlaybackError = () => {
+        if (this.session !== session) return;
+        this.close();
+        showToast('Failed to start video stream.', 0, 'error');
+      };
       this.video.onloadedmetadata = () => {
-        this.video.play();
-
-        // Enable scanning and update button
-        this.camera.scanning = true;
-
-        // Start scanning for QR codes
-        // Use interval instead of requestAnimationFrame for better control over scan frequency
-        this.camera.scanInterval = setInterval(() => this.readQRCode(), 100); // scan every 100ms (10 times per second)
+        if (this.session !== session) return;
+        this.video.onloadedmetadata = null;
+        this.video.play().catch(reportPlaybackError);
+        session.scanInterval = setInterval(() => this.readQRCode(session), 100);
       };
-
-      // Add error handler for video element
-      this.video.onerror = function (error) {
-        console.error('Video element error:', error);
-        this.stopCamera();
-        throw new Error('Failed to start video stream');
-      };
+      this.video.onerror = reportPlaybackError;
+      this.video.srcObject = stream;
     } catch (error) {
+      if (this.session !== session) return;
       console.error('Error accessing camera:', error);
-      this.stopCamera(); // Ensure we clean up any partial setup
+      this.close();
 
       // Show user-friendly error message
       showToast(error.message || 'Failed to access camera. Please check your permissions and try again.', 0, 'error');
     }
   }
 
-  stopCamera() {
-    if (this.camera.scanInterval) {
-      clearInterval(this.camera.scanInterval);
-      this.camera.scanInterval = null;
-    }
-
-    if (this.camera.stream) {
-      this.camera.stream.getTracks().forEach((track) => track.stop());
-      this.camera.stream = null;
-      this.video.srcObject = null;
-      this.camera.scanning = false;
-    }
-  }
-
-  readQRCode() {
-    if (this.camera.scanning && this.video.readyState === this.video.HAVE_ENOUGH_DATA) {
+  readQRCode(session) {
+    if (this.session === session && this.video.readyState === this.video.HAVE_ENOUGH_DATA) {
       // Set canvas size to match video dimensions
       this.canvasElement.height = this.video.videoHeight;
       this.canvasElement.width = this.video.videoWidth;
@@ -3646,7 +9103,7 @@ class ScanQRModal {
 
         // If QR code found and decoded
         if (decodedText) {
-          this.handleSuccessfulScan(decodedText);
+          this.close(decodedText);
         }
       } catch (error) {
         // qr.decodeQR throws error if not found or on error
@@ -3654,14 +9111,9 @@ class ScanQRModal {
       }
     }
   }
-
-  handleSuccessfulScan(data) {
-    this.close();
-    if (this.fillFunction) this.fillFunction(data); // Call the assigned fill function (e.g., fillPaymentFromQR or fillStakeAddressFromQR)
-  }
 }
 
-const scanQRModal = new ScanQRModal();
+const qrScanModal = new ScanQRModal();
 
 /**
  * Validate the balance of the user
@@ -3887,12 +9339,21 @@ class SignInModal {
       'SignInModal DOM is incomplete'
     );
 
-    this.accountList.addEventListener('click', (event) => {
-      const item = event.target.closest('.sign-in-account-item');
+    const selectAccountItem = (item) => {
       if (!item || this.isSigningIn) return;
       const username = item.dataset.username;
       assert(username, 'Sign-in account item is missing username');
       void this.handleAccountClick(username);
+    };
+    this.accountList.addEventListener('click', (event) => {
+      selectAccountItem(event.target.closest('.sign-in-account-item'));
+    });
+    this.accountList.addEventListener('keydown', (event) => {
+      if (event.key !== 'Enter' && event.key !== ' ') return;
+      const item = event.target.closest('.sign-in-account-item');
+      if (!item) return;
+      event.preventDefault();
+      selectAccountItem(item);
     });
 
     this.actionSheetOverlay.addEventListener('click', (event) => {
@@ -3920,14 +9381,7 @@ class SignInModal {
     this.actionRecreateButton.addEventListener('click', runSheetAction((username) => this.openRecreateFlow(username)));
     this.actionRemoveButton.addEventListener('click', runSheetAction((username) => removeAccountModal.removeAccount(username)));
 
-    this.backButton.addEventListener('click', () => {
-      if (this.isCompletingSignIn) return;
-      if (this.actionSheetOverlay.classList.contains('active')) {
-        this.closeActionSheet();
-        return;
-      }
-      this.close();
-    });
+    this.backButton.addEventListener('click', () => this.close());
   }
 
   /** Hide the account error action sheet. */
@@ -3968,11 +9422,8 @@ class SignInModal {
     assert(accountData?.account?.keys?.secret, `Missing private key for ${username}`);
     const privateKey = accountData.account.keys.secret;
 
-    createAccountModal.usernameInput.value = username;
-    createAccountModal.privateKeyInput.value = privateKey;
-    this.close();
-    createAccountModal.open();
-    createAccountModal.usernameInput.dispatchEvent(new Event('input'));
+    this.forceClose();
+    createAccountModal.openWithPrivateKey(username, privateKey);
   }
 
   /**
@@ -3991,21 +9442,24 @@ class SignInModal {
    * Split current usernames into the same account groups shown in the sign-in list.
    * @param {string[]} usernames Current network usernames in registry order.
    * @param {string} netid Active network id.
-   * @returns {{ usernameGroups: { public: string[], private: string[] }, isPrivateMap: Object }}
+   * @returns {{ usernameGroups: { public: string[], private: string[] }, isPrivateMap: Object, avatarIdMap: Object }}
    */
   getSignInUsernameGroups(usernames, netid) {
     const usernameGroups = { public: [], private: [] };
     const isPrivateMap = Object.create(null);
+    const avatarIdMap = Object.create(null);
 
     for (const username of usernames) {
       const localState = loadState(`${username}_${netid}`);
       const isPrivate = localState?.account?.private === true;
+      const avatarId = localState?.account?.avatarId;
       const usernameType = isPrivate ? 'private' : 'public';
       isPrivateMap[username] = isPrivate;
+      avatarIdMap[username] = typeof avatarId === 'string' && avatarId ? avatarId : null;
       usernameGroups[usernameType].push(username);
     }
 
-    return { usernameGroups, isPrivateMap };
+    return { usernameGroups, isPrivateMap, avatarIdMap };
   }
 
   /**
@@ -4154,13 +9608,60 @@ class SignInModal {
   }
 
   /**
+   * Render the same address-derived avatar used elsewhere in the client.
+   * Accounts without a valid saved address intentionally have no avatar.
+   * @param {unknown} address Saved account address.
+   * @returns {string} Avatar SVG markup or an empty string.
+   */
+  getSignInAccountFallbackAvatar(address) {
+    if (!address) return '';
+
+    try {
+      return generateIdenticon(normalizeAddress(address), 40);
+    } catch {
+      return '';
+    }
+  }
+
+  /**
+   * Replace an address-derived fallback with the account's cached uploaded avatar.
+   * Detached rows indicate that the list closed or rerendered while IndexedDB loaded.
+   * @param {HTMLElement} item Rendered sign-in account row.
+   * @param {string} avatarId Saved account avatar id.
+   * @returns {Promise<void>}
+   */
+  async loadUploadedSignInAvatar(item, avatarId) {
+    try {
+      const owner = MediaCacheOwnership.getOwnerKey({ username: item.dataset.username, netid: network.netid });
+      const blobUrl = await contactAvatarCache.getBlobUrl(avatarId, owner);
+      if (!blobUrl || !item.isConnected) return;
+
+      const image = document.createElement('img');
+      image.className = 'contact-avatar-img';
+      image.width = 40;
+      image.height = 40;
+      image.alt = '';
+      await new Promise((resolve, reject) => {
+        image.addEventListener('load', resolve, { once: true });
+        image.addEventListener('error', reject, { once: true });
+        image.src = blobUrl;
+      });
+
+      if (!item.isConnected) return;
+      item.querySelector('.sign-in-account-avatar')?.replaceChildren(image);
+    } catch {
+      // Keep the deterministic fallback when the local cache is unavailable.
+    }
+  }
+
+  /**
    * Render the account list with notification indicators and sort by notification status.
    * @returns {string[]} Usernames for the current network (registry order, not display order)
    */
   renderAccountList() {
     const { usernames, netidAccounts } = this.getSignInUsernames();
     const { netid } = network;
-    const { usernameGroups, isPrivateMap } = this.getSignInUsernameGroups(usernames, netid);
+    const { usernameGroups, isPrivateMap, avatarIdMap } = this.getSignInUsernameGroups(usernames, netid);
     const usernameOrder = this.getSignInUsernameOrder(usernameGroups, netidAccounts);
     const notifiedAddresses = reactNativeApp.isReactNativeWebView ? reactNativeApp.getNotificationAddresses() : [];
     const normalizedNotifiedSet = new Set();
@@ -4197,15 +9698,17 @@ class SignInModal {
 
     const renderListItem = (username) => {
       const isPrivateAccount = isPrivateMap[username];
-      const displayName = isPrivateAccount ? `- ${username}` : username;
       const privateClass = isPrivateAccount ? ' is-private' : '';
       const notificationBadge = notifiedUsernameSet.has(username)
         ? '<span class="sign-in-account-badge" aria-label="Has notifications">🔔</span>'
         : '';
+      const address = netidAccounts.usernames[username]?.address;
+      const avatar = this.getSignInAccountFallbackAvatar(address);
       return `
-        <li class="sign-in-account-item${privateClass}" data-username="${username}">
+        <li class="sign-in-account-item${privateClass}" data-username="${username}" role="button" tabindex="0">
           <div class="sign-in-account-card">
-            <span class="sign-in-account-name">${escapeHtml(displayName)}</span>
+            <span class="sign-in-account-avatar" aria-hidden="true">${avatar}</span>
+            <span class="sign-in-account-name">${escapeHtml(username)}</span>
             ${notificationBadge}
           </div>
         </li>
@@ -4221,6 +9724,11 @@ class SignInModal {
       sections.push(...privateRemaining.map(renderListItem));
     }
     this.accountList.innerHTML = sections.join('');
+    this.accountList.querySelectorAll('.sign-in-account-item').forEach((item) => {
+      const avatarId = avatarIdMap[item.dataset.username];
+      const hasFallbackAvatar = item.querySelector('.sign-in-account-avatar:not(:empty)');
+      if (avatarId && hasFallbackAvatar) void this.loadUploadedSignInAvatar(item, avatarId);
+    });
     this.updateRecentSignInResetButtonVisibility();
 
     return usernames;
@@ -4238,11 +9746,11 @@ class SignInModal {
 
     // Wait for browser to process DOM changes before starting modal transition.
     requestAnimationFrame(async () => {
-      this.modal.classList.add('active');
+      openModal(this.modal);
 
       // No accounts on this device — open Create Account instead.
       if (usernames.length === 0) {
-        this.close();
+        this.forceClose();
         createAccountModal.open();
         return;
       }
@@ -4271,6 +9779,16 @@ class SignInModal {
   }
 
   close() {
+    if (this.isCompletingSignIn) return;
+    if (this.actionSheetOverlay.classList.contains('active')) {
+      this.closeActionSheet();
+      return;
+    }
+
+    this.forceClose();
+  }
+
+  forceClose() {
     this.accountClickSeq++;
     this.selectedUsername = null;
     this.setCompletingSignIn(false);
@@ -4296,6 +9814,7 @@ class SignInModal {
     myData = loadState(`${username}_${netid}`);
     assert(myData, `Account data missing for ${username}`);
     myAccount = myData.account;
+    chatModal.resetPendingMessageConfirmations();
     logsModal.log(`SignIn as ${username}_${netid}`)
     this.recordRecentSignInUsername(username);
 
@@ -4346,7 +9865,7 @@ class SignInModal {
     }
 
     // Close modal and proceed to app
-    this.close();
+    this.forceClose();
     welcomeScreen.close();
     
     // Log storage information after successful sign-in
@@ -4358,6 +9877,9 @@ class SignInModal {
     }
     
     await footer.switchView('chats'); // Default view
+
+    // DAO reminders use only the metadata index and must not block sign-in.
+    await refreshDaoNotificationSummary();
     
     // Restore wallet/history notification dots if there are unread transfers
     if (myData?.wallet?.history && Array.isArray(myData.wallet.history) && myData.wallet.history.length > 0) {
@@ -4481,7 +10003,7 @@ class MyInfoModal {
     this.avatarEditButton.setAttribute('aria-label', 'Edit photo');
 
     this.backButton.addEventListener('click', () => this.close());
-    this.editButton.addEventListener('click', () => myProfileModal.open());
+    this.editButton.addEventListener('click', () => accountModal.open());
 
     // Copy address functionality
     this.copyButton.addEventListener('click', () => this.copyAddress());
@@ -4590,7 +10112,7 @@ class MyInfoModal {
 
   async open() {
     await this.updateMyInfo();
-    this.modal.classList.add('active');
+    openModal(this.modal);
   }
 
   close() {
@@ -4676,7 +10198,6 @@ class ContactInfoModal {
     this.nameDiv = this.avatarSection.querySelector('.name');
     this.subtitleDiv = document.getElementById('contactInfoDisplayAddress');
     this.copyButton = document.getElementById('contactInfoCopyAddress');
-    this.usernameDiv = document.getElementById('contactInfoUsername');
     this.avatarEditButton = document.createElement('button');
     this.avatarEditButton.className = 'icon-button edit-icon avatar-edit-button avatar-edit-button-outside';
     this.avatarEditButton.setAttribute('aria-label', 'Edit photo');
@@ -4698,10 +10219,9 @@ class ContactInfoModal {
       }
     });
 
-    // Add send money button handler
     this.sendButton.addEventListener('click', () => {
-      sendAssetFormModal.username = this.usernameDiv.textContent;
-      sendAssetFormModal.open();
+      const contact = myData?.contacts?.[this.currentContactAddress];
+      if (contact) payChoiceModal.open(contact, this.sendButton);
     });
 
     // Add add friend button handler
@@ -4741,6 +10261,7 @@ class ContactInfoModal {
   // Update contact info values
   async updateContactInfo(displayInfo) {
     const avatarHtml = await getContactAvatarHtml(displayInfo, 96);
+    if (this.currentContactAddress !== displayInfo.address) return;
 
     // Update the avatar section
     this.avatarDiv.innerHTML = avatarHtml;
@@ -4843,9 +10364,13 @@ class ContactInfoModal {
 
   // Open the modal
   async open(displayInfo) {
-    friendModal.setAddress(displayInfo.address);
     this.currentContactAddress = displayInfo.address;
+    this.sendButton.disabled = true;
     await this.updateContactInfo(displayInfo);
+    if (this.currentContactAddress !== displayInfo.address) return;
+
+    this.sendButton.disabled = false;
+    friendModal.setAddress(displayInfo.address);
     this.setupChatButton(displayInfo);
 
     // Update friend button status
@@ -4854,7 +10379,7 @@ class ContactInfoModal {
       friendModal.updateFriendButton(contact, 'addFriendButtonContactInfo');
     }
 
-    this.modal.classList.add('active');
+    openModal(this.modal);
   }
 
   // Close the modal
@@ -4882,7 +10407,15 @@ class ContactInfoModal {
 const contactInfoModal = new ContactInfoModal();
 
 const FRIEND_STATUS_PENDING_STALE_MS = 60 * 1000;
+const FRIEND_STATUS_REFRESH_TIMEOUT_MS = 10 * 1000;
 const VALID_FRIEND_STATUSES = new Set([0, 1, 2]);
+const FRIEND_STATUS_REFRESH_MESSAGES = Object.freeze({
+  pending: 'Status update pending\u2026',
+  checking: 'Checking current status\u2026',
+  offline: 'You are offline. Showing saved status; editing is unavailable.',
+  failed: 'Could not refresh current status. Showing saved status; editing is unavailable.',
+  ready: '',
+});
 
 function isValidFriendStatus(status) {
   const statusNumber = Number(status);
@@ -4903,12 +10436,16 @@ class FriendModal {
     this.lastChangeTimeStamp = 0; // track the last time the friend status was changed
     this.initialFriendStatus = null; // track the initial friend status when modal opens
     this.warningShown = false; // track if warning has been shown
+    this.statusRefreshState = null;
+    this.statusRefreshAbortController = null;
+    this.statusRefreshToastId = null;
   }
 
   load() {
     this.modal = document.getElementById('friendModal');
     this.friendForm = document.getElementById('friendForm');
     this.submitButton = document.getElementById('friendSubmitButton');
+    this.statusRefreshMessage = document.getElementById('friendStatusRefreshMessage');
 
     // Friend modal form submission
     this.friendForm.addEventListener('submit', withButtonCooldown(
@@ -5002,12 +10539,37 @@ class FriendModal {
     if (!contactAddress) return;
     const contact = myData.contacts[contactAddress];
     if (!contact) return;
-    if (this.hasPendingFriendStatusUpdate(contactAddress)) {
-      showToast('You have a pending transaction to update the friend status. Come back to this page later.', 0, 'warning');
+
+    this.statusRefreshAbortController?.abort();
+    this.statusRefreshAbortController = null;
+    this.currentContactAddress = contactAddress;
+
+    this.selectFriendStatus(contact.friend);
+    this.initialFriendStatus = contact.friend;
+    this.warningShown = false;
+    openModal(this.modal);
+
+    if (this.showPendingStatusIfNeeded(contactAddress)) {
       return;
     }
 
-    // Query network for current toll required status
+    await this.refreshStatus(contactAddress, contact);
+  }
+
+  async refreshStatus(contactAddress, contact) {
+    if (!isOnline) {
+      this.setStatusRefreshState('offline');
+      return;
+    }
+
+    this.statusRefreshAbortController?.abort();
+    this.setStatusRefreshState('checking');
+
+    const abortController = new AbortController();
+    this.statusRefreshAbortController = abortController;
+    const timeoutId = setTimeout(() => abortController.abort(), FRIEND_STATUS_REFRESH_TIMEOUT_MS);
+
+    let networkRequired;
     try {
       const myAddr = longAddress(myAccount.keys.address);
       const contactAddr = longAddress(contactAddress);
@@ -5015,52 +10577,140 @@ class FriendModal {
       const chatId = hashBytes(sortedAddresses.join(''));
       const myIndex = sortedAddresses.indexOf(myAddr);
 
-      const tollInfo = await queryNetwork(`/messages/${chatId}/toll`);
-      const networkRequired = tollInfo?.toll?.required?.[myIndex];
-
-      if (networkRequired !== undefined) {
-        // Map backend required value to frontend status
-        // Backend: 1 = toll required, 0 = toll not required, 2 = blocked
-        // Frontend: 0 = blocked, 1 = Other, 2 = Connection
-        let networkFriendStatus;
-        if (networkRequired === 2) {
-          networkFriendStatus = 0; // blocked
-        } else if (networkRequired === 1) {
-          networkFriendStatus = 1; // Other (toll required)
-        } else if (networkRequired === 0) {
-          // toll not required - connection
-          networkFriendStatus = 2;
-        }
-
-        // Update contact's friend status if it differs from network
-        if (networkFriendStatus !== undefined && networkFriendStatus !== contact.friend) {
-          const previousFriendStatus = contact.friend;
-          contact.friend = networkFriendStatus;
-          contact.friendOld = networkFriendStatus;
-          if (networkFriendStatus === 0 && previousFriendStatus !== 0) {
-            await this.clearContactAvatar(contact);
-          }
-          // Update the friend button color
-          this.updateFriendButton(contact, 'addFriendButtonContactInfo');
-          this.updateFriendButton(contact, 'addFriendButtonChat');
-        }
-      }
+      const tollInfo = await queryNetwork(`/messages/${chatId}/toll`, abortController.signal);
+      networkRequired = tollInfo?.toll?.required?.[myIndex];
     } catch (error) {
       console.error('Error querying toll required status:', error);
+    } finally {
+      clearTimeout(timeoutId);
     }
 
-    // Set the current friend status
-    const status = contact.friend.toString();
+    if (this.statusRefreshAbortController !== abortController) {
+      return;
+    }
+    this.statusRefreshAbortController = null;
+
+    if (!this.isActive() || this.currentContactAddress !== contactAddress) {
+      return;
+    }
+
+    const networkFriendStatus = this.getNetworkFriendStatus(networkRequired);
+    if (networkFriendStatus === null) {
+      this.setStatusRefreshState(isOnline ? 'failed' : 'offline');
+      return;
+    }
+
+    const previousFriendStatus = contact.friend;
+    contact.friend = networkFriendStatus;
+    contact.friendOld = networkFriendStatus;
+    this.initialFriendStatus = networkFriendStatus;
+    this.selectFriendStatus(networkFriendStatus);
+    this.updateFriendButton(contact, 'addFriendButtonContactInfo');
+    this.updateFriendButton(contact, 'addFriendButtonChat');
+    this.setStatusRefreshState('ready');
+
+    if (networkFriendStatus === 0 && previousFriendStatus !== 0) {
+      await this.clearContactAvatar(contact);
+    }
+  }
+
+  handleConnectivityChange() {
+    if (!this.isActive()) {
+      return;
+    }
+
+    this.statusRefreshAbortController?.abort();
+    this.statusRefreshAbortController = null;
+
+    const contactAddress = normalizeAddress(this.currentContactAddress);
+    if (this.showPendingStatusIfNeeded(contactAddress)) {
+      return;
+    }
+
+    if (!isOnline) {
+      this.setStatusRefreshState('offline');
+      return;
+    }
+
+    const contact = myData.contacts?.[contactAddress];
+    assert(contact, `Missing contact while refreshing friend status: ${contactAddress}`);
+    this.refreshStatus(contactAddress, contact);
+  }
+
+  handlePendingStatusSettled(address) {
+    const contactAddress = normalizeAddress(address);
+    if (!this.isActive() || this.currentContactAddress !== contactAddress) {
+      return;
+    }
+
+    const contact = myData.contacts?.[contactAddress];
+    assert(contact, `Missing contact after friend status settled: ${contactAddress}`);
+    this.selectFriendStatus(contact.friend);
+    this.initialFriendStatus = contact.friend;
+
+    if (this.showPendingStatusIfNeeded(contactAddress)) {
+      return;
+    }
+
+    this.refreshStatus(contactAddress, contact);
+  }
+
+  showPendingStatusIfNeeded(contactAddress) {
+    if (!this.hasPendingFriendStatusUpdate(contactAddress)) {
+      return false;
+    }
+
+    this.setStatusRefreshState('pending');
+    return true;
+  }
+
+  getNetworkFriendStatus(networkRequired) {
+    switch (networkRequired) {
+      case 0:
+        return 2;
+      case 1:
+        return 1;
+      case 2:
+        return 0;
+      default:
+        return null;
+    }
+  }
+
+  selectFriendStatus(status) {
     const radio = this.friendForm.querySelector(`input[value="${status}"]`);
     if (radio) radio.checked = true;
+  }
 
-    // Store initial friend status for change detection
-    this.initialFriendStatus = contact.friend;
-    this.warningShown = false;
+  setStatusRefreshState(state) {
+    assert(FRIEND_STATUS_REFRESH_MESSAGES[state] !== undefined, `Unknown friend status refresh state: ${state}`);
 
-    this.modal.classList.add('active');
-    // Initialize submit button state after modal is active so updateSubmitButtonState()'s isActive() guard passes
+    this.hideStatusRefreshToast();
+    const showLoadingToast = state === 'pending' || state === 'checking';
+    if (showLoadingToast) {
+      this.statusRefreshToastId = showToast(
+        FRIEND_STATUS_REFRESH_MESSAGES[state],
+        0,
+        'loading',
+        false,
+        { dedupe: false }
+      );
+    }
+
+    const showInlineMessage = state === 'offline' || state === 'failed';
+    this.statusRefreshState = state;
+    this.statusRefreshMessage.textContent = showInlineMessage ? FRIEND_STATUS_REFRESH_MESSAGES[state] : '';
+    this.statusRefreshMessage.hidden = !showInlineMessage;
     this.updateSubmitButtonState();
+  }
+
+  hideStatusRefreshToast() {
+    if (!this.statusRefreshToastId) {
+      return;
+    }
+
+    hideToast(this.statusRefreshToastId);
+    this.statusRefreshToastId = null;
   }
 
   /**
@@ -5077,8 +10727,12 @@ class FriendModal {
       }
     }
 
+    this.statusRefreshAbortController?.abort();
+    this.statusRefreshAbortController = null;
+    this.hideStatusRefreshToast();
     this.modal.classList.remove('active');
     this.initialFriendStatus = null;
+    this.statusRefreshState = null;
     this.warningShown = false;
   }
 
@@ -5103,6 +10757,7 @@ class FriendModal {
       chatId: chatId_,
       required: requiredNum,
       previousRequired: previousRequiredNum,
+      username: myAccount.username,
       type: 'update_toll_required',
       timestamp: getTransactionTimestamp(),
       networkId: network.netid,
@@ -5132,6 +10787,11 @@ class FriendModal {
    */
   async handleFriendSubmit(event) {
     event.preventDefault();
+
+    if (this.statusRefreshState !== 'ready' || !isOnline) {
+      return;
+    }
+
     const contact = myData.contacts[this.currentContactAddress];
     const selectedStatus = this.friendForm.querySelector('input[name="friendStatus"]:checked')?.value;
     const prevFriendStatus = Number(contact?.friend);
@@ -5284,8 +10944,14 @@ class FriendModal {
   updateSubmitButtonState() {
     if (!this.isActive()) return;
     const contact = myData?.contacts?.[this.currentContactAddress];
-    // return early if contact is not found or offline
-    if (!contact || !isOnline) {
+    const canEdit = Boolean(contact) && isOnline && this.statusRefreshState === 'ready';
+    const statusInputs = this.friendForm.querySelectorAll('input[name="friendStatus"]');
+    statusInputs.forEach((input) => {
+      input.disabled = !canEdit;
+      input.setAttribute('aria-disabled', String(!canEdit));
+    });
+
+    if (!canEdit) {
       this.submitButton.disabled = true;
       return;
     }
@@ -5362,7 +11028,7 @@ class EditContactModal {
     // Update the avatar section
     this.avatarDiv.innerHTML = document.getElementById('contactInfoAvatar').innerHTML;
     // update the name and subtitle
-    nameDiv.textContent = contactInfoModal.usernameDiv.textContent;
+    nameDiv.textContent = document.getElementById('contactInfoUsername').textContent;
     subtitleDiv.textContent = contactInfoModal.subtitleDiv.textContent;
 
     // update the provided name
@@ -5400,7 +11066,7 @@ class EditContactModal {
     this.notesInput.value = contactNotes;
 
     // Show the edit contact modal
-    this.modal.classList.add('active');
+    openModal(this.modal);
     // Delay focus to ensure transition completes (modal transition is 300ms)
     setTimeout(() => {
       const inputToFocus = focusField === 'notes' ? this.notesInput : this.nameInput;
@@ -5539,8 +11205,9 @@ class HistoryModal {
   }
 
   open() {
-    this.modal.classList.add('active');
+    openModal(this.modal);
     this.populateAssets();
+    PopupSelect.sync(this.assetSelect);
     this.updateTransactionHistory();
     
     // Update last viewed timestamp when user opens history modal
@@ -5695,7 +11362,7 @@ class HistoryModal {
     
     const type = item.querySelector('.transaction-type')?.textContent;
     if (type.includes('stake')) {
-      validatorStakingModal.open();
+      validatorModal.open();
       return;
     }
     
@@ -5750,11 +11417,7 @@ class ClockTimer {
    * @returns {string} Formatted current time string
    */
   formatCurrentTime() {
-    const now = getCorrectedTimestamp();
-    const localMs = now - timeSkew;
-    const date = new Date(localMs);
-    
-    return date.toLocaleTimeString(undefined, {
+    return new Date().toLocaleTimeString(undefined, {
       hour: 'numeric',
       minute: '2-digit',
       second: '2-digit',
@@ -5854,7 +11517,7 @@ class CallsModal {
   open() {
     this.refreshCalls();
     this.render();
-    this.modal.classList.add('active');
+    openModal(this.modal);
     this.clockTimer.start();
     // start periodic refresh to update call button states every 5s
     this._stateInterval = setInterval(() => {
@@ -5952,11 +11615,12 @@ class CallsModal {
       showToast(`Call scheduled for ${chatModal.formatLocalDateTime(callGroup.callTime)}`, 2500, 'info');
       return;
     }
-    if (!callGroup.callUrl) {
+    const callJoinUrl = buildCallJoinUrl(callGroup.callUrl, myAccount.username);
+    if (!callJoinUrl) {
       showToast('Call link not found', 0, 'error');
       return;
     }
-    window.open(callGroup.callUrl+`${callUrlParams}"${myAccount.username}"`, '_blank');
+    window.open(callJoinUrl, '_blank', 'noopener,noreferrer');
   }
 
   /**
@@ -6178,7 +11842,7 @@ class GroupCallParticipantsModal {
       }
     }
 
-    this.modal?.classList.add('active');
+    openModal(this.modal);
   }
 
   onParticipantClick(e) {
@@ -6244,8 +11908,7 @@ function getAssetUsdPrice(asset) {
     return getLibUsdPriceFromParameters();
   }
 
-  const price = Number(asset?.price);
-  return Number.isFinite(price) && price >= 0 ? price : null;
+  return WalletUsdValuation.fromValue(asset?.price).total;
 }
 
 function calculateAssetUsdValue(asset) {
@@ -6419,6 +12082,30 @@ async function ensureContactKeys(address) {
   } catch (e) {
     console.error('ensureContactKeys error:', e);
     return false;
+  }
+}
+
+async function getVerifiedChatContactKeys(address) {
+  const existingContact = myData.contacts[address];
+  const existingPublicKey = existingContact?.public;
+  if (isPublicKeyForAddress(existingPublicKey, address, generateAddress)) {
+    return {
+      public: existingPublicKey.replace(/^0x/i, ''),
+      pqPublic: existingContact.pqPublic ?? null,
+    };
+  }
+
+  try {
+    const accountInfo = await queryNetwork(`/account/${longAddress(address)}`);
+    const publicKey = accountInfo?.account?.publicKey;
+    if (!isPublicKeyForAddress(publicKey, address, generateAddress)) return null;
+    return {
+      public: publicKey.replace(/^0x/i, ''),
+      pqPublic: accountInfo?.account?.pqPublicKey || existingContact?.pqPublic || null,
+    };
+  } catch (error) {
+    console.warn('Unable to resolve authenticated chat participant keys', error);
+    return null;
   }
 }
 
@@ -6891,6 +12578,14 @@ function getReactionTargetPreviewText(message) {
     return 'location';
   }
 
+  if (message.type === EVM_CHAT_MESSAGE_TYPE) {
+    return message.payment ? `${evmPaymentAmount(message.payment)} ${message.payment.symbol}` : 'payment';
+  }
+
+  if (message.type === INTENTS_CHAT_MESSAGE_TYPE) {
+    return message.payment ? `${message.payment.amount} ${message.payment.symbol}` : 'payment';
+  }
+
   const messageText = typeof message.message === 'string' ? message.message.trim() : '';
   if (messageText) {
     return messageText;
@@ -7293,6 +12988,330 @@ function restorePendingMessageEdit(pendingTxid, contactAddress, editPending) {
  * @param {Object} pendingTxInfo
  * @returns {void}
  */
+/**
+ * A received payment message only claims a payment; this checks the intent
+ * behind it actually settled, and says so on the bubble.
+ *
+ * Results are cached per intent hash: a settled intent stays settled, and
+ * re-asking on every render would poll the relay for the whole history.
+ */
+const intentsPaymentVerifications = new Map();
+
+const EVM_CHECK_LIMIT = 20;
+const EVM_RECHECK_MS = 5 * 60_000;
+let evmPaymentCheckSession = null;
+
+function stopEvmPaymentChecks() {
+  evmPaymentCheckSession = null;
+  evmAssets.transactions.paymentEvidence.clear();
+}
+
+function evmPaymentMessages(record, account) {
+  const own = `0x${normalizeAddress(account.keys.address)}`;
+  const address = normalizeAddress(record.payment.from === own ? record.payment.to : record.payment.from);
+  return (myData.contacts[address]?.messages || []).filter((message) => !message.deleted
+    && message.type === EVM_CHAT_MESSAGE_TYPE && stringify(message.payment) === stringify(record.payment)
+    && message.my === (record.payment.from === own));
+}
+
+// Background status updates must not interrupt reading another chat or older messages.
+function refreshEvmPaymentChat(messages) {
+  if (!chatModal.isActive()) return;
+  const contact = myData.contacts[chatModal.address];
+  if (!messages.some((message) => contact?.messages.includes(message))) return;
+  const scrollTop = chatModal.messagesContainer.scrollTop;
+  chatModal.appendChatModal(false, true);
+  chatModal.messagesContainer.scrollTop = scrollTop;
+}
+
+// The normal Liberdus pending checker owns announcement outcomes. Match the
+// current attempt so a late result cannot change a newly retried message.
+function settleEvmPaymentMessage(txid, delivered) {
+  const record = loadEvmPayments().find((item) => item.kind === 'outgoing' && item.attempt?.txid === txid);
+  if (!record || record.messageState === 'delivered') return;
+  const messages = evmPaymentMessages(record, myAccount);
+  if (!delivered && messages.some((message) => message.paymentMessageConfirmed)) return;
+  record.messageState = delivered ? 'delivered' : 'rejected';
+  record.checkAttempts = 0;
+  record.nextCheckAt = 0;
+  for (const message of messages) {
+    message.status = delivered ? 'sent' : 'failed';
+    if (delivered) message.paymentMessageConfirmed = true;
+  }
+  saveEvmPayment(record);
+  refreshEvmPaymentChat(messages);
+  chatsScreen.updateChatList();
+  if (evmAssets.assetsModal.isActive()) evmAssets.assetsModal.renderRecovery();
+}
+
+async function recheckEvmPayment(payment) {
+  evmAssets.transactions.paymentEvidence.clear();
+  const record = loadEvmPayments().find((item) => stringify(item.payment) === stringify(payment))
+    || { kind: 'verification', payment, assetState: 'unknown', createdAt: Date.now() };
+  record.checkAttempts = 0;
+  record.nextCheckAt = 0;
+  saveEvmPayment(record);
+  await checkEvmPayments();
+}
+
+// The existing five-second app heartbeat schedules this queue independently of
+// Liberdus pending. No chat modal owns a timer or a verification request.
+async function checkEvmPayments() {
+  if (!myAccount || !isOnline || document.visibilityState === 'hidden' || evmAssets.sending) return;
+  if (evmPaymentCheckSession?.account !== myAccount) {
+    stopEvmPaymentChecks();
+    evmPaymentCheckSession = { account: myAccount, running: false };
+  }
+  const session = evmPaymentCheckSession;
+  if (session.running) return;
+  session.running = true;
+  const current = () => evmPaymentCheckSession === session && myAccount === session.account
+    && isOnline && document.visibilityState !== 'hidden' && !evmAssets.sending;
+  let refreshBalances = false;
+  const changedMessages = [];
+  try {
+    const due = loadEvmPayments().filter((record) => record.broadcastState !== 'rejected'
+      && record.verification !== 'reverted'
+      && (record.checkAttempts || 0) < EVM_CHECK_LIMIT
+      && (record.nextCheckAt || 0) <= Date.now()).sort((a, b) => (a.nextCheckAt || 0) - (b.nextCheckAt || 0)).slice(0, 4);
+    await Promise.all(due.map(async (record) => {
+      if (!current()) return;
+      const recordId = evmPaymentRecordId(record);
+      if (record.kind === 'verification' && !evmPaymentMessages(record, session.account).length) {
+        removeEvmPayment(record);
+        return;
+      }
+      const checkedRecord = stringify(record);
+      // A completed asset does not need more EVM RPC calls while its chat is unresolved.
+      let state;
+      if (record.kind === 'verification') {
+        state = await evmAssets.transactions.verifyPayment(record.payment, record.payment.from, record.payment.to);
+      } else if (record.assetState === 'confirmed') {
+        state = 'settled';
+      } else if (record.assetState === 'reverted') {
+        state = 'reverted';
+      } else {
+        state = await evmAssets.transactions.verifyOutgoingPayment(record);
+      }
+      if (!current()) return;
+      // Do not apply a stale result to an operation changed while RPC was in flight.
+      const latest = loadEvmPayments().find((item) => evmPaymentRecordId(item) === recordId);
+      if (!latest || stringify(latest) !== checkedRecord) return;
+      record = latest;
+      record.checkedAt = Date.now();
+      record.checkAttempts = (record.checkAttempts || 0) + 1;
+      record.nextCheckAt = Date.now() + Math.min(30_000, 5000 * 2 ** Math.min(record.checkAttempts - 1, 3));
+      // A consumed nonce releases submission blocking, but proves no outcome
+      // for this hash. Keep the record and show the card as unverified.
+      if (state === 'nonce_used') record.broadcastState = 'nonce_used';
+      record.verification = state === 'nonce_used' ? 'unverifiable' : state;
+      const assetState = state === 'settled' ? 'confirmed' : state === 'reverted' ? 'reverted'
+        : state === 'pending' ? 'pending' : 'unknown';
+      if (record.kind === 'outgoing' && record.assetState !== assetState && ['confirmed', 'reverted'].includes(assetState)) {
+        refreshBalances = true;
+      }
+      record.assetState = assetState;
+      if (record.kind === 'outgoing' && ['pending', 'settled', 'reverted'].includes(state)) {
+        record.broadcastState = 'acknowledged';
+        delete record.broadcastError;
+        if (state !== 'pending') delete record.rawTransaction;
+        // An announcement prepared before a failed broadcast was never injected.
+        if (state === 'reverted' && record.messageState === 'ready') {
+          record.messageState = 'abandoned';
+        }
+      }
+      const messages = evmPaymentMessages(record, session.account);
+      const verified = state === 'reverted' ? 'failed' : record.verification;
+      for (const message of messages) {
+        if (message.paymentVerified !== verified || (message.paymentReverted === true) !== (state === 'reverted')) {
+          changedMessages.push(message);
+        }
+        message.paymentVerified = verified;
+        message.paymentReverted = state === 'reverted';
+        message.paymentCheckedAt = record.checkedAt;
+      }
+      if (messages.some((message) => message.my && message.paymentMessageConfirmed)
+        && record.kind === 'outgoing') record.messageState = 'delivered';
+      const terminal = ['settled', 'reverted', 'failed'].includes(state);
+      if (terminal && record.kind === 'verification') {
+        removeEvmPayment(record);
+        return;
+      }
+      // Keep failed transfers for form restoration until the user dismisses them.
+      if (state === 'reverted') {
+        if (record.notifiedAssetState !== 'reverted') {
+          showToast(`EVM transfer reverted: ${record.payment.transactionHash}`, 0, 'error');
+          record.notifiedAssetState = 'reverted';
+        }
+        saveEvmPayment(record);
+        return;
+      }
+      const operationFinished = state === 'settled'
+        && ['none', 'delivered', 'abandoned'].includes(record.messageState);
+      if (!operationFinished) {
+        saveEvmPayment(record);
+        return;
+      }
+
+      if (!record.username && record.notifiedAssetState !== record.assetState) {
+        showToast(
+          `EVM transfer ${record.assetState}: ${record.payment.transactionHash}`,
+          state === 'reverted' ? 0 : 5000,
+          state === 'reverted' ? 'error' : 'info',
+        );
+      }
+      removeEvmPayment(record);
+    }));
+    if (!current()) return;
+    if (!due.length) return;
+    saveState();
+    refreshEvmPaymentChat(changedMessages);
+    chatsScreen.updateChatList();
+    // Completion is independent of portfolio availability or refresh speed.
+    if (refreshBalances) void evmAssets.refresh({ force: true }).catch(() => {});
+    if (evmAssets.assetsModal?.modal?.classList.contains('active')) evmAssets.assetsModal.renderRecovery();
+  } catch (error) {
+    console.warn('EVM payment verification interrupted:', error.message);
+  } finally {
+    session.running = false;
+  }
+}
+
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'hidden') stopEvmPaymentChecks();
+  else void checkEvmPayments();
+});
+
+// Intents whose receipt is being sent right now, so a double-tapped Retry
+// cannot sign and pay for two messages.
+const intentsReceiptsInFlight = new Set();
+
+// Bubbles whose answer can still change: not yet asked, still settling, or
+// not answerable last time.
+const UNRESOLVED_PAYMENT_BUBBLES = ['unchecked', 'pending', 'unverifiable']
+  .map((state) => `.intents-payment-message[data-verified="${state}"]`).join(', ');
+
+// While a payment in the open chat is unresolved, look again. An intent
+// settles or misses its two-minute deadline by itself, and the card should
+// say so while the person is watching, not after they leave and come back.
+// Backs off 4s, 8s ... to a minute: a pending intent is answered within
+// about two minutes, and an outage is not hammered.
+const PAYMENT_POLL_FIRST_MS = 4_000;
+const PAYMENT_POLL_MAX_MS = 60_000;
+const paymentPoll = { timer: null, delay: PAYMENT_POLL_FIRST_MS, running: null, again: false };
+
+/**
+ * Check the payment bubbles on screen, then keep checking the unresolved ones.
+ * A render starts the backoff over; overlapping calls share one pass.
+ */
+function verifyVisibleChatPayments({ poll = false } = {}) {
+  clearTimeout(paymentPoll.timer);
+  paymentPoll.timer = null;
+  if (!poll) paymentPoll.delay = PAYMENT_POLL_FIRST_MS;
+  if (paymentPoll.running) {
+    paymentPoll.again = true;
+    return paymentPoll.running;
+  }
+  paymentPoll.running = (async () => {
+    try {
+      do {
+        paymentPoll.again = false;
+        await verifyPaymentBubbles();
+      } while (paymentPoll.again);
+    } finally {
+      paymentPoll.running = null;
+      schedulePaymentPoll();
+    }
+  })();
+  return paymentPoll.running;
+}
+
+function paymentPollWanted() {
+  return chatModal.isActive() && document.visibilityState !== 'hidden'
+    && document.querySelector(UNRESOLVED_PAYMENT_BUBBLES) !== null;
+}
+
+function schedulePaymentPoll() {
+  if (!paymentPollWanted()) return;
+  paymentPoll.timer = setTimeout(() => {
+    paymentPoll.timer = null;
+    if (paymentPollWanted()) void verifyVisibleChatPayments({ poll: true });
+  }, paymentPoll.delay);
+  paymentPoll.delay = Math.min(paymentPoll.delay * 2, PAYMENT_POLL_MAX_MS);
+}
+
+// A hidden tab stops polling at its next turn; coming back looks at once.
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible' && chatModal.isActive()) void verifyVisibleChatPayments();
+});
+
+async function verifyPaymentBubbles() {
+  const bubbles = document.querySelectorAll(UNRESOLVED_PAYMENT_BUBBLES);
+
+  for (const bubble of bubbles) {
+    const intentHash = bubble.dataset.intentHash;
+    if (!intentHash) continue;
+    // The whole claim, from the stored message: the check compares what was
+    // claimed -- token, amount, the two sides -- with what the verifier logged.
+    const found = findPaymentMessage(intentHash);
+    if (!found) continue;
+
+    // Our own payments too: publishing an intent is not proof it settled, and
+    // one still in flight when its receipt went can miss its deadline.
+    const me = intentsAccountIdForAddress(myAccount?.keys?.address);
+    const them = intentsAccountIdForAddress(found.contact.address);
+    let result = intentsPaymentVerifications.get(intentHash);
+    if (!result || result.state === 'pending' || result.state === 'unverifiable') {
+      result = await verifyTransferClaim(found.message.payment, {
+        expectedFrom: found.message.my ? me : them,
+        expectedTo: found.message.my ? them : me,
+      });
+      if (RESTING_PAYMENT_STATES.has(result.state)) {
+        intentsPaymentVerifications.set(intentHash, result);
+        rememberPaymentVerdict(intentHash, result.state);
+      }
+    }
+
+    const label = bubble.querySelector('.intents-payment-verified');
+    if (!label) continue;
+    bubble.dataset.verified = result.state;
+    label.textContent = paymentStatusLabel(result.state);
+  }
+}
+
+/** The stored message behind a payment bubble, and whose chat it is in. */
+function findPaymentMessage(intentHash) {
+  for (const contact of Object.values(myData?.contacts || {})) {
+    const message = (contact.messages || []).find((item) => item.payment?.intentHash === intentHash);
+    if (message) return { contact, message };
+  }
+  return null;
+}
+
+// Keep these results when the bubble is rendered again, including an
+// inconclusive relay miss for receipts without a usable payment time.
+const RESTING_PAYMENT_STATES = new Set(['settled', 'failed', 'expired', 'unknown']);
+
+/**
+ * Keep a payment's verdict on the stored message itself.
+ *
+ * The relay forgets intents within days, so a payment checked once must stay
+ * checked: without this, a genuine payment verified today would come back
+ * "not found" next week. The bubble renders from the stored field, and a
+ * newly checked copy of the same intent cannot replace a saved result.
+ */
+function rememberPaymentVerdict(intentHash, state) {
+  let changed = false;
+  for (const contact of Object.values(myData?.contacts || {})) {
+    for (const message of contact.messages || []) {
+      if (message.payment?.intentHash !== intentHash || RESTING_PAYMENT_STATES.has(message.paymentVerified)) continue;
+      message.paymentVerified = state;
+      changed = true;
+    }
+  }
+  if (changed) saveState();
+}
+
 function reconcilePendingMessageEdit(pendingTxInfo) {
   const { editPending } = pendingTxInfo;
   assert(editPending, `Missing pending message edit metadata for ${pendingTxInfo.txid}`);
@@ -7430,23 +13449,89 @@ function syncChatTabNotificationBubble() {
 
 // Actually payments also appear in the chats, so we can add these to
 async function processChats(chats, keys) {
+  const avatarOwner = MediaCacheOwnership.getOwnerKey();
   let newTimestamp = 0;
   const timestamp = myAccount.chatTimestamp || 0;
   const messageQueryTimestamp = Math.max(0, timestamp+1);
   let hasAnyTransfer = false;
   let needsUpcomingCallsUiRefresh = false;
+  let syncedEvmPayment = false;
   const currentUserAddress = normalizeAddress(keys.address);
+  const currentUserPublicKey = isPublicKeyForAddress(keys.public, currentUserAddress, generateAddress)
+    ? keys.public
+    : bin2hex(getPublicKey(hex2bin(keys.secret)));
+  const verifiedChats = new Map();
 
-  for (let sender in chats) {
+  // Prepare the whole batch before changing contacts, messages, or the sync cursor.
+  for (const sender in chats) {
+    let from;
+    let expectedChatId;
+    try {
+      from = normalizeAddress(sender);
+      expectedChatId = getExpectedChatId(currentUserAddress, from, hashBytes);
+    } catch {
+      console.warn('Ignoring chat entry with an invalid participant address');
+      continue;
+    }
+    if (chats[sender] !== expectedChatId) {
+      console.warn('Ignoring chat entry with a mismatched chat identifier');
+      continue;
+    }
+
     // Fetch messages using the adjusted timestamp
-    const res = await queryNetwork(`/messages/${chats[sender]}/${messageQueryTimestamp}`);
+    const res = await queryNetwork(`/messages/${expectedChatId}/${messageQueryTimestamp}`);
     if (res && res.messages) {
-      const from = normalizeAddress(sender);
+      const contactKeys = await getVerifiedChatContactKeys(from);
+      const verifiedMessages = [];
+      for (const [order, tx] of Object.entries(res.messages)) {
+        let transactionFrom = '';
+        try {
+          transactionFrom = normalizeAddress(tx?.from);
+        } catch {
+          // validateChatTransaction returns the specific participant error below.
+        }
+        const publicKey = transactionFrom === currentUserAddress
+          ? currentUserPublicKey
+          : contactKeys?.public;
+        const validation = validateChatTransaction(tx, {
+          currentAddress: currentUserAddress,
+          contactAddress: from,
+          expectedChatId,
+          networkId: network.netid,
+          publicKey,
+        }, {
+          ethHashMessage,
+          generateAddress,
+          hashBytes,
+          stringify,
+          verifyMessage,
+        });
+        if (!validation.ok) {
+          if (validation.reason === 'public_key_unavailable') {
+            console.warn('Deferring chat sync until the participant signing key is available');
+            return;
+          }
+          console.warn(`Ignoring unauthenticated chat transaction: ${validation.reason}`);
+          continue;
+        }
+        verifiedMessages.push({ order, tx, txid: validation.txid });
+      }
+      if (verifiedMessages.length === 0) continue;
+      verifiedChats.set(sender, { from, contactKeys, verifiedMessages });
+    }
+  }
+
+  for (const sender in chats) {
+    const verifiedChat = verifiedChats.get(sender);
+    if (verifiedChat) {
+      const { from, contactKeys, verifiedMessages } = verifiedChat;
       if (!myData.contacts[from]) {
         // New inbound chat (not previously in contacts): create as tolled + allow one-time tolled deposit toast
         createNewContact(from, undefined, 1, false);
       }
       const contact = myData.contacts[from];
+      if (contactKeys?.public) contact.public = contactKeys.public;
+      if (contactKeys?.pqPublic) contact.pqPublic = contactKeys.pqPublic;
       // Set username to "Liberdus Faucet" if there is no username for the faucet address contact
       if (isFaucetAddress(from) && !contact.username) {
         contact.username = 'Liberdus Faucet';
@@ -7462,6 +13547,7 @@ async function processChats(chats, keys) {
       let didChangeReactionPreview = false;
       let didApplyStatusChange = false;
       let needsStatusChatRefresh = false;
+      let syncedOwnEvmPayment = false;
       let myStatusUpdate = null;
       let contactStatusUpdate = null;
       const touchedReactionTargetTxids = new Set();
@@ -7471,14 +13557,12 @@ async function processChats(chats, keys) {
       const inActiveChatWithSender =
         chatModal.address === from && chatModal.isActive();
 
-      for (let i in res.messages) {
-        const tx = res.messages[i]; // the messages are actually the whole tx
-        // compute the transaction id (txid)
-        const txidHex = getTxid(tx);
+      for (const verifiedMessage of verifiedMessages) {
+        const { order: i, tx, txid: txidHex } = verifiedMessage;
         let useTxTimestamp = false;
 
         newTimestamp = tx.timestamp > newTimestamp ? tx.timestamp : newTimestamp;
-        mine = tx.from == longAddress(keys.address) ? true : false;
+        mine = normalizeAddress(tx.from) === currentUserAddress;
         // timestamp-skew check for incoming messages/transfers (ensures we don't use out of range sent_timestamp)
         if (!mine && (tx.type === 'message' || tx.type === 'transfer')) {
           const sentTs = Number(((tx.type === 'message' ? tx.xmessage : tx.xmemo) || {}).sent_timestamp || 0);
@@ -7519,6 +13603,14 @@ async function processChats(chats, keys) {
           }
 
           const statusContact = myData.contacts[statusContactAddress];
+          if (txFrom !== currentUserAddress && !statusContact.username && tx.username) {
+            const verifiedUsername = await getVerifiedUsername(tx.username, txFrom, getUsernameAddress);
+            if (verifiedUsername) {
+              statusContact.username = verifiedUsername;
+            } else {
+              console.warn(`Ignoring unverified username on update_toll_required from ${tx.from}`);
+            }
+          }
           const statusHistoryItem = buildUpdateTollRequiredHistoryItem(tx, txidHex, currentUserAddress);
           const didInsertStatusHistory = insertUpdateTollRequiredHistoryItem(statusContact, statusHistoryItem);
           if (didInsertStatusHistory) {
@@ -7615,8 +13707,8 @@ async function processChats(chats, keys) {
                   
                   if (!messageToDelete.my && originalSender === from) {
                     // This is a message received from sender, who is now deleting it - valid
-                    // Purge cached thumbnails for image attachments, if any
-                    chatModal.purgeThumbnail(messageToDelete.xattach);
+                    // Purge cached media for attachments, if any
+                    void chatModal.purgeAttachmentCaches(messageToDelete.xattach, messageToDelete, from);
 
                     // Mark the message as deleted
                     messageToDelete.deleted = MESSAGE_DELETED_STATE_ALL;
@@ -7641,8 +13733,8 @@ async function processChats(chats, keys) {
                     );
                   } else if (messageToDelete.my && normalizeAddress(keys.address) === normalizeAddress(tx.from)) {
                     // This is our own message, and we're deleting it - valid
-                    // Purge cached thumbnails for image attachments, if any
-                    chatModal.purgeThumbnail(messageToDelete.xattach);
+                    // Purge cached media for attachments, if any
+                    void chatModal.purgeAttachmentCaches(messageToDelete.xattach, messageToDelete, from);
 
                     // Mark the message as deleted
                     messageToDelete.deleted = MESSAGE_DELETED_STATE_ALL;
@@ -7782,6 +13874,30 @@ async function processChats(chats, keys) {
                   payload.latitude = latitude;
                   payload.longitude = longitude;
                   payload.accuracy = Number.isFinite(accuracy) && accuracy >= 0 ? accuracy : null;
+                } else if (parsedMessage.type === EVM_CHAT_MESSAGE_TYPE) {
+                  const claim = parseEvmTransferMessage(parsedMessage);
+                  if (!claim || claim.from !== `0x${normalizeAddress(tx.from)}`
+                    || claim.to !== `0x${normalizeAddress(tx.to)}`) continue;
+                  payload.message = '';
+                  payload.type = EVM_CHAT_MESSAGE_TYPE;
+                  payload.payment = claim;
+                  // Verification is local evidence, never a sender-provided assertion.
+                  payload.paymentVerified = 'unchecked';
+                  delete payload.paymentCheckedAt;
+                  delete payload.paymentReverted;
+                  delete payload.paymentMessageConfirmed;
+                } else if (parsedMessage.type === INTENTS_CHAT_MESSAGE_TYPE) {
+                  // Every field of this arrives from the sender, and a payment
+                  // bubble is worth forging, so anything malformed is dropped
+                  // rather than rendered with defaults.
+                  const claim = parseTransferMessage(parsedMessage);
+                  if (!claim) {
+                    console.warn('Ignoring invalid chat payment message', parsedMessage);
+                    continue;
+                  }
+                  payload.message = '';
+                  payload.type = INTENTS_CHAT_MESSAGE_TYPE;
+                  payload.payment = claim;
                 } else if (parsedMessage.type === 'message') {
                   const hasReactionFields =
                     typeof parsedMessage.reactId !== 'undefined' ||
@@ -7870,12 +13986,14 @@ async function processChats(chats, keys) {
             contact.senderInfo = cleanSenderInfo(payload.senderInfo)
             delete payload.senderInfo;
             if (contact.senderInfo.avatarId && contact.senderInfo.avatarKey && contact.avatarId !== contact.senderInfo.avatarId) {
-              downloadAndDecryptAvatar(`${network.attachmentServerUrl}/get/${contact.senderInfo.avatarId}`, contact.senderInfo.avatarKey)
-                .then(async (blob) => {
+              const { avatarId, avatarKey } = contact.senderInfo;
+              const avatarUrl = `${network.attachmentServerUrl}/get/${avatarId}`;
+              downloadAndDecryptAvatar(avatarUrl, avatarKey)
+                .then(async blob => {
                   try {
                     // Save blob under the server-provided avatar id
-                    await contactAvatarCache.save(contact.senderInfo.avatarId, blob);
-                    contact.avatarId = contact.senderInfo.avatarId;
+                    await contactAvatarCache.save(avatarId, blob, avatarOwner);
+                    contact.avatarId = avatarId;
                     contact.hasAvatar = true;
                     // If contact provided a new avatar, prefer their sent avatar
                     myData.contacts ??= {};
@@ -7900,18 +14018,31 @@ async function processChats(chats, keys) {
               // if we already have the username, we can use it
               contact.senderInfo.username = contact.username;
             } else if (contact.senderInfo.username) {
-              // check if the username given with the message maps to the address of this contact
-              const usernameAddress = await getUsernameAddress(contact.senderInfo.username);
-              if (usernameAddress && normalizeAddress(usernameAddress) === normalizeAddress(tx.from)) {
-                contact.username = contact.senderInfo.username;
-              } else {
-                // username doesn't match address so skipping this message
+              const verifiedUsername = await getVerifiedUsername(contact.senderInfo.username, tx.from, getUsernameAddress);
+              if (!verifiedUsername) {
                 console.error(`Username: ${contact.senderInfo.username} does not match address ${tx.from}`);
                 continue;
               }
+              contact.username = verifiedUsername;
             } else {
               console.error(`Username not provided in senderInfo.`)
               continue
+            }
+          }
+          if (payload.type === EVM_CHAT_MESSAGE_TYPE) {
+            // A queried message proves Liberdus delivery, not EVM settlement.
+            payload.paymentMessageConfirmed = true;
+            payload.status = 'sent';
+            syncedEvmPayment = true;
+            syncedOwnEvmPayment ||= mine;
+            const existing = contact.messages.find((message) => message.type === EVM_CHAT_MESSAGE_TYPE
+              && message.my === mine && stringify(message.payment) === stringify(payload.payment));
+            if (existing) {
+              existing.paymentMessageConfirmed = true;
+              existing.status = 'sent';
+              existing.txid = txidHex;
+              queueEvmPaymentMessage(existing);
+              continue;
             }
           }
           //  skip if this tx was processed before and is already in contact.messages;
@@ -7927,6 +14058,20 @@ async function processChats(chats, keys) {
           if (alreadyExists) {
             //console.log(`Skipping already existing message: ${payload.sent_timestamp}`);
             continue; // Skip to the next message
+          }
+          // One card per payment. A receipt retried after a lost response can
+          // land twice under two txids; the second says nothing new. For our
+          // own card it is proof the receipt arrived after all.
+          if (payload.type === INTENTS_CHAT_MESSAGE_TYPE) {
+            const card = contact.messages.find((message) => message.type === INTENTS_CHAT_MESSAGE_TYPE
+              && message.my === mine && message.payment?.intentHash === payload.payment.intentHash);
+            if (card) {
+              if (mine && card.status === 'failed') {
+                card.status = 'sent';
+                needsStatusChatRefresh = true;
+              }
+              continue;
+            }
           }
 
           //console.log('contact.message', contact.messages)
@@ -7964,11 +14109,13 @@ async function processChats(chats, keys) {
           }
           
           insertSorted(contact.messages, payload, 'timestamp');
+          if (payload.type === EVM_CHAT_MESSAGE_TYPE) queueEvmPaymentMessage(payload);
           if (payload.type === 'call' && shouldRefreshUpcomingCallsUiForCallTime(payload.callTime)) {
             needsUpcomingCallsUiRefresh = true;
           }
-          // if we are not in the chatModal of who sent it, playChatSound or if device visibility is hidden play sound
-          if (!inActiveChatWithSender || document.visibilityState === 'hidden') {
+          if (payload.type === EVM_CHAT_MESSAGE_TYPE || payload.type === INTENTS_CHAT_MESSAGE_TYPE) {
+            if (!mine) playTransferSound();
+          } else if (!inActiveChatWithSender || document.visibilityState === 'hidden') {
             playChatSound();
           }
           if (!mine){
@@ -8021,11 +14168,13 @@ async function processChats(chats, keys) {
             contact.senderInfo = cleanSenderInfo(payload.senderInfo);
             delete payload.senderInfo;
             if (contact.senderInfo.avatarId && contact.senderInfo.avatarKey && contact.avatarId !== contact.senderInfo.avatarId) {
-              downloadAndDecryptAvatar(`${network.attachmentServerUrl}/get/${contact.senderInfo.avatarId}`, contact.senderInfo.avatarKey)
-                .then(async (blob) => {
+              const { avatarId, avatarKey } = contact.senderInfo;
+              const avatarUrl = `${network.attachmentServerUrl}/get/${avatarId}`;
+              downloadAndDecryptAvatar(avatarUrl, avatarKey)
+                .then(async blob => {
                   try {
-                    await contactAvatarCache.save(contact.senderInfo.avatarId, blob);
-                    contact.avatarId = contact.senderInfo.avatarId;
+                    await contactAvatarCache.save(avatarId, blob, avatarOwner);
+                    contact.avatarId = avatarId;
                     contact.hasAvatar = true;
                     // If contact provided a new avatar, prefer their sent avatar
                     myData.contacts ??= {};
@@ -8050,15 +14199,12 @@ async function processChats(chats, keys) {
               // if we already have the username, we can use it
               contact.senderInfo.username = contact.username;
             } else if (contact.senderInfo.username) {
-              // check if the username given with the message maps to the address of this contact
-              const usernameAddress = await getUsernameAddress(contact.senderInfo.username);
-              if (usernameAddress && normalizeAddress(usernameAddress) === normalizeAddress(tx.from)) {
-                contact.username = contact.senderInfo.username;
-              } else {
-                // username doesn't match address so skipping this message
+              const verifiedUsername = await getVerifiedUsername(contact.senderInfo.username, tx.from, getUsernameAddress);
+              if (!verifiedUsername) {
                 console.error(`Username: ${contact.senderInfo.username} does not match address ${tx.from}`);
                 continue;
               }
+              contact.username = verifiedUsername;
             } else {
               console.error(`Username not provided in senderInfo.`)
               continue
@@ -8223,7 +14369,11 @@ async function processChats(chats, keys) {
         chatsScreen.updateChatList();
       }
 
-      if (didApplyStatusChange && chatsScreen.isActive()) {
+      if (syncedOwnEvmPayment) {
+        syncChatLatestActivityTimestamp(from, contact);
+        if (inActiveChatWithSender) chatModal.appendChatModal();
+      }
+      if ((didApplyStatusChange || syncedOwnEvmPayment) && chatsScreen.isActive()) {
         chatsScreen.updateChatList();
       }
 
@@ -8277,6 +14427,8 @@ async function processChats(chats, keys) {
     // Update the timestamp
     myAccount.chatTimestamp = newTimestamp;
   }
+  // Save queried messages and their verification work together.
+  if (syncedEvmPayment) saveState();
 }
 
 /**
@@ -8317,28 +14469,32 @@ function restoreWalletNotificationDots() {
 /**
  * Get the address of a username and return the address if it exists
  * @param {string} username - The username to check
+ * @param {{requireNetworkResult?: boolean}} options - Throw on lookup failure when enabled
  * @returns {Promise<string|null>} The address of the username or null if it doesn't exist
  */
-async function getUsernameAddress(username) {
+async function getUsernameAddress(username, { requireNetworkResult = false } = {}) {
   const usernameBytes = utf82bin(normalizeUsername(username));
   const usernameHash = hashBytes(usernameBytes);
-  const selectedGateway = getGatewayForRequest();
-  if (!selectedGateway) {
-    console.error('No gateway available for username check');
-    return null;
-  }
   try {
+    const selectedGateway = getGatewayForRequest();
+    if (!selectedGateway) throw new Error('No gateway available for username check');
     const response = await fetch(
       `${selectedGateway.web}/address/${usernameHash}`
     );
-    const data = await response.json();
-    // if address is not present, return null
-    if (!data || !data.address) {
-      return null;
+    if (requireNetworkResult && !response.ok) {
+      throw new Error(`Username lookup returned HTTP ${response.status}`);
     }
-    return data.address;
+    const data = await response.json();
+    if (requireNetworkResult) {
+      if (data?.error === 'No account exists for the given handle') return null;
+      if (data?.error || typeof data?.address !== 'string' || !data.address) {
+        throw new Error('Invalid username lookup response');
+      }
+    }
+    return data?.address || null;
   } catch (error) {
     console.error('Error checking username:', error);
+    if (requireNetworkResult) throw error;
     return null;
   }
 }
@@ -8557,6 +14713,10 @@ function isRecipientTollStateFailure(reason) {
   return /required toll|blocked by the receiver|chat is blocked/i.test(reason);
 }
 
+function isRecipientTollTooLowFailure(reason) {
+  return typeof reason === 'string' && /less than required toll/i.test(reason);
+}
+
 /**
  * Extracts the actionable one-line recipient toll/block reason from a pre-crack message.
  * @param {string} reason
@@ -8571,7 +14731,7 @@ function getRecipientTollPrecrackFailureReason(reason, contact) {
     return 'You are blocked by this user';
   }
 
-  if (/less than required toll/i.test(reason)) {
+  if (isRecipientTollTooLowFailure(reason)) {
     const username = getContactDisplayName(contact);
     return `You can only send reactions to people who have added you as a connection. Ask ${username} to add you as a connection`;
   }
@@ -8601,9 +14761,10 @@ async function refreshNetworkParamsOnTxFeeMismatch(reason) {
  * Inject a transaction
  * @param {Object} tx - The transaction object
  * @param {string} txid - The transaction ID
+ * @param {{deferTollTooLowToast?: boolean}} options - Let the caller report an insufficient toll
  * @returns {Promise<Object>} The response from the injectTx call
  */
-async function injectTx(tx, txid) {
+async function injectTx(tx, txid, { deferTollTooLowToast = false } = {}) {
   if (!isOnline) {
     return null;
   }
@@ -8722,6 +14883,7 @@ async function injectTx(tx, txid) {
         timeDifference()
         toastMessage += ' (Please try again)';
       }
+      if (deferTollTooLowToast && isRecipientTollTooLowFailure(failureReason)) return data;
       if (
         isRecipientTollStateFailure(failureReason)
         && myData.pending.some((pendingTx) => pendingTx.txid === txid && pendingTx.reactionPending)
@@ -8729,6 +14891,7 @@ async function injectTx(tx, txid) {
         return data;
       }
       showToast(toastMessage, 0, feeMismatchStatus.detected ? 'warning' : 'error');
+      data.toastAlreadyShown = true;
     }
     return data;
   } catch (error) {
@@ -8742,6 +14905,7 @@ async function injectTx(tx, txid) {
     const errorReason = typeof error === 'string' ? error : (error?.message || String(error) || 'inject_failed');
     return {
       result: { success: false, reason: errorReason },
+      transportFailure: true,
       txid,
       toastAlreadyShown: true,
     };
@@ -8802,7 +14966,7 @@ class SearchMessagesModal {
   }
 
   load() {
-    this.modal = document.getElementById('searchModal');
+    this.modal = document.getElementById('messageSearchModal');
     this.searchInput = document.getElementById('messageSearch');
     this.closeButton = document.getElementById('closeSearchModal');
     this.searchResults = document.getElementById('searchResults');
@@ -8812,7 +14976,7 @@ class SearchMessagesModal {
   }
 
   open() {
-    this.modal.classList.add('active');
+    openModal(this.modal);
     // Delay focus to ensure transition completes (modal transition is 300ms)
     setTimeout(() => {
       this.searchInput.focus();
@@ -8833,7 +14997,9 @@ class SearchMessagesModal {
     if (!searchText || !myData?.contacts) return [];
 
     const results = [];
-    const searchLower = searchText.toLowerCase();
+    // Case-insensitive literal matching; regex metacharacters in the query are escaped.
+    // The same pattern finds and highlights matches, so every result shows a highlight
+    const matchPattern = new RegExp(escapeRegExp(searchText), 'gi');
 
     // Search through all contacts and their messages
     Object.entries(myData.contacts).forEach(([address, contact]) => {
@@ -8844,20 +15010,8 @@ class SearchMessagesModal {
         // Skip deleted messages and call messages
         if (isDeleted(message)) return;
         if (message.type === 'call') return;
-        if (message.message.toLowerCase().includes(searchLower)) {
-          // Highlight matching text
-          const messageText = escapeHtml(message.message);
-          // Escape search text for safe regex usage
-          const escapedSearch = escapeRegExp(searchText);
-          const highlightedText = messageText.replace(new RegExp(escapedSearch, 'gi'), (match) => `<mark>${match}</mark>`);
-          
-          const maxDisplayLength = 100;
-          
-          // Adjust maxLength to account for <mark> tags (add 13 chars per highlight)
-          // This ensures truncateMessage gets enough characters to display ~100 chars of actual text
-          const highlightCount = (highlightedText.match(/<mark>/g) || []).length;
-          const adjustedMaxLength = maxDisplayLength + (highlightCount * 13); // <mark> + </mark> = 13 chars
-          
+        matchPattern.lastIndex = 0; // a global pattern resumes from its last match
+        if (matchPattern.test(message.message)) {
           const displayedName = getContactDisplayName(contact);
           results.push({
             contactAddress: address,
@@ -8865,7 +15019,8 @@ class SearchMessagesModal {
             messageId: message.txid,
             message: message, // Pass the entire message object
             timestamp: message.timestamp,
-            preview: truncateMessage(highlightedText, adjustedMaxLength),
+            // Excerpt and match positions on the raw text; rendered as nodes in displaySearchResults
+            preview: this.buildSearchPreview(message.message, matchPattern),
             my: message.my, // Include the my property
           });
         }
@@ -8873,6 +15028,81 @@ class SearchMessagesModal {
     });
 
     return results.sort((a, b) => b.timestamp - a.timestamp);
+  }
+
+  /**
+   * Selects the excerpt shown for a search result and locates the matches inside it.
+   * Everything is computed on the raw message text and character positions, so encoding
+   * never changes what is matched. renderSearchPreview() turns the result into DOM nodes.
+   * @param {string} text raw message text
+   * @param {RegExp} matchPattern global, case-insensitive pattern built from the escaped query
+   * @param {number} maxLength approximate number of message characters to show
+   * @returns {{text: string, highlights: Array<{start: number, end: number}>, leadingEllipsis: boolean, trailingEllipsis: boolean}}
+   */
+  buildSearchPreview(text, matchPattern, maxLength = 100) {
+    const matches = [];
+    matchPattern.lastIndex = 0; // matchAll() starts from the pattern's current position
+    for (const match of text.matchAll(matchPattern)) {
+      if (!match[0]) break; // an empty pattern would never advance
+      matches.push({ start: match.index, end: match.index + match[0].length });
+    }
+
+    let start = 0;
+    let end = text.length;
+    if (text.length > maxLength) {
+      const first = matches[0];
+      if (first) {
+        // Show some context before the first match and fill the rest of the window after it
+        start = Math.max(0, first.start - Math.floor(maxLength * 0.3));
+        end = Math.min(text.length, start + maxLength);
+        // When the window reaches the end of the message, pull it back to show a full window
+        if (end === text.length) start = Math.max(0, text.length - maxLength);
+        // Never cut a match short at the end of the excerpt
+        const straddling = matches.find((m) => m.start < end && m.end > end);
+        if (straddling) end = straddling.end;
+      } else {
+        end = maxLength;
+      }
+      // Keep surrogate pairs (e.g. emoji) intact at the excerpt edges
+      const isLowSurrogate = (index) => (text.charCodeAt(index) & 0xfc00) === 0xdc00;
+      if (start > 0 && isLowSurrogate(start)) start -= 1;
+      if (end < text.length && isLowSurrogate(end)) end += 1;
+    }
+
+    return {
+      text: text.slice(start, end),
+      highlights: matches
+        .filter((m) => m.start >= start && m.start < end)
+        .map((m) => ({ start: m.start - start, end: Math.min(m.end, end) - start })),
+      leadingEllipsis: start > 0,
+      trailingEllipsis: end < text.length,
+    };
+  }
+
+  /**
+   * Renders a preview from buildSearchPreview() as text nodes and <mark> elements.
+   * Previewed and query text are assigned through textContent and never parsed as HTML.
+   * Also used by contact search for its "field: value" labels.
+   * @param {ReturnType<SearchMessagesModal['buildSearchPreview']>} preview
+   * @param {string} prefix text placed before the preview, e.g. a direction marker or field label
+   * @returns {DocumentFragment}
+   */
+  renderSearchPreview(preview, prefix = '') {
+    const fragment = document.createDocumentFragment();
+    let pendingText = `${prefix}${preview.leadingEllipsis ? '...' : ''}`;
+    let cursor = 0;
+    preview.highlights.forEach(({ start, end }) => {
+      pendingText += preview.text.slice(cursor, start);
+      if (pendingText) fragment.appendChild(document.createTextNode(pendingText));
+      pendingText = '';
+      const mark = document.createElement('mark');
+      mark.textContent = preview.text.slice(start, end);
+      fragment.appendChild(mark);
+      cursor = end;
+    });
+    pendingText += preview.text.slice(cursor) + (preview.trailingEllipsis ? '...' : '');
+    if (pendingText) fragment.appendChild(document.createTextNode(pendingText));
+    return fragment;
   }
 
   // this is also used by contact search 
@@ -8922,24 +15152,24 @@ class SearchMessagesModal {
 
       const avatarHtml = await getContactAvatarHtml(result.contactAddress);
 
-      // Format message preview with "<" for user messages and ">" for contact messages
-      // make this textContent?
-      const messagePreview = result.my ? `< ${result.preview}` : `> ${result.preview}`;
-
       resultElement.innerHTML = `
               <div class="chat-avatar">
                   ${avatarHtml}
               </div>
               <div class="chat-content">
                   <div class="chat-header">
-                      <div class="chat-name">${result.username}</div>
+                      <div class="chat-name"></div>
                       <div class="chat-time">${formatTime(result.timestamp)}</div>
                   </div>
-                  <div class="chat-message">
-                      ${messagePreview}
-                  </div>
+                  <div class="chat-message"></div>
               </div>
           `;
+
+      // Contact names are local or sender-supplied text, so they are never parsed as HTML
+      resultElement.querySelector('.chat-name').textContent = result.username;
+      // Message preview: "<" for user messages, ">" for contact messages. Rendered as text
+      // nodes and <mark> elements so message and query text are never parsed as HTML
+      resultElement.querySelector('.chat-message').appendChild(this.renderSearchPreview(result.preview, result.my ? '< ' : '> '));
 
       resultElement.addEventListener('click', async (event) => {
         event.stopImmediatePropagation(); // Stop all other listeners and bubbling immediately
@@ -8992,7 +15222,197 @@ class SearchMessagesModal {
   }
 }
 
-const searchMessagesModal = new SearchMessagesModal();
+const messageSearchModal = new SearchMessagesModal();
+
+class ContactSearch {
+  /**
+   * Lists the profile fields a contact can be found by, each once per distinct value.
+   * Only these fields are searched: the rest of senderInfo (avatarId, avatarKey, timezone)
+   * holds identifiers and keys a user never searches for and should not see in a result label.
+   * @param {object} contact
+   * @returns {Array<{field: string, value: string}>} display label and raw value per field
+   */
+  static getSearchableFields(contact) {
+    const fields = [];
+    const seenValues = new Set();
+
+    for (const field of ['username', 'name', 'email', 'phone', 'linkedin', 'x']) {
+      for (const rawValue of [contact[field], contact.senderInfo?.[field]]) {
+        const value = String(rawValue ?? '').trim();
+        const lowerValue = value.toLowerCase();
+        if (!value || seenValues.has(lowerValue)) continue;
+        seenValues.add(lowerValue);
+        fields.push({ field, value });
+      }
+    }
+
+    return fields;
+  }
+
+  static getMatchType(contact, query, usernameQuery = query) {
+    let rank = -1;
+    for (const { field, value } of ContactSearch.getSearchableFields(contact)) {
+      const search = field === 'username' ? usernameQuery : query;
+      const candidate = value.toLowerCase();
+      if (candidate === search) return 2;
+      if (candidate.startsWith(search)) rank = 1;
+      else if (rank < 0 && candidate.includes(search)) rank = 0;
+    }
+    return rank;
+  }
+}
+
+class ContactAutocomplete {
+  constructor({ input, list, getContacts, onSelect }) {
+    this.input = input;
+    this.list = list;
+    this.getContacts = getContacts;
+    this.onSelect = onSelect;
+    this.contacts = [];
+    this.activeIndex = -1;
+
+    input.setAttribute('role', 'combobox');
+    input.setAttribute('aria-autocomplete', 'list');
+    input.setAttribute('aria-controls', list.id);
+    list.setAttribute('role', 'listbox');
+    this.close();
+
+    input.addEventListener('focus', () => this.render());
+    input.addEventListener('click', () => {
+      if (list.hidden) this.render();
+    });
+    input.addEventListener('input', (event) => {
+      if (event.isTrusted && input === input.ownerDocument.activeElement) this.render();
+      else this.close();
+    });
+    input.addEventListener('blur', () => this.close());
+    input.addEventListener('keydown', (event) => this.handleKeyDown(event));
+
+    // Keep focus on the input during a pick. A touch scroll does not fire mousedown.
+    list.addEventListener('mousedown', (event) => {
+      if (event.target.closest('.contact-autocomplete-option')) event.preventDefault();
+    });
+    list.addEventListener('click', (event) => {
+      const option = event.target.closest('.contact-autocomplete-option');
+      if (option) this.select(Number(option.dataset.index));
+    });
+  }
+
+  getDisplayName(contact) {
+    return contact.displayName || contact.name || contact.username;
+  }
+
+  getMatches() {
+    const query = this.input.value.trim().toLowerCase();
+    const contacts = this.getContacts();
+    const compareUsernames = (a, b) => (a.username || '').localeCompare(b.username || '');
+
+    if (!query) {
+      return [...contacts].sort((a, b) =>
+        this.getDisplayName(a).localeCompare(this.getDisplayName(b))
+        || compareUsernames(a, b));
+    }
+
+    const usernameQuery = query.length > 1 ? query.replace(/^@/, '') : query;
+    return contacts
+      .map((contact) => ({ contact, rank: ContactSearch.getMatchType(contact, query, usernameQuery) }))
+      .filter(({ rank }) => rank >= 0)
+      .sort((a, b) => b.rank - a.rank || compareUsernames(a.contact, b.contact))
+      .map(({ contact }) => contact);
+  }
+
+  render() {
+    this.contacts = this.getMatches();
+    this.activeIndex = -1;
+    this.input.removeAttribute('aria-activedescendant');
+    const options = this.list.ownerDocument.createDocumentFragment();
+    this.contacts.forEach((contact, index) => options.append(this.createOption(contact, index)));
+    this.list.replaceChildren(options);
+    this.list.scrollTop = 0;
+    this.list.hidden = this.contacts.length === 0;
+    this.input.setAttribute('aria-expanded', String(!this.list.hidden));
+  }
+
+  createOption(contact, index) {
+    const document = this.list.ownerDocument;
+    const option = document.createElement('div');
+    option.id = `${this.list.id}-option-${index}`;
+    option.className = 'contact-autocomplete-option';
+    option.dataset.index = index;
+    option.setAttribute('role', 'option');
+    option.setAttribute('aria-selected', 'false');
+    const avatar = document.createElement('span');
+    avatar.className = 'contact-autocomplete-avatar';
+    avatar.setAttribute('aria-hidden', 'true');
+    const text = document.createElement('span');
+    text.className = 'contact-autocomplete-text';
+    const name = this.getDisplayName(contact);
+    const label = document.createElement('span');
+    label.textContent = name;
+    text.append(label);
+
+    if (contact.username && contact.username !== name) {
+      const username = document.createElement('span');
+      username.className = 'contact-autocomplete-username';
+      username.textContent = `@${contact.username}`;
+      text.append(username);
+    }
+    option.append(avatar, text);
+    this.renderAvatar(avatar, contact);
+    return option;
+  }
+
+  async renderAvatar(avatar, contact) {
+    const html = await getContactAvatarHtml(contact, 32);
+    if (avatar.isConnected) avatar.innerHTML = html;
+  }
+
+  handleKeyDown(event) {
+    if (event.isComposing) return;
+
+    if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+      if (this.list.hidden) this.render();
+      if (this.list.hidden) return;
+      event.preventDefault();
+      const lastIndex = this.contacts.length - 1;
+      const next = event.key === 'ArrowDown'
+        ? Math.min(this.activeIndex + 1, lastIndex)
+        : this.activeIndex < 0 ? lastIndex : Math.max(this.activeIndex - 1, 0);
+      this.setActiveOption(next);
+    } else if (!this.list.hidden && event.key === 'Enter' && this.activeIndex >= 0) {
+      event.preventDefault();
+      this.select(this.activeIndex);
+    } else if (!this.list.hidden && event.key === 'Escape') {
+      event.preventDefault();
+      event.stopPropagation();
+      this.close();
+    }
+  }
+
+  setActiveOption(index) {
+    this.list.children[this.activeIndex]?.setAttribute('aria-selected', 'false');
+    this.activeIndex = index;
+    const option = this.list.children[index];
+    option.setAttribute('aria-selected', 'true');
+    this.input.setAttribute('aria-activedescendant', option.id);
+    option.scrollIntoView({ block: 'nearest' });
+  }
+
+  select(index) {
+    const contact = this.contacts[index];
+    this.close();
+    if (contact) this.onSelect(contact);
+  }
+
+  close() {
+    this.list.hidden = true;
+    this.list.replaceChildren();
+    this.contacts = [];
+    this.activeIndex = -1;
+    this.input.setAttribute('aria-expanded', 'false');
+    this.input.removeAttribute('aria-activedescendant');
+  }
+}
 
 class SearchContactsModal {
   constructor() {}
@@ -9018,7 +15438,7 @@ class SearchContactsModal {
 
           const results = this.searchContacts(searchText);
           if (results.length === 0) {
-            searchMessagesModal.displayEmptyState('contactSearchResults', 'No contacts found');
+            messageSearchModal.displayEmptyState('contactSearchResults', 'No contacts found');
           } else {
             this.displayContactResults(results, searchText);
           }
@@ -9032,7 +15452,7 @@ class SearchContactsModal {
   }
 
   open() {
-    this.modal.classList.add('active');
+    openModal(this.modal);
     // Delay focus to ensure transition completes (modal transition is 300ms)
     setTimeout(() => {
       this.searchInput.focus();
@@ -9049,62 +15469,6 @@ class SearchContactsModal {
     return this.modal.classList.contains('active');
   }
 
-  getSearchableFields(contact) {
-    const fields = [];
-    const seenValues = new Set();
-
-    const fieldDefinitions = [
-      { key: 'username', label: 'username' },
-      { key: 'name', label: 'name' },
-      { key: 'email', label: 'email' },
-      { key: 'phone', label: 'phone' },
-      { key: 'linkedin', label: 'linkedin' },
-      { key: 'x', label: 'x' },
-    ];
-    const knownSenderInfoKeys = new Set(fieldDefinitions.map(({ key }) => key));
-    const senderInfo = contact.senderInfo || null;
-
-    const normalize = (value) =>
-      value === undefined || value === null ? '' : String(value).trim();
-
-    const addField = (fieldLabel, value) => {
-      const stringValue = normalize(value);
-      if (!stringValue) {
-        return;
-      }
-
-      const lowerValue = stringValue.toLowerCase();
-      if (seenValues.has(lowerValue)) {
-        return;
-      }
-
-      seenValues.add(lowerValue);
-      fields.push({ field: fieldLabel, value: stringValue });
-    };
-
-    fieldDefinitions.forEach(({ key, label }) => {
-      const primaryValue = normalize(contact[key]);
-      const senderValue = senderInfo ? normalize(senderInfo[key]) : '';
-
-      addField(label, primaryValue);
-
-      if (senderValue && senderValue !== primaryValue) {
-        addField(`${label}`, senderValue);
-      }
-    });
-
-    if (senderInfo) {
-      Object.entries(senderInfo).forEach(([key, value]) => {
-        if (knownSenderInfoKeys.has(key)) {
-          return;
-        }
-        addField(`${key}`, value);
-      });
-    }
-
-    return fields;
-  }
-
   searchContacts(searchText) {
     if (!searchText || !myData?.contacts) return [];
 
@@ -9117,24 +15481,10 @@ class SearchContactsModal {
       if (isFaucetAddress(address)) {
         return;
       }
-      
-      // Fields to search through
-      const searchableFields = this.getSearchableFields(contact);
-      const searchFields = searchableFields.map((f) => f.value);
 
-      // Check if any field matches
-      const matches = searchFields.some((field) => field.toLowerCase().includes(searchLower));
-
-      if (matches) {
-        // Determine match type for sorting
-        const exactMatch = searchFields.some((field) => field.toLowerCase() === searchLower);
-        const startsWithMatch = searchFields.some((field) => field.toLowerCase().startsWith(searchLower));
-
-        results.push({
-          ...contact,
-          address,
-          matchType: exactMatch ? 2 : startsWithMatch ? 1 : 0,
-        });
+      const matchType = ContactSearch.getMatchType(contact, searchLower);
+      if (matchType >= 0) {
+        results.push({ ...contact, address, matchType });
       }
     });
 
@@ -9147,13 +15497,21 @@ class SearchContactsModal {
     });
   }
 
+  /**
+   * Picks the field shown under a contact result and locates the query inside its value.
+   * Exact matches win over prefix matches, which win over substring matches. Match
+   * positions are found on the raw value; displayContactResults() renders them as nodes.
+   * @param {object} contact
+   * @param {string} searchText
+   * @returns {{field: string, preview: ReturnType<SearchMessagesModal['buildSearchPreview']>} | null}
+   */
   createMatchPreview(contact, searchText) {
     if (!searchText) {
-      return '';
+      return null;
     }
 
     const searchLower = searchText.toLowerCase();
-    const searchableFields = this.getSearchableFields(contact);
+    const searchableFields = ContactSearch.getSearchableFields(contact);
 
     const matchBuckets = {
       exact: [],
@@ -9176,16 +15534,16 @@ class SearchContactsModal {
       matchBuckets.exact[0] || matchBuckets.startsWith[0] || matchBuckets.includes[0];
 
     if (!prioritizedField) {
-      return '';
+      return null;
     }
 
-    const highlightRegex = new RegExp(escapeRegExp(searchText), 'gi');
-    const highlightedValue = prioritizedField.value.replace(
-      highlightRegex,
-      (match) => `<mark>${match}</mark>`
-    );
-
-    return `${prioritizedField.field}: ${highlightedValue}`;
+    // Case-insensitive literal matching; regex metacharacters in the query are escaped.
+    // Contact values are short, so the whole value is shown without an excerpt window
+    const matchPattern = new RegExp(escapeRegExp(searchText), 'gi');
+    return {
+      field: prioritizedField.field,
+      preview: messageSearchModal.buildSearchPreview(prioritizedField.value, matchPattern, Infinity),
+    };
   }
 
   displayContactResults(results, searchText) {
@@ -9199,9 +15557,8 @@ class SearchContactsModal {
 
       const avatarHtml = await getContactAvatarHtml(contact);
 
-      // Create match preview with label and highlighted matched value prioritizing exact and starts-with matches
+      // Match preview: "field: value" with the query highlighted, prioritizing exact and starts-with matches
       const matchPreview = this.createMatchPreview(contact, searchText);
-      const displayedName = getContactDisplayName(contact);
 
       contactElement.innerHTML = `
               <div class="chat-avatar">
@@ -9209,13 +15566,22 @@ class SearchContactsModal {
               </div>
               <div class="chat-content">
                   <div class="chat-header">
-                      <span class="chat-name">${displayedName}</span>
+                      <span class="chat-name"></span>
                   </div>
                   <div class="chat-message">
-                      <span class="match-label">${matchPreview}</span>
+                      <span class="match-label"></span>
                   </div>
               </div>
           `;
+
+      // Contact values are local or sender-supplied text. They are assigned as text nodes and
+      // <mark> elements so neither contact nor query text is ever parsed as HTML
+      contactElement.querySelector('.chat-name').textContent = getContactDisplayName(contact);
+      if (matchPreview) {
+        contactElement
+          .querySelector('.match-label')
+          .appendChild(messageSearchModal.renderSearchPreview(matchPreview.preview, `${matchPreview.field}: `));
+      }
 
       // Add click handler to show contact info
       contactElement.addEventListener('click', () => {
@@ -9233,7 +15599,7 @@ class SearchContactsModal {
   }
 }
 
-const searchContactsModal = new SearchContactsModal();
+const contactSearchModal = new SearchContactsModal();
 
 // Create a display info object from a contact object
 function createDisplayInfo(contact) {
@@ -9420,7 +15786,7 @@ class AvatarEditModal {
     await this.refreshPreview();
     // populate three-option avatar selector (contact, mine, identicon)
     try { await this.populateOptions(); } catch (e) { console.warn('populateOptions failed', e); }
-    this.modal.classList.add('active');
+    openModal(this.modal);
     enterFullscreen();
   }
 
@@ -9468,6 +15834,7 @@ class AvatarEditModal {
    * and wire handlers to persist `useAvatar` for the contact.
    */
   async populateOptions() {
+    const owner = MediaCacheOwnership.getOwnerKey();
     const address = this.currentAddress;
     const contactThumb = this.avatarThumbContact;
     const uploadedThumb = this.avatarThumbUploaded;
@@ -9511,8 +15878,8 @@ class AvatarEditModal {
       return;
     } else {
       const contactObj = myData?.contacts?.[address] || null;
-      try { contactBlob = contactObj?.avatarId ? await contactAvatarCache.get(contactObj.avatarId) : null; } catch (e) { contactBlob = null; }
-      try { userBlob = contactObj?.mineAvatarId ? await contactAvatarCache.get(contactObj.mineAvatarId) : null; } catch (e) { userBlob = null; }
+      try { contactBlob = contactObj?.avatarId ? await contactAvatarCache.get(contactObj.avatarId, owner) : null; } catch (e) { contactBlob = null; }
+      try { userBlob = contactObj?.mineAvatarId ? await contactAvatarCache.get(contactObj.mineAvatarId, owner) : null; } catch (e) { userBlob = null; }
     }
 
     const contactUrl = contactBlob ? URL.createObjectURL(contactBlob) : null;
@@ -9693,15 +16060,6 @@ class AvatarEditModal {
    */
   async refreshPreview() {
     this.clearPreviewUrl();
-    let displayInfo;
-    if (this.isOwnAvatar) {
-      // For own avatar, use account data
-      displayInfo = { address: this.currentAddress, hasAvatar: myData?.account?.hasAvatar || false };
-    } else {
-      const contact = myData?.contacts?.[this.currentAddress];
-      displayInfo = contact ? createDisplayInfo(contact) : { address: this.currentAddress, hasAvatar: false };
-    }
-
     if (this.pendingBlob) {
       await this.setImageFromBlob(this.pendingBlob, true);
       return;
@@ -9712,7 +16070,8 @@ class AvatarEditModal {
     if (!this.isOwnAvatar) {
       try {
         const contactObj = myData?.contacts?.[this.currentAddress] || null;
-        const mineBlob = contactObj?.mineAvatarId ? await contactAvatarCache.get(contactObj.mineAvatarId) : null;
+        const avatarId = contactObj?.mineAvatarId;
+        const mineBlob = avatarId ? await contactAvatarCache.get(avatarId) : null;
         if (mineBlob) {
           await this.setImageFromBlob(mineBlob, false);
           return;
@@ -9746,7 +16105,7 @@ class AvatarEditModal {
     }
 
     // Fallback to identicon if no avatar blob for own avatar
-    const avatarHtml = await getContactAvatarHtml(displayInfo, 218);
+    const avatarHtml = generateIdenticon(this.currentAddress, 218);
     this.previewContainer.innerHTML = avatarHtml;
     this.enableTransform = false;
     this.updateZoomUI();
@@ -9869,6 +16228,7 @@ class AvatarEditModal {
       return;
     }
 
+    const owner = MediaCacheOwnership.getOwnerKey();
     try {
       if (this.isOwnAvatar) {
         // Update own avatar state
@@ -9916,7 +16276,7 @@ class AvatarEditModal {
         // Check whether a contact-sent avatar still exists
         let contactExists = false;
         try {
-          const contactBlob = contact.avatarId ? await contactAvatarCache.get(contact.avatarId) : null;
+          const contactBlob = contact.avatarId ? await contactAvatarCache.get(contact.avatarId, owner) : null;
           contactExists = !!contactBlob;
         } catch (e) {
           contactExists = false;
@@ -10162,6 +16522,7 @@ class AvatarEditModal {
     try {
       // Need an image source to save
       if (this.pendingBlob || this.activeImageBlob) {
+        const owner = MediaCacheOwnership.getOwnerKey();
         const sourceBlob = this.pendingBlob || this.activeImageBlob;
         const thumbnail = await this.exportCroppedThumbnail(sourceBlob);
 
@@ -10203,7 +16564,7 @@ class AvatarEditModal {
           const avatarId = result.id;
 
           // Save thumbnail to cache now that server operations succeeded (keyed by avatarId)
-          await contactAvatarCache.save(avatarId, thumbnail);
+          await contactAvatarCache.save(avatarId, thumbnail, owner);
 
           // Save id, key and secret in account
           myData.account.avatarId = avatarId;
@@ -10225,7 +16586,7 @@ class AvatarEditModal {
           contact.hasAvatar = true;
           // Save user's uploaded avatar under a generated id and reference it on the contact
           const mineId = bin2hex(generateRandomBytes(16));
-          await contactAvatarCache.save(mineId, thumbnail);
+          await contactAvatarCache.save(mineId, thumbnail, owner);
           contact.mineAvatarId = mineId;
           // Prefer the user's uploaded avatar for this contact
           myData.contacts ??= {};
@@ -10445,9 +16806,31 @@ function hideToast(toastId) {
   }, 300); // Match transition duration
 }
 
+/**
+ * Resolves once the browser has painted pending UI changes, so the caller can start
+ * work that may block the main thread without hiding what was just shown.
+ * @param {number} delayMs - Time to wait before the frame, e.g. for showToast() to reveal its toast
+ * @returns {Promise<void>}
+ */
+function waitForPaint(delayMs = 0) {
+  return new Promise((resolve) => {
+    setTimeout(() => {
+      // requestAnimationFrame is paused in background tabs, so never wait on it alone
+      const fallback = setTimeout(resolve, 100);
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          clearTimeout(fallback);
+          resolve();
+        });
+      });
+    }, delayMs);
+  });
+}
+
 
 // Handle online/offline events
 async function handleConnectivityChange() {
+  chatModal.resetPendingMessageConfirmations();
   if (isOnline) {
     await getNetworkParams();
     if (!isOnline) return;
@@ -10557,10 +16940,10 @@ function markConnectivityDependentElements() {
     // Call schedule modals
     '#callScheduleNowBtn',
     '#openCallScheduleDateBtn',
-    '#confirmCallSchedule',
+    '#confirmDateTimePicker',
 
-    // Message context menu (disable all except 'Delete for me' and 'Copy' and 'Join')
-    '.message-context-menu .context-menu-option:not([data-action="delete"]):not([data-action="copy"]):not([data-action="join"]):not([data-action="location"])',
+    // Delete for all stays clickable so its handler can explain offline requirements.
+    '.message-context-menu .context-menu-option:not([data-action="delete"]):not([data-action="delete-for-all"]):not([data-action="copy"]):not([data-action="join"]):not([data-action="location"]):not([data-action="wallet"])',
 
     // bridgeModal
     '#bridgeForm button[type="submit"]',
@@ -10638,6 +17021,10 @@ function updateUIForConnectivity() {
     element.setAttribute('aria-disabled', !isOnline);
   });
 
+  if (typeof friendModal !== 'undefined') {
+    friendModal.handleConnectivityChange();
+  }
+
   // When coming back online, re-validate buttons that may be disabled for reasons other than connectivity
   if (isOnline) {
     revalidateButtonStates();
@@ -10650,10 +17037,14 @@ function updateUIForConnectivity() {
  * buttons aren't incorrectly enabled if they should remain disabled for other reasons.
  */
 function revalidateButtonStates() {
+  if (typeof createAccountModal !== 'undefined' && createAccountModal.controls) {
+    createAccountModal.refreshControlStates();
+  }
+
   // Check if validator modal is open and refresh it to re-validate all button states
-  if (typeof validatorStakingModal !== 'undefined' && validatorStakingModal.isActive()) {
-    validatorStakingModal.close();
-    validatorStakingModal.open();
+  if (typeof validatorModal !== 'undefined' && validatorModal.isActive()) {
+    validatorModal.close();
+    validatorModal.open();
   }
 
   // Check if friend modal is open and re-validate submit button
@@ -10931,14 +17322,16 @@ function getTransactionTimestamp() {
 // Validator Modals
 
 class RemoveAccountModal {
-  constructor() {}
+  constructor() {
+    this.isRemoving = false;
+  }
 
   load() {
     // called when the DOM is loaded; can setup event handlers here
     this.modal = document.getElementById('removeAccountModal');
     document.getElementById('closeRemoveAccountModal').addEventListener('click', () => this.close());
     document.getElementById('confirmRemoveAccount').addEventListener('click', () => this.removeAccount());
-    document.getElementById('openBackupFromRemove').addEventListener('click', () => backupAccountModal.open());
+    document.getElementById('openBackupFromRemove').addEventListener('click', () => backupModal.open());
   }
 
   signin() {
@@ -10947,7 +17340,7 @@ class RemoveAccountModal {
 
   open() {
     // called when the modal needs to be opened
-    this.modal.classList.add('active');
+    openModal(this.modal);
   }
 
   close() {
@@ -10967,30 +17360,48 @@ class RemoveAccountModal {
     }
   }
 
-  submit(username = myAccount.username) {
-    // called when the form is submitted
-    // Get network ID from network.js
+  async submit(username = myAccount.username) {
     const { netid } = network;
+    if (!await this.removeAccounts([{ username, netid }])) return;
 
-    // Get existing accounts
-    const existingAccounts = parse(localStorage.getItem('accounts') || '{"netids":{}}');
-
-    // Remove the account from the accounts object
-    const netidAccounts = existingAccounts.netids[netid];
-    if (netidAccounts && netidAccounts.usernames) {
-      delete netidAccounts.usernames[username];
-      this.removeSignInUsernameOrder(netidAccounts, username);
-      localStorage.setItem('accounts', stringify(existingAccounts));
-    }
-    // Remove the account data from localStorage
-    localStorage.removeItem(`${username}_${netid}`);
-
-    // Reload the page to redirect to welcome screen
-    clearMyData(); // need to delete this so that the reload does not save the data into localStore again
+    clearMyData(); // Prevent the reload from saving the removed account again.
     window.location.reload();
   }
 
-  removeAccount(username = null) {
+  async removeAccounts(accounts) {
+    if (this.isRemoving) return false;
+    this.isRemoving = true;
+    try {
+      const ownerKeys = accounts.map(({ username, netid }) => `${username}_${netid}`);
+      const results = await Promise.allSettled([
+        contactAvatarCache.removeOwners(ownerKeys),
+        thumbnailCache.removeOwners(ownerKeys),
+      ]);
+      const failure = results.find((result) => result.status === 'rejected');
+      if (failure) throw failure.reason;
+
+      // Read after cleanup so a concurrent account update is not overwritten.
+      const existingAccounts = parse(localStorage.getItem('accounts') || '{"netids":{}}');
+      for (const { username, netid } of accounts) {
+        const netidAccounts = existingAccounts.netids[netid];
+        if (netidAccounts?.usernames) {
+          delete netidAccounts.usernames[username];
+          this.removeSignInUsernameOrder(netidAccounts, username);
+        }
+        localStorage.removeItem(`${username}_${netid}`);
+      }
+      localStorage.setItem('accounts', stringify(existingAccounts));
+      return true;
+    } catch (error) {
+      console.error('Failed to remove account media:', error);
+      showToast('Account removal failed. Please try again to finish removing cached media.', 0, 'error');
+      return false;
+    } finally {
+      this.isRemoving = false;
+    }
+  }
+
+  async removeAccount(username = null) {
     // Username must be provided explicitly - when called from sign-in modal, myAccount is not yet available
     if (!username) {
       // if myAccount is available and removeAccountModal is open, use myAccount.username
@@ -11003,25 +17414,7 @@ class RemoveAccountModal {
     }
     const confirmed = confirm(`Are you sure you want to remove the account "${username}" from this device?`);
     if (!confirmed) return;
-    
-    const { netid } = network;
-
-    // Get existing accounts
-    const existingAccounts = parse(localStorage.getItem('accounts') || '{"netids":{}}');
-
-    // Remove the account from the accounts object
-    const netidAccounts = existingAccounts.netids[netid];
-    if (netidAccounts && netidAccounts.usernames) {
-      delete netidAccounts.usernames[username];
-      this.removeSignInUsernameOrder(netidAccounts, username);
-      localStorage.setItem('accounts', stringify(existingAccounts));
-    }
-    // Remove the account data from localStorage
-    localStorage.removeItem(`${username}_${netid}`);
-
-    // Reload the page to redirect to welcome screen
-    clearMyData(); // need to delete this so that the reload does not save the data into localStore again
-    window.location.reload();
+    await this.submit(username);
   }
 
   isActive() {
@@ -11036,7 +17429,9 @@ const removeAccountModal = new RemoveAccountModal();
 
 // Modal to remove multiple accounts at once from welcome screen
 class RemoveAccountsModal {
-  constructor() {}
+  constructor() {
+    this.isRemovingAll = false;
+  }
 
   load() {
     this.modal = document.getElementById('removeAccountsModal');
@@ -11062,7 +17457,7 @@ class RemoveAccountsModal {
   open() {
     this.renderAccounts();
     this.submitButton.disabled = true;
-    this.modal.classList.add('active');
+    openModal(this.modal);
   }
 
   close() {
@@ -11240,43 +17635,44 @@ class RemoveAccountsModal {
     }, { once: true }); // attach once, inside we attach nested listeners via event bubbling
   }
 
-  handleSubmit() {
+  async handleSubmit() {
     const checked = this.listContainer.querySelectorAll('input[type="checkbox"]:checked');
     if (checked.length === 0) return;
     const confirmText = confirm(`Remove ${checked.length} selected account(s) from this device?`);
     if (!confirmText) return;
-    const accountsObj = parse(localStorage.getItem('accounts') || '{"netids":{}}');
-    checked.forEach(cb => {
-      const username = cb.dataset.username;
-      const netid = cb.dataset.netid;
-      // remove account data file
-      localStorage.removeItem(`${username}_${netid}`);
-      // remove from registry if present
-      if (accountsObj.netids[netid] && accountsObj.netids[netid].usernames && accountsObj.netids[netid].usernames[username]) {
-        delete accountsObj.netids[netid].usernames[username];
-        removeAccountModal.removeSignInUsernameOrder(accountsObj.netids[netid], username);
-      }
-    });
-    localStorage.setItem('accounts', stringify(accountsObj));
+    const accounts = Array.from(checked, (checkbox) => ({
+      username: checkbox.dataset.username,
+      netid: checkbox.dataset.netid,
+    }));
+    if (!await removeAccountModal.removeAccounts(accounts)) return;
     showToast('Selected accounts removed', 3000, 'success');
     this.close();
   }
 
-  handleRemoveAllAccounts() {
+  async handleRemoveAllAccounts() {
+    if (this.isRemovingAll) return;
     const confirmText = prompt(`WARNING: All accounts and data will be permanently removed from this device.\n\nType "REMOVE ALL" to confirm:`);
     if (confirmText !== "REMOVE ALL") {
       showToast('Remove all cancelled', 2000, 'warning');
       return;
     }
-    
-    // Clear all localStorage data
+    this.isRemovingAll = true;
+    const results = await Promise.allSettled([
+      contactAvatarCache.deleteDatabase(),
+      thumbnailCache.deleteDatabase(),
+    ]);
+    const failures = results.filter(result => result.status === 'rejected');
+    for (const { reason } of failures) {
+      console.warn('Failed to delete a media cache database:', reason);
+    }
+
     localStorage.clear();
-    
-    // Show success message
-    showToast('All data has been removed from this device', 3000, 'success');
-    
-    // Reload the page to redirect to welcome screen
     clearMyData();
+    if (failures.length === 0) {
+      showToast('All data has been removed from this device', 3000, 'success');
+    } else {
+      alert('All accounts were removed, but some cached media could not be cleared.');
+    }
     window.location.reload();
   }
 }
@@ -11321,7 +17717,7 @@ class BackupAccountModal {
 
   open() {
     // called when the modal needs to be opened
-    this.modal.classList.add('active');
+    openModal(this.modal);
     
     // Show/hide checkbox based on login status
     if (myData) {
@@ -11353,6 +17749,7 @@ class BackupAccountModal {
     this.backupAllAccountsCheckbox.checked = false;
     // Reset storage location to default
     this.storageLocationSelect.value = 'local';
+    PopupSelect.sync(this.storageLocationSelect);
     this.handleStorageLocationChange();
   }
 
@@ -11841,16 +18238,28 @@ class BackupAccountModal {
       return;
     }
 
-    const isGoogleDrive = this.storageLocationSelect.value === 'google-drive';
+    this.setPreparingState(true);
+    // Allow the browser to paint the loading state before backup preparation begins.
+    await new Promise(resolve => setTimeout(resolve, 0));
+    try {
+      const isGoogleDrive = this.storageLocationSelect.value === 'google-drive';
 
-    // Determine which backup method to use
-    if (myData && !this.backupAllAccountsCheckbox.checked) {
-      // User is signed in and wants to backup only current account
-      await this.handleSubmitOne(isGoogleDrive);
-    } else {
-      // User wants to backup all accounts (either not signed in or checkbox checked)
-      await this.handleSubmitAll(isGoogleDrive);
+      // Determine which backup method to use
+      if (myData && !this.backupAllAccountsCheckbox.checked) {
+        // User is signed in and wants to backup only current account
+        await this.handleSubmitOne(isGoogleDrive);
+      } else {
+        // User wants to backup all accounts (either not signed in or checkbox checked)
+        await this.handleSubmitAll(isGoogleDrive);
+      }
+    } finally {
+      this.setPreparingState(false);
     }
+  }
+
+  setPreparingState(isPreparing) {
+    this.submitButton.classList.toggle('is-preparing', isPreparing);
+    this.submitButton.setAttribute('aria-busy', String(isPreparing));
   }
 
   /**
@@ -12164,7 +18573,7 @@ class BackupAccountModal {
     this.updateButtonState();
   }
 }
-const backupAccountModal = new BackupAccountModal();
+const backupModal = new BackupAccountModal();
 
 class RestoreAccountModal {
   constructor() {
@@ -12256,6 +18665,7 @@ class RestoreAccountModal {
     inputElement.addEventListener('change', (e) => {
       if (e.target.value.trim()) {
         selectElement.value = '';
+        PopupSelect.sync(selectElement);
       }
     });
   }
@@ -12266,7 +18676,7 @@ class RestoreAccountModal {
 
     // clear and show modal
     this.clearForm();
-    this.modal.classList.add('active');
+    openModal(this.modal);
   }
 
   close() {
@@ -12327,10 +18737,10 @@ class RestoreAccountModal {
     try {
       // Start OAuth flow using the backup modal's auth method
       showToast('Approve Drive access in the Google window.', 3000, 'info');
-      const tokenData = await backupAccountModal.startGoogleDriveAuth();
+      const tokenData = await backupModal.startGoogleDriveAuth();
       
       // Show picker modal and load files
-      this.pickerModal.classList.add('active');
+      openModal(this.pickerModal);
       this.pickerLoading.style.display = 'block';
       this.pickerFileList.style.display = 'none';
       this.pickerEmpty.style.display = 'none';
@@ -12522,8 +18932,8 @@ class RestoreAccountModal {
       
       const data = parse(content);
       
-      // Check if backup requires password
-      const requiresBackupPassword = data.lock && !(localStorage.lock && data.lock === localStorage.lock);
+      const entries = this.getBackupAccountEntries(data, this.parseBackupAccountsRegistry(data));
+      const requiresBackupPassword = data.lock && entries.length && !this.getReusableBackupKey(data, entries);
       if (requiresBackupPassword) {
         this.backupAccountLockGroup.style.display = 'block';
       } else {
@@ -12632,27 +19042,27 @@ class RestoreAccountModal {
    */
   async mergeBackupAccountsToLocal(backupData) {
     const overwrite = this.overwriteAccountsCheckbox?.checked;
-    const locksMatch = !!(backupData.lock && localStorage.lock && backupData.lock === localStorage.lock);
+    const backupAccountsRegistry = this.parseBackupAccountsRegistry(backupData);
+    const backupAccountEntries = this.getBackupAccountEntries(backupData, backupAccountsRegistry);
+    let backupEncKey = backupData.lock ? this.getReusableBackupKey(backupData, backupAccountEntries) : null;
 
-    // If backup has a lock, require backup password
-    let backupEncKey = null;
-    if (backupData.lock && !locksMatch) {
+    if (backupData.lock && backupAccountEntries.length && !backupEncKey) {
+      this.backupAccountLockGroup.style.display = 'block';
       const password = this.backupAccountLock.value || '';
       if (!password) {
         showToast('Backup password required to unlock accounts in the backup file', 0, 'error');
         return false;
       }
       backupEncKey = await passwordToKey(password + 'liberdusData');
-      if (!backupEncKey) {
+      if (!backupAccountEntries.some(({ key }) => this.tryDecryptBackupAccount(backupData[key], backupEncKey) !== null)) {
         showToast('Invalid backup password', 0, 'error');
         return false;
       }
     }
 
+    const localEncKey = localStorage.lock && !unlockModal.isLocked() ? lockModal.encKey : null;
     // Iterate over account payloads and copy account entries.
     const restoredAccountKeys = new Set();
-    const backupAccountsRegistry = this.parseBackupAccountsRegistry(backupData);
-    const backupAccountEntries = this.getBackupAccountEntries(backupData, backupAccountsRegistry);
     for (const { key, username, netid, registryAccount } of backupAccountEntries) {
 
       const localKey = `${username}_${netid}`;
@@ -12663,51 +19073,33 @@ class RestoreAccountModal {
         continue;
       }
 
-      let value = backupData[key];
-      let decryptedAccount = null;
+      const value = backupData[key];
+      const decryptedAccount = backupData.lock ? this.tryDecryptBackupAccount(value, backupEncKey) : value;
+      if (decryptedAccount === null) {
+        showToast(`Failed to decrypt account ${username} on ${netid}. Skipping.`, 0, 'error');
+        continue;
+      }
 
-      if (locksMatch) {
-        localStorage.setItem(localKey, value);
-        restoredAccountKeys.add(localKey);
-        decryptedAccount = this.tryDecryptWithLocalLock(value);
-      } else {
-        // Need to decrypt with backupEncKey if available
-        let decrypted = value;
-        if (backupData.lock) {
-          try {
-            const maybe = decryptData(value, backupEncKey, true);
-            if (maybe != null) {
-              decrypted = maybe;
-            } else {
-              showToast(`Failed to decrypt account ${username} on ${netid}. Skipping.`, 0, 'error');
-              continue;
-            }
-          } catch (e) {
-            showToast(`Failed to decrypt account ${username} on ${netid}. Skipping.`, 0, 'error');
-            continue;
-          }
+      let finalValue = decryptedAccount;
+      if (localStorage.lock) {
+        if (!localEncKey) {
+          showToast('Local lock is set but unlock state is missing. Please unlock before importing.', 0, 'error');
+          return false;
         }
-
-        decryptedAccount = decrypted;
-
-        // Now re-encrypt with local lock if localStorage.lock exists
-        let finalValue = decrypted;
-        if (localStorage.lock) {
-          if (!lockModal?.encKey) {
-            showToast('Local lock is set but unlock state is missing. Please unlock before importing.', 0, 'error');
-            return false;
-          }
+        if (backupEncKey === localEncKey) {
+          finalValue = value;
+        } else {
           try {
-            finalValue = encryptData(decrypted, lockModal.encKey, true);
+            finalValue = encryptData(decryptedAccount, localEncKey, true);
           } catch (e) {
             showToast(`Failed to re-encrypt account ${username} on ${netid}. Skipping.`, 0, 'error');
             continue;
           }
         }
-
-        localStorage.setItem(localKey, finalValue);
-        restoredAccountKeys.add(localKey);
       }
+
+      localStorage.setItem(localKey, finalValue);
+      restoredAccountKeys.add(localKey);
 
       if (decryptedAccount) {
         this.updateAccountRegistryAddress(netid, username, decryptedAccount);
@@ -12716,10 +19108,12 @@ class RestoreAccountModal {
       }
     }
 
+    const acceptedOwnerKeys = [...restoredAccountKeys];
+
     // Import contact avatars if present in backup
     if (backupData._avatars && typeof backupData._avatars === 'object') {
       try {
-        await contactAvatarCache.importAll(backupData._avatars, overwrite);
+        await contactAvatarCache.importAll(backupData._avatars, overwrite, acceptedOwnerKeys);
       } catch (e) {
         console.warn('Failed to import avatars from backup:', e);
       }
@@ -12728,7 +19122,7 @@ class RestoreAccountModal {
     // Import message thumbnails if present in backup
     if (backupData._thumbnails && typeof backupData._thumbnails === 'object') {
       try {
-        await thumbnailCache.importAll(backupData._thumbnails, overwrite);
+        await thumbnailCache.importAll(backupData._thumbnails, overwrite, acceptedOwnerKeys);
       } catch (e) {
         console.warn('Failed to import thumbnails from backup:', e);
       }
@@ -12861,6 +19255,7 @@ class RestoreAccountModal {
     this.sourceLocationSelect.value = 'local';
     this.clearSelectedGoogleDriveFile();
     this.handleSourceLocationChange();
+    PopupSelect.syncAll(this.importForm);
   }
 
   resetBackupLockPrompt() {
@@ -12882,6 +19277,7 @@ class RestoreAccountModal {
 
     cleanup(this.oldStringSelect);
     cleanup(this.newStringSelect);
+    PopupSelect.syncAll(this.importForm);
   }
 
   parseBackupAccountsRegistry(backupData) {
@@ -12975,18 +19371,24 @@ class RestoreAccountModal {
     localStorage.setItem('accounts', stringify(accountsObj));
   }
 
-  tryDecryptWithLocalLock(value) {
-    if (!localStorage.lock) return value;
-    if (!lockModal?.encKey) return null;
+  getReusableBackupKey(backupData, entries) {
+    if (!localStorage.lock || unlockModal.isLocked() || !lockModal.encKey) return null;
 
+    // Verifier salts differ between devices. Authenticate backup data with the unlocked account key.
+    const key = lockModal.encKey;
+    return entries.some(entry => this.tryDecryptBackupAccount(backupData[entry.key], key) !== null) ? key : null;
+  }
+
+  tryDecryptBackupAccount(value, key) {
+    if (!key) return null;
     try {
-      return decryptData(value, lockModal.encKey, true);
+      return decryptData(value, key, true);
     } catch (e) {
       return null;
     }
   }
 }
-const restoreAccountModal = new RestoreAccountModal();
+const importModal = new RestoreAccountModal();
 
 class TollModal {
   constructor() {
@@ -13019,7 +19421,7 @@ class TollModal {
   }
 
   open() {
-    this.modal.classList.add('active');
+    openModal(this.modal);
     // set currentTollValue to the toll value
     const toll = myData.settings.toll || 0n;
     const tollUnit = myData.settings.tollUnit || 'USD';
@@ -13361,7 +19763,7 @@ class InviteModal {
       }
     }
     this.validateInputs(); // Set initial button state
-    this.modal.classList.add('active');
+    openModal(this.modal);
   }
 
   close() {
@@ -13443,7 +19845,7 @@ class SourceModal {
   }
 
   open() {
-    this.modal.classList.add('active');
+    openModal(this.modal);
   }
 
   close() {
@@ -13473,7 +19875,7 @@ class AboutModal {
     });
 
     // Set version and network information once during initialization
-    this.versionDisplay.textContent = myVersion + ' ' + version;
+    this.versionDisplay.textContent = getWebVersionDisplay();
     this.networkName.textContent = network.name;
     this.netId.textContent = network.netid;
 
@@ -13485,7 +19887,7 @@ class AboutModal {
 
   open() {
     // Show the modal
-    this.modal.classList.add('active');
+    openModal(this.modal);
   }
 
   close() {
@@ -13517,7 +19919,7 @@ class UpdateWarningModal {
 
     // Set up event listeners
     this.closeButton.addEventListener('click', () => this.close());
-    this.backupFirstBtn.addEventListener('click', () => backupAccountModal.open());
+    this.backupFirstBtn.addEventListener('click', () => backupModal.open());
     this.proceedToStoreBtn.addEventListener('click', withButtonCooldown(
       this.proceedToStoreBtn,
       BUTTON_COOLDOWN_MS,
@@ -13546,7 +19948,7 @@ class UpdateWarningModal {
     } else {
       this.storeUrl = 'https://play.google.com/store/apps/details?id=com.jairaj.liberdus';
     }
-    this.modal.classList.add('active');
+    openModal(this.modal);
   }
 
   close() {
@@ -13588,7 +19990,7 @@ class HelpModal {
   }
 
   open() {
-    this.modal.classList.add('active');
+    openModal(this.modal);
   }
 
   close() {
@@ -13610,7 +20012,7 @@ class FarmModal {
   }
 
   open() {
-    this.modal.classList.add('active');
+    openModal(this.modal);
     enterFullscreen();
   }
 
@@ -13661,7 +20063,7 @@ class LogsModal {
   }
 
   open() {
-    this.modal.classList.add('active');
+    openModal(this.modal);
     // Fill the textarea with data and position the scroll to the bottom
     this.logsTextarea.value = this.data;
     this.logsTextarea.scrollTop = this.logsTextarea.scrollHeight;
@@ -13798,7 +20200,7 @@ class MyProfileModal {
 
   open() {
     // called when the modal needs to be opened
-    this.modal.classList.add('active');
+    openModal(this.modal);
     if (myData && myData.account) {
       this.name.value = myData.account.name || '';
       // Email and Phone fields hidden - may want to restore later
@@ -13838,7 +20240,7 @@ class MyProfileModal {
     }
   }
 }
-const myProfileModal = new MyProfileModal();
+const accountModal = new MyProfileModal();
 
 class ValidatorStakingModal {
   constructor() {
@@ -13875,7 +20277,7 @@ class ValidatorStakingModal {
     this.learnMoreButton = document.getElementById('validator-learn-more');
     this.rewardsEstimateElement = document.getElementById('validator-rewards-estimate');
 
-    // Skeleton bar elements
+    // Pending transaction status elements
     this.pendingSkeletonBar = document.getElementById('pending-nominee-skeleton-1');
     this.pendingTxTextInBar = document.getElementById('pending-tx-text-in-bar');
 
@@ -13891,7 +20293,7 @@ class ValidatorStakingModal {
     this.unstakeButton.addEventListener('click', withButtonCooldown(
       [this.unstakeButton, this.backButton, this.stakeButton],
       BUTTON_COOLDOWN_MS,
-      null,
+      () => this.revalidateActionButtons(),
       () => this.handleUnstake()
     ));
     this.backButton.addEventListener('click', () => this.close());
@@ -13900,6 +20302,44 @@ class ValidatorStakingModal {
     if (this.learnMoreButton) {
       this.learnMoreButton.addEventListener('click', this.handleLearnMoreClick.bind(this));
     }
+  }
+
+  getCurrentPendingStakeTx() {
+    return myData?.pending?.find(
+      (tx) => tx.type === 'deposit_stake' || tx.type === 'withdraw_stake'
+    ) || null;
+  }
+
+  revalidateActionButtons() {
+    const currentPendingTx = this.getCurrentPendingStakeTx();
+    const nominee = this.nomineeValueElement.textContent.trim() || null;
+    this.backButton.disabled = false;
+    this.stakeButton.disabled = Boolean(currentPendingTx);
+    this.updateUnstakeLockUI({ nominee, currentPendingTx });
+  }
+
+  updatePendingTxUi(currentPendingTx) {
+    this.nomineeValueElement.style.display = '';
+    this.pendingTxTextInBar.textContent = '';
+    this.pendingSkeletonBar.style.display = 'none';
+    this.stakeButton.disabled = Boolean(currentPendingTx);
+
+    if (!currentPendingTx) return;
+
+    this.pendingTxTextInBar.textContent =
+      currentPendingTx.type === 'withdraw_stake'
+        ? 'Unstake submitted — pending confirmation'
+        : 'Stake submitted — pending confirmation';
+    this.pendingSkeletonBar.style.display = 'flex';
+  }
+
+  /**
+   * Refresh staking details in place when the modal is already open.
+   * Never opens the modal if it is closed.
+   */
+  async refreshIfOpen() {
+    if (!this.isActive()) return;
+    await this.open();
   }
 
   async open() {
@@ -13929,30 +20369,9 @@ class ValidatorStakingModal {
     this.stakeButton.disabled = false;
 
     // Show the modal
-    this.modal.classList.add('active');
+    openModal(this.modal);
 
-    // logic for text in skeleton bar
-    // Pending Transaction UI
-    this.nomineeValueElement.style.display = ''; // as in the original code
-    this.pendingTxTextInBar.style.display = 'none';
-    this.pendingSkeletonBar.style.display = 'none';
-
-    let currentPendingTx = null;
-    if (myData && myData.pending && Array.isArray(myData.pending) && myData.pending.length > 0) {
-      currentPendingTx = myData.pending.find((tx) => tx.type === 'deposit_stake' || tx.type === 'withdraw_stake');
-    }
-
-    if (currentPendingTx) {
-      this.detailsElement.style.display = 'block';
-      this.pendingSkeletonBar.style.display = 'flex';
-      this.pendingTxTextInBar.textContent =
-        currentPendingTx.type === 'withdraw_stake' ? 'Pending Unstake Transaction' : 'Pending Stake Transaction';
-      this.pendingTxTextInBar.style.display = 'block';
-
-      if (currentPendingTx.type === 'deposit_stake') {
-        this.stakeButton.disabled = true;
-      }
-    }
+    this.updatePendingTxUi(this.getCurrentPendingStakeTx());
 
     let nominee = null;
 
@@ -14107,6 +20526,10 @@ class ValidatorStakingModal {
         this.lockInfo = null;
       }
 
+      // Re-read pending so settlement changes are reflected after refresh
+      const latestPendingTx = this.getCurrentPendingStakeTx();
+      this.updatePendingTxUi(latestPendingTx);
+      this.updateUnstakeLockUI({ nominee, currentPendingTx: latestPendingTx });
       this.detailsElement.style.display = 'block'; // Or 'flex' if it's a flex container
     } catch (error) {
       console.error('Error fetching validator details:', error);
@@ -14120,8 +20543,6 @@ class ValidatorStakingModal {
     } finally {
       // Hide loading indicator regardless of success or failure
       this.loadingElement.style.display = 'none';
-      // Apply final UI state for Unstake (considers nominee, pending tx, and lockInfo)
-      this.updateUnstakeLockUI({ nominee, currentPendingTx });
     }
   }
 
@@ -14192,7 +20613,7 @@ class ValidatorStakingModal {
     }
 
     // If there is a pending stake/unstake tx, do not proceed (same condition that disables the button in the UI)
-    const currentPendingTx = myData.pending?.find((tx) => tx.type === 'deposit_stake' || tx.type === 'withdraw_stake');
+    const currentPendingTx = this.getCurrentPendingStakeTx();
     if (currentPendingTx) {
       showToast('A stake or unstake transaction is already pending.', 0, 'error');
       return;
@@ -14215,14 +20636,12 @@ class ValidatorStakingModal {
     // Confirmation dialog
     const confirmationMessage = `Are you sure you want to unstake from validator: ${nominee}?`;
     if (window.confirm(confirmationMessage)) {
-      //console.log(`User confirmed unstake from: ${nominee}`);
-      showToast('Submitting unstake transaction...', 3000, 'loading');
-      // Call the function to handle the actual transaction submission
       await this.submitUnstakeTransaction(nominee);
     }
   }
 
   async submitUnstakeTransaction(nodeAddress) {
+    let loadingToastId = showToast('Submitting unstake transaction...', 0, 'loading');
     try {
       const response = await this.postUnstake(nodeAddress);
       if (response && response.result && response.result.success) {
@@ -14236,8 +20655,18 @@ class ValidatorStakingModal {
           txid: response.txid,
         });
 
-        this.close();
-        this.open();
+        hideToast(loadingToastId);
+        loadingToastId = null;
+        showToast('Unstake submitted—pending confirmation', 5000, 'info');
+
+        if (this.isActive()) {
+          const currentPendingTx = this.getCurrentPendingStakeTx();
+          this.updatePendingTxUi(currentPendingTx);
+          this.updateUnstakeLockUI({
+            nominee: nodeAddress,
+            currentPendingTx,
+          });
+        }
       } else {
         // not showing toast since shown in injectTx
         console.error('Unstake failed. API Response:', response);
@@ -14246,6 +20675,8 @@ class ValidatorStakingModal {
       console.error('Error submitting unstake transaction:', error);
       // Provide a user-friendly error message
       showToast('Unstake transaction failed. Network or server error.', 0, 'error');
+    } finally {
+      if (loadingToastId) hideToast(loadingToastId);
     }
   }
 
@@ -14455,10 +20886,11 @@ class ValidatorStakingModal {
     return this.modal?.classList.contains('active') || false;
   }
 }
-const validatorStakingModal = new ValidatorStakingModal();
+const validatorModal = new ValidatorStakingModal();
 
 class StakeValidatorModal {
   constructor() {
+    this.openContext = null;
     this.stakedAmount = 0n;
     this.lastValidationTimestamp = 0;
     this.hasNominee = false;
@@ -14500,9 +20932,9 @@ class StakeValidatorModal {
       this.amountInput.value = normalizeUnsignedFloat(this.amountInput.value);
     });
     this.amountInput.addEventListener('input', this.debouncedValidateStakeInputs);
-    this.scanStakeQRButton.addEventListener('click', () => scanQRModal.open());
+    this.scanStakeQRButton.addEventListener('click', () => qrScanModal.open((data) => this.fillFromQR(data)));
     this.uploadStakeQRButton.addEventListener('click', () => this.stakeQRFileInput.click());
-    this.stakeQRFileInput.addEventListener('change', (event) => sendAssetFormModal.handleQRFileSelect(event, this));
+    this.stakeQRFileInput.addEventListener('change', (event) => this.readQRFile(event));
     this.faucetButton.addEventListener('click', withButtonCooldown(
       this.faucetButton,
       FAUCET_COOLDOWN_MS,
@@ -14515,10 +20947,8 @@ class StakeValidatorModal {
   }
 
   open() {
-    this.modal.classList.add('active');
-
-    // Set the correct fill function for the staking context
-    scanQRModal.fillFunction = this.fillFromQR.bind(this);
+    if (!openModal(this.modal)) return;
+    this.openContext = { account: myAccount };
 
     // Display Available Balance and Fee
     this.updateStakeBalanceDisplay();
@@ -14546,6 +20976,7 @@ class StakeValidatorModal {
   }
 
   close() {
+    this.openContext = null;
     this.modal.classList.remove('active');
     // Reset the form fields
     this.resetForm();
@@ -14557,6 +20988,27 @@ class StakeValidatorModal {
    */
   isActive() {
     return this.modal?.classList.contains('active') || false;
+  }
+
+  isCurrentOpening(context) {
+    return Boolean(context && this.openContext === context && context.account === myAccount && this.isActive());
+  }
+
+  async readQRFile(event) {
+    const input = event.target;
+    const file = input.files[0];
+    if (!file) return;
+    const context = this.openContext;
+    try {
+      const text = await QRImageDecoder.decode(file);
+      if (this.isCurrentOpening(context) && input.files[0] === file) await this.fillFromQR(text);
+    } catch (error) {
+      if (!this.isCurrentOpening(context) || input.files[0] !== file) return;
+      showToast('Could not read QR code from image', 0, 'error');
+      this.resetForm();
+    } finally {
+      if (input.files[0] === file) input.value = '';
+    }
   }
 
   async handleSubmit(event) {
@@ -14595,11 +21047,11 @@ class StakeValidatorModal {
 
         showToast('Submitted stake transaction...', 3000, 'loading');
 
-        validatorStakingModal.close();
+        validatorModal.close();
         this.nodeAddressInput.value = ''; // Clear form
         this.amountInput.value = '';
         this.close();
-        validatorStakingModal.open();
+        validatorModal.open();
       }
     } catch (error) {
       console.error('Stake transaction error:', error);
@@ -14779,6 +21231,11 @@ class StakeValidatorModal {
    * @returns {Promise<void>}
    */
   async requestFromFaucet() {
+    if (!network.faucetUrl) {
+      showToast('Faucet not available', 0, 'error');
+      return;
+    }
+
     const toastId = showToast('Requesting from faucet...', 0, 'loading');
     try {
       const payload = {
@@ -14789,9 +21246,7 @@ class StakeValidatorModal {
       };
       await signObj(payload, myAccount.keys);
       
-      const faucetUrl = network.faucetUrl || 'https://dev.liberdus.com:3355/faucet';
-      
-      const response = await fetch(faucetUrl, {
+      const response = await fetch(network.faucetUrl, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -14817,7 +21272,7 @@ class StakeValidatorModal {
     }
   }
 }
-const stakeValidatorModal = new StakeValidatorModal();
+const stakeModal = new StakeValidatorModal();
 
 const CHAT_REACTION_SHEET_CATEGORY_MAP = new Map(
   CHAT_REACTION_SHEET_CATEGORIES.map((category) => [category.key, category])
@@ -14865,10 +21320,13 @@ const CHAT_REACTION_SHEET_TAB_ICONS = {
 };
 
 class ChatModal {
+  static CONFIRMATION_WINDOW_MS = 30_000;
+
   constructor() {
     this.newestReceivedMessage = null;
     this.newestSentMessage = null;
     this.lastMessageCount = null;
+    this.messageConfirmationController = null;
 
     // used by updateTollValue and updateTollRequired
     this.toll = null;
@@ -14884,6 +21342,7 @@ class ChatModal {
     this.locationSendInProgress = false;
     // context menu properties
     this.currentContextMessage = null;
+    this.paymentWalletRequestId = 0;
 
     // Flag to prevent multiple downloads
     this.attachmentDownloadInProgress = false; 
@@ -14924,6 +21383,40 @@ class ChatModal {
     this.chatRenderedOldestIndex = CHAT_INITIAL_RENDER_COUNT - 1;
   }
 
+  /** Give unresolved messages a fresh window after sign-in or interruption. */
+  resetPendingMessageConfirmations() {
+    this.messageConfirmationController?.abort();
+    this.messageConfirmationController = null;
+    for (const pendingTxInfo of myData?.pending || []) {
+      if (pendingTxInfo.type === 'message' && !pendingTxInfo.reactionPending && !pendingTxInfo.editPending) {
+        pendingTxInfo.checkedts = 0;
+      }
+    }
+  }
+
+  /**
+   * Bound a message receipt lookup by its current verification window.
+   * @param {{checkedts?: number}} pendingTxInfo
+   * @param {string} endpointPath
+   * @returns {Promise<{response: unknown, cancelled: boolean}>}
+   */
+  async checkPendingMessageReceipt(pendingTxInfo, endpointPath) {
+    pendingTxInfo.checkedts ||= getCorrectedTimestamp();
+    const controller = new AbortController();
+    this.messageConfirmationController = controller;
+    const remainingMs = Math.max(0, pendingTxInfo.checkedts + ChatModal.CONFIRMATION_WINDOW_MS - getCorrectedTimestamp());
+    const timeoutId = setTimeout(() => controller.abort(), remainingMs);
+    try {
+      const response = await queryNetwork(endpointPath, controller.signal);
+      return { response, cancelled: this.messageConfirmationController !== controller };
+    } finally {
+      clearTimeout(timeoutId);
+      if (this.messageConfirmationController === controller) {
+        this.messageConfirmationController = null;
+      }
+    }
+  }
+
   /**
    * Gets toll info message from HTML template
    * @returns {string} The toll info message HTML
@@ -14941,6 +21434,7 @@ class ChatModal {
    * @returns {void}
    */
   cancelAllOperations() {
+    fullImageModal.close();
     this.abortController.abort();
     this.abortController = new AbortController();
   }
@@ -15553,13 +22047,12 @@ class ChatModal {
 
     // Add input event listener for message textarea auto-resize
     this.messageInput.addEventListener('input', (e) => {
-      this.messageInput.style.height = '48px';
-      this.messageInput.style.height = Math.min(this.messageInput.scrollHeight, 120) + 'px';
+      this.resizeMessageInput();
 
       const messageText = e.target.value;
       this.revalidateSendButtonState();
 
-      // Save draft (text is already limited to 2000 chars by maxlength attribute)
+      // Save draft
       this.debouncedSaveDraft(messageText);
     });
 
@@ -15577,9 +22070,14 @@ class ChatModal {
     window.addEventListener('resize', () => {
       const currentHeight = window.innerHeight;
       const heightDifference = this.initialViewportHeight - currentHeight;
-      
-      // If viewport height decreased significantly, keyboard is likely open
-      if (heightDifference > 150) { // 150px threshold for keyboard detection
+      const keyboardPossible = (isMobile() || isIOS()) && document.activeElement === this.messageInput;
+
+      // Window resizing and docked desktop DevTools are not a mobile keyboard.
+      if (!keyboardPossible) {
+        this.isKeyboardVisible = false;
+        this.initialViewportHeight = currentHeight;
+        this.unlockBackgroundScroll();
+      } else if (heightDifference > 150) { // 150px threshold for keyboard detection
         this.isKeyboardVisible = true;
         this.lockBackgroundScroll();
       } else if (heightDifference < 50) { // If height increased or stayed similar, keyboard is likely closed
@@ -15614,6 +22112,7 @@ class ChatModal {
 
     // Unlock when input loses focus (keyboard likely dismissed)
     this.messageInput.addEventListener('blur', () => {
+      this.isKeyboardVisible = false;
       this.unlockBackgroundScroll();
     });
 
@@ -15922,6 +22421,8 @@ class ChatModal {
 
     this.chatRenderedOldestIndex = nextOldestIndex;
     list.insertAdjacentHTML('afterbegin', range.html);
+    // Older payments scrolled into view are claims like any other.
+    void verifyVisibleChatPayments();
     const prependedThumbnailRows = [];
     for (let messageEl = list.firstElementChild; messageEl && messageEl !== oldFirstMessage; messageEl = messageEl.nextElementSibling) {
       prependedThumbnailRows.push(
@@ -15998,7 +22499,7 @@ class ChatModal {
     if (!Array.isArray(this.fileAttachments) || this.fileAttachments.length === 0) return;
 
     const removedAttachments = this.fileAttachments.splice(0, this.fileAttachments.length);
-    this.purgeThumbnail(removedAttachments);
+    void this.purgeAttachmentCaches(removedAttachments);
 
     if (deleteFromServer) {
       this.deleteAttachmentsFromServer(removedAttachments);
@@ -16008,6 +22509,14 @@ class ChatModal {
 
     if (this.address && myData.contacts[this.address]) {
       this.saveAttachmentState(myData.contacts[this.address]);
+    }
+  }
+
+  resizeMessageInput() {
+    const input = this.messageInput;
+    input.style.height = '';
+    if (input.value) {
+      input.style.height = input.scrollHeight + 'px';
     }
   }
 
@@ -16025,7 +22534,7 @@ class ChatModal {
 
     // clear message input
     this.messageInput.value = '';
-    this.messageInput.style.height = '48px';
+    this.resizeMessageInput();
     this.messageByteCounter.style.display = 'none';
     this.clearPendingLocation();
     this.toggleSendButtonVisibility();
@@ -16061,14 +22570,6 @@ class ChatModal {
 
     this.updateTollAmountUI(address);
 
-    // Store username for context menu pay action
-    if (this.headerContextMenu) {
-      const payOption = this.headerContextMenu.querySelector('[data-action="pay"]');
-      if (payOption) {
-        payOption.dataset.username = contact.username || address;
-      }
-    }
-
     this.modalAvatar.innerHTML = await getContactAvatarHtml(contact, 40);
 
     // Stop and cleanup all voice messages from previous conversation
@@ -16101,7 +22602,9 @@ class ChatModal {
     this.loadDraft(address);
 
     // Show modal
-    this.modal.classList.add('active');
+    openModal(this.modal);
+
+    this.revalidateSendButtonState();
 
     // Clear unread count
     const totalUnread = contact.unread;
@@ -16207,6 +22710,7 @@ class ChatModal {
    * @returns {void}
    */
   close() {
+    this.paymentWalletRequestId++;
     this.closeReactionSheet();
     const closingAddress = this.address;
     this.hideAttachmentLoadingToastsForContact(closingAddress);
@@ -16801,7 +23305,7 @@ class ChatModal {
 
       // Clear input and reset height, and delete any saved draft
            this.messageInput.value = '';
-      this.messageInput.style.height = '48px'; // original height
+      this.resizeMessageInput();
 
       // Hide byte counter
       this.messageByteCounter.style.display = 'none';
@@ -17288,6 +23792,523 @@ class ChatModal {
   }
 
   /**
+   * The LIB a chat receipt to this contact costs in toll, before the fee.
+   *
+   * The recipient's own toll, from their contact record -- not this.toll,
+   * which belongs to whichever conversation is open. A payment sent from the
+   * wallet may go to someone whose chat was never opened this session.
+   */
+  paymentMessageToll(recipient) {
+    const { toll, tollUnit, tollRequiredToSend } = recipient;
+    if (tollRequiredToSend == 0 || typeof toll !== 'bigint' || toll === 0n) return 0n;
+    if (tollUnit !== 'LIB' && tollUnit !== 'USD') return 0n;
+
+    const libWei = tollUnit === 'USD'
+      ? EthNum.usdToWei(EthNum.toStr(toll), parameters?.current?.stabilityFactorStr)
+      : toll;
+    return getEffectiveTollLibWei(libWei);
+  }
+
+  /**
+   * The checked toll in LIB wei, or why a payment receipt could not reach this contact.
+   *
+   * Asked before any money moves. The transfer settles on NEAR and the
+   * receipt on Liberdus, so anything that would stop the receipt -- the
+   * other kind of account (public and private accounts cannot message each
+   * other), a block, missing keys, or too little LIB for the toll and fee --
+   * has to be found here, not after the money has gone. Throws when it
+   * cannot be checked; the caller refuses then too.
+   */
+  async checkPaymentRecipient(recipientAddress, isCurrentLookup = () => true, { checkBalance = true } = {}) {
+    const address = normalizeAddress(recipientAddress);
+    const contact = myData?.contacts[address];
+    if (!contact) return { problem: 'Add this person to your contacts first.' };
+    const name = getContactDisplayName(contact);
+    const assertCurrentContact = () => {
+      if (myData?.contacts[address] !== contact) {
+        throw new Error('Payment contact changed during receipt checks');
+      }
+    };
+
+    const recipientLongAddress = longAddress(address);
+    const accountRes = await queryNetwork(`/account/${recipientLongAddress}`);
+    assertCurrentContact();
+    const recipient = accountRes?.account;
+    if (accountRes?.error || !recipient) throw new Error('Recipient account lookup failed');
+    const myIsPrivate = isPrivateAccount();
+    if ((recipient.private === true) !== myIsPrivate) {
+      return { problem: `${myIsPrivate ? 'Private' : 'Public'} accounts can only send to other ${myIsPrivate ? 'private' : 'public'} accounts, so a payment cannot reach ${name} here.` };
+    }
+
+    const recipientToll = recipient.data?.toll;
+    const tollUnit = recipient.data?.tollUnit ?? 'LIB';
+    if (typeof recipientToll !== 'bigint' || recipientToll < 0n || !['LIB', 'USD'].includes(tollUnit)) {
+      throw new Error('Cannot determine recipient toll.');
+    }
+    const sorted = [longAddress(myAccount.keys.address), recipientLongAddress].sort();
+    const recipientIndex = sorted.indexOf(recipientLongAddress);
+    const tollInfo = await queryNetwork(`/messages/${hashBytes(sorted.join(''))}/toll`);
+    assertCurrentContact();
+    const noChat = tollInfo?.error === 'No account with the given chatId';
+    const required = tollInfo?.toll?.required;
+    if (!noChat && (tollInfo?.error || !Array.isArray(required) || required.length !== 2
+      || !required.every((value) => [0, 1, 2].includes(value)))) {
+      throw new Error('Cannot check recipient toll. Try again.');
+    }
+    const tollState = {
+      toll: recipientToll, tollUnit, tollRequiredToSend: noChat ? 1 : required[recipientIndex],
+    };
+    if (!isCurrentLookup()) return { problem: 'The recipient changed. Go back and review the payment again.' };
+    Object.assign(contact, tollState);
+    if (!noChat) {
+      const senderRequired = required[1 - recipientIndex];
+      if (senderRequired === 2) {
+        applyUpdateTollRequiredState(contact, { my: true, required: senderRequired }, { preservePendingFriend: true });
+      } else {
+        contact.tollRequiredToReceive = senderRequired;
+      }
+    }
+    this.saveRecipientTollState(address, contact);
+    if (tollState.tollRequiredToSend === 2) {
+      return { problem: `${name} is not accepting messages from you, so a payment cannot reach them here.` };
+    }
+    const recipientKeys = contact.public && contact.pqPublic ? contact : {
+      public: accountRes.account.publicKey || contact.public,
+      pqPublic: accountRes.account.pqPublicKey || contact.pqPublic,
+    };
+    this.validatePaymentRecipientKeys(address, recipientKeys, myAccount.keys);
+    if (recipientKeys !== contact) Object.assign(contact, recipientKeys);
+
+    if (checkBalance) {
+      // Fresh where it can be; the saved balance otherwise, as any send uses.
+      await walletScreen.updateWalletBalances().catch((error) => console.warn('LIB balance refresh failed:', error));
+    }
+    await getNetworkParams(false, isCurrentLookup);
+    assertCurrentContact();
+    const fee = getTransactionFeeWei({ allowNull: true });
+    if (fee === null) throw new Error('Message fee unavailable');
+    const tollWei = this.paymentMessageToll(tollState);
+    if (checkBalance && getLibBalanceWei() < tollWei + fee) {
+      const needed = formatDisplayAmount(big2str(tollWei + fee, 18), 6);
+      return {
+        tollWei,
+        problem: `The chat message to ${name} costs ${needed} LIB with its fee, and you do not have enough LIB. Add LIB first.`,
+      };
+    }
+    return { tollWei };
+  }
+
+  /** Local eligibility for wallet Send. The receipt check can load missing keys. */
+  canSendIntentsPaymentTo(contact) {
+    return Boolean(contact.address && !isFaucetAddress(contact.address));
+  }
+
+  /**
+   * Check receipt eligibility and save a new contact just before publication.
+   * @returns {Promise<{tollWei: bigint, beforePublish: (approvedTollWei: bigint) => void} | {problem: string, tollWei?: bigint}>}
+   */
+  async checkIntentsPaymentReceipt(address, username, isCurrentLookup) {
+    const contact = myData?.contacts[address];
+    if (username && contact && !this.canSendIntentsPaymentTo(contact)) {
+      return { problem: 'This contact cannot receive a NEAR Intents payment.' };
+    }
+
+    let tollWei;
+    let connection;
+    if (contact || !username) {
+      const checked = await this.checkPaymentRecipient(address, isCurrentLookup);
+      if (checked.problem) return checked;
+      tollWei = checked.tollWei;
+    } else {
+      if (isFaucetAddress(address)) {
+        return { problem: 'This account cannot receive a NEAR Intents payment.' };
+      }
+      try {
+        connection = await this.prepareExternalPaymentRecipient(
+          { address, username }, myAccount, { forIntents: true, isCurrentLookup },
+        );
+      } catch (error) {
+        return {
+          tollWei: error.recipientToll,
+          problem: error.message || 'Could not check that this payment can reach them. Try again.',
+        };
+      }
+      tollWei = BigInt(connection.toll);
+    }
+
+    return {
+      tollWei,
+      beforePublish: (approvedTollWei = tollWei) => {
+        if (myData?.contacts[address] !== contact) {
+          throw new Error('The recipient changed. Go back and review the payment again.');
+        }
+        if (username && contact && !this.canSendIntentsPaymentTo(contact)) {
+          throw new Error('This contact cannot receive a NEAR Intents payment.');
+        }
+        if (Number(contact?.tollRequiredToSend) === 2) {
+          throw new Error('This recipient has blocked messages.');
+        }
+        const latestTollWei = this.paymentMessageToll(contact ?? connection.contactUpdates);
+        if (latestTollWei > approvedTollWei) throw new IntentsPaymentTollIncreasedError(latestTollWei);
+        if (contact) this.validatePaymentRecipientKeys(address, contact, myAccount.keys);
+        if (!connection) return;
+        const friendStatus = connection.contactUpdates.tollRequiredToReceive === 2 ? 0 : 2;
+        createNewContact(address, username, friendStatus);
+        Object.assign(myData.contacts[address], connection.contactUpdates);
+        try {
+          saveState();
+        } catch (error) {
+          delete myData.contacts[address];
+          throw new Error('Could not save this contact. Try again.', { cause: error });
+        }
+      },
+    };
+  }
+
+  /** Check the actual recipient and live LIB funds before an external payment. */
+  async prepareExternalPaymentRecipient(resolution, account, { forIntents = false, isCurrentLookup } = {}) {
+    const address = normalizeAddress(resolution.address);
+    const sorted = [longAddress(account.keys.address), longAddress(address)].sort();
+    const chatId = hashBytes(sorted.join(''));
+    const [recipientInfo, tollInfo, balanceInfo, paramsOk] = await Promise.all([
+      queryNetwork(`/account/${longAddress(address)}`),
+      queryNetwork(`/messages/${chatId}/toll`),
+      queryNetwork(`/account/${longAddress(account.keys.address)}/balance`),
+      getNetworkParams(true, isCurrentLookup),
+    ]);
+    const recipient = recipientInfo?.account;
+    const fee = paramsOk ? getTransactionFeeWei({ allowNull: true }) : null;
+    if (!recipient?.data || balanceInfo?.balance == null || fee === null) {
+      throw new Error('Cannot check LIB balance, message fee, or recipient toll. Try again.');
+    }
+    const senderIsPrivate = account.private === true;
+    if ((recipient.private === true) !== senderIsPrivate) {
+      throw new Error(`${senderIsPrivate ? 'Private' : 'Public'} accounts can only send chat payments to other ${senderIsPrivate ? 'private' : 'public'} accounts.`);
+    }
+    const noChat = tollInfo?.error === 'No account with the given chatId';
+    const recipientIndex = sorted.indexOf(longAddress(address));
+    const tollRequirements = tollInfo?.toll?.required;
+    const required = noChat ? 1 : tollRequirements?.[recipientIndex];
+    const senderRequired = noChat ? 1 : tollRequirements?.[1 - recipientIndex];
+    if (![0, 1, 2].includes(required) || (forIntents && ![0, 1, 2].includes(senderRequired))) {
+      throw new Error('Cannot check recipient toll. Try again.');
+    }
+    if (required === 2) throw new Error('This recipient has blocked messages.');
+    const tollUnit = recipient.data.tollUnit || 'LIB';
+    if (typeof recipient.data.toll !== 'bigint' || !['LIB', 'USD'].includes(tollUnit)) {
+      throw new Error('Cannot determine recipient toll.');
+    }
+    const contactUpdates = {
+      public: recipient.publicKey, pqPublic: recipient.pqPublicKey,
+      toll: recipient.data.toll, tollUnit, tollRequiredToSend: required,
+    };
+    if (forIntents) contactUpdates.tollRequiredToReceive = senderRequired;
+    let toll = 0n;
+    if (required !== 0) {
+      toll = forIntents
+        ? this.paymentMessageToll(contactUpdates)
+        : getEffectiveTollLibWei(normalizeTollToLibWei(contactUpdates.toll, tollUnit));
+    }
+    const totalRequired = fee + toll;
+    const available = BigInt(balanceInfo.balance);
+    if (available < totalRequired) {
+      const error = new Error(`Not enough LIB for the chat message. Required: ${big2str(totalRequired, 18)} LIB; available: ${big2str(available, 18)} LIB; add ${big2str(totalRequired - available, 18)} LIB.`);
+      error.recipientToll = toll;
+      throw error;
+    }
+    this.validatePaymentRecipientKeys(address, contactUpdates, account.keys);
+    return {
+      address, username: resolution.username, fee: fee.toString(), toll: toll.toString(), totalRequired: totalRequired.toString(),
+      contactUpdates,
+    };
+  }
+
+  validatePaymentRecipientKeys(address, { public: publicKey, pqPublic: pqPublicKey }, keys) {
+    try {
+      if (!pqPublicKey || !isPublicKeyForAddress(publicKey, address, generateAddress)) {
+        throw new Error('Missing or invalid recipient key');
+      }
+      dhkeyCombined(keys.secret, publicKey, pqPublicKey);
+    } catch (error) {
+      throw new Error('Cannot verify recipient encryption keys. Try again.', { cause: error });
+    }
+  }
+
+  async prepareEvmPaymentMessage(record, account, isCurrent = () => true) {
+    if (myAccount !== account || !isCurrent()) return false;
+    if (record.kind !== 'outgoing') throw new Error('Only outgoing payments can send a chat message.');
+    const payment = parseEvmTransferMessage(record.payment);
+    if (!payment || payment.from !== `0x${normalizeAddress(account.keys.address)}`) throw new Error('Invalid payment sender.');
+    const prepared = await this.prepareExternalPaymentRecipient({ address: payment.to, username: record.username }, account);
+    if (myAccount !== account || !isCurrent()) return false;
+    const contact = myData.contacts[prepared.address];
+    if (!contact && (record.broadcastState !== 'not_started' || !prepared.username)) {
+      throw new Error('Add this username to Contacts before sending an EVM payment message.');
+    }
+
+    // Prepare the receipt with fresh keys before saving a first-time recipient as a Connection.
+    const { public: publicKey, pqPublic: pqPublicKey } = prepared.contactUpdates;
+    const cryptoContext = {
+      contact: contact || { friend: 2 },
+      ...dhkeyCombined(account.keys.secret, publicKey, pqPublicKey),
+    };
+    const { payload, chatMessageObj, txid } = await this.buildEncryptedStructuredChatTx(
+      prepared.address, payment, BigInt(prepared.toll), account.keys, cryptoContext,
+    );
+    if (myAccount !== account || !isCurrent()) return false;
+    // The last lookup or message builder can see a newer fee/toll than confirmation.
+    const messageCost = chatMessageObj.amount + chatMessageObj.fee;
+    if (messageCost > BigInt(record.messageCostLimit)) {
+      if (record.assetState !== 'confirmed') {
+        throw new Error('Chat message cost exceeds the approved amount. Review the message cost before sending.');
+      }
+      const approved = window.confirm(`The chat message fee and toll increased from ${big2str(BigInt(record.messageCostLimit), 18)} LIB to ${big2str(messageCost, 18)} LIB. Send the message at this cost? The EVM asset will not be sent again.`);
+      if (!approved) return false;
+      record.messageCostLimit = messageCost.toString();
+    }
+    const savedContact = myData.contacts[prepared.address];
+    if (!savedContact) {
+      if (contact) throw new Error('The recipient was removed from Contacts. Review the payment again.');
+      createNewContact(prepared.address, prepared.username, 2);
+    }
+    const recipient = myData.contacts[prepared.address];
+    if (!recipient.username && prepared.username) recipient.username = prepared.username;
+    Object.assign(recipient, prepared.contactUpdates);
+
+    record.attempt = { tx: chatMessageObj, txid, timestamp: payload.sent_timestamp };
+    record.messageState = 'ready';
+    saveEvmPayment(record);
+    return true;
+  }
+
+  async sendEvmPaymentMessage(record, account) {
+    if (record.kind !== 'outgoing') throw new Error('Only outgoing payments can send a chat message.');
+    if (['submitted', 'delivered', 'abandoned'].includes(record.messageState)) return;
+    if (record.cardCreated && record.assetState !== 'confirmed') {
+      throw new Error('Wait for the EVM transfer to be confirmed before retrying its message.');
+    }
+    if (record.broadcastState !== 'acknowledged' || !['pending', 'confirmed'].includes(record.assetState)) {
+      throw new Error('Confirm EVM submission before sending its chat message.');
+    }
+    const previousTxid = record.attempt.txid;
+    // Never replay a saved, possibly expired signature. A retry gets a new txid.
+    // Keep the old card available if refreshing keys, LIB balance or cost fails.
+    try {
+      if (!await this.prepareEvmPaymentMessage(record, account)) return false;
+    } catch (error) {
+      record.messageState = 'rejected';
+      this.upsertEvmPaymentCard(record);
+      saveEvmPayment(record);
+      throw error;
+    }
+    const { tx, txid } = record.attempt;
+    // Like normal chat retry, replace the old pending attempt only after preparation succeeds.
+    removePendingTransaction(previousTxid);
+    record.messageState = 'submitting';
+    record.checkAttempts = 0;
+    record.nextCheckAt = 0;
+    this.upsertEvmPaymentCard(record);
+    saveEvmPayment(record);
+    const response = await injectTx(tx, txid);
+    const current = loadEvmPayments().find((item) => evmPaymentRecordId(item) === evmPaymentRecordId(record));
+    record.messageState = current?.messageState === 'delivered' ? 'delivered'
+      : response?.result?.success === true ? 'submitted'
+      : response?.result?.success === false && !response.transportFailure ? 'rejected' : 'uncertain';
+    saveEvmPayment(record);
+    this.upsertEvmPaymentCard(record);
+    if (!['submitted', 'delivered'].includes(record.messageState)) {
+      const error = new Error(response?.result?.reason || 'Message submission could not be confirmed.');
+      error.toastAlreadyShown = response?.toastAlreadyShown === true;
+      throw error;
+    }
+    return true;
+  }
+
+  upsertEvmPaymentCard(record) {
+    const address = normalizeAddress(record.payment.to);
+    const contact = myData.contacts[address];
+    if (!contact) return;
+    const existing = contact.messages.find((message) => message.my && message.type === EVM_CHAT_MESSAGE_TYPE
+      && stringify(message.payment) === stringify(record.payment));
+    // Message sync can finish while injectTx is still waiting for a response.
+    if (existing?.paymentMessageConfirmed || existing?.deleted || (!existing && record.cardCreated)) return;
+    const message = existing || { message: '', type: EVM_CHAT_MESSAGE_TYPE, payment: record.payment, my: true, paymentVerified: 'unchecked' };
+    message.paymentMessageConfirmed = record.messageState === 'delivered';
+    message.txid = record.attempt.txid;
+    message.timestamp = record.attempt.timestamp;
+    message.sent_timestamp = message.timestamp;
+    message.status = ['rejected', 'uncertain'].includes(record.messageState) ? 'failed' : 'sent';
+    // A freshly signed retry moves the existing card to its new sent time.
+    if (existing) contact.messages.splice(contact.messages.indexOf(existing), 1);
+    insertSorted(contact.messages, message, 'timestamp');
+    record.cardCreated = true;
+    const chatIndex = myData.chats.findIndex((chat) => chat.address === address);
+    if (chatIndex >= 0) myData.chats.splice(chatIndex, 1);
+    insertSorted(myData.chats, { address, timestamp: message.timestamp, txid: message.txid }, 'timestamp');
+    if (this.isActive() && this.address === address) this.appendChatModal();
+    chatsScreen.updateChatList();
+  }
+
+  /**
+   * Send, or send again, the chat receipt for a payment already made on NEAR.
+   *
+   * Called only after the transfer is published, so a failure here means the
+   * money moved and the receipt did not. It throws rather than swallowing
+   * that, so the caller can say exactly which of the two happened.
+   *
+   * The card in the conversation is the payment's record, one per intent. It
+   * is written before anything is submitted, and a receipt that fails --
+   * now, or found failed after a reload -- leaves it marked failed, where
+   * Retry sends the message again. Called again for the same intent this
+   * reuses that card, so it never adds a second, and never moves money.
+   */
+  async sendIntentsPaymentMessage(recipientAddress, messageObj, approvedTollWei, { retry = false } = {}) {
+    const currentAddress = normalizeAddress(recipientAddress);
+    const keys = myAccount.keys;
+    assert(keys, 'Keys not found for sender address');
+    const contact = myData.contacts[currentAddress];
+    assert(contact, `Contact not found for ${currentAddress}`);
+    const payment = parseTransferMessage(messageObj);
+    assert(payment, 'Invalid payment message');
+
+    if (intentsReceiptsInFlight.has(payment.intentHash)) {
+      throw new Error('This payment message is already being sent.');
+    }
+    intentsReceiptsInFlight.add(payment.intentHash);
+    try {
+      await this.submitIntentsPaymentMessage(currentAddress, contact, payment, keys, approvedTollWei, retry);
+    } finally {
+      intentsReceiptsInFlight.delete(payment.intentHash);
+    }
+  }
+
+  /** The body of sendIntentsPaymentMessage, run once per intent at a time. */
+  async submitIntentsPaymentMessage(currentAddress, contact, payment, keys, approvedTollWei, retry) {
+    const isCurrentRecipient = () => myData?.contacts[currentAddress] === contact;
+    const findCard = () => contact.messages.find((message) => message.my && !message.deleted
+      && message.type === INTENTS_CHAT_MESSAGE_TYPE && message.payment?.intentHash === payment.intentHash);
+    let card = findCard();
+    // Already sent, or on its way: nothing to retry.
+    if (card && card.status !== 'failed') return;
+    if (retry && !card) return;
+    if (!retry) {
+      assert(typeof approvedTollWei === 'bigint' && approvedTollWei >= 0n, 'Invalid approved payment message toll');
+    }
+    const isCurrentReceipt = () => isCurrentRecipient() && findCard() === card && (!card || card.status === 'failed');
+
+    const placeCard = (txid, timestamp, status) => {
+      if (!isCurrentRecipient()) return;
+      if (card) contact.messages.splice(contact.messages.indexOf(card), 1);
+      card = card || {
+        message: '',
+        type: INTENTS_CHAT_MESSAGE_TYPE,
+        payment,
+        // Checked like any other payment: publishing it is not proof it
+        // settled, and an intent past its deadline never will.
+        paymentVerified: 'unchecked',
+        my: true,
+      };
+      Object.assign(card, { txid, timestamp, sent_timestamp: timestamp, status });
+      insertSorted(contact.messages, card, 'timestamp');
+
+      const chatIndex = myData.chats.findIndex((chat) => chat.address === currentAddress);
+      if (chatIndex !== -1) {
+        myData.chats.splice(chatIndex, 1);
+      }
+      insertSorted(myData.chats, { address: currentAddress, timestamp, txid }, 'timestamp');
+      this.appendChatModal();
+      saveState();
+      chatsScreen.updateChatList();
+    };
+
+    let built;
+    try {
+      if (retry) {
+        const { problem } = await this.checkPaymentRecipient(currentAddress, isCurrentReceipt, { checkBalance: false });
+        if (problem) throw new Error(problem);
+      }
+      if (!isCurrentRecipient()) throw new Error('The account or recipient changed during receipt preparation.');
+      if (!isCurrentReceipt()) return;
+      if (Number(contact.tollRequiredToSend) === 2) throw new Error('This recipient has blocked messages.');
+      const knownTollWei = this.paymentMessageToll(contact);
+      if (!retry && knownTollWei > approvedTollWei) throw new IntentsPaymentTollIncreasedError(knownTollWei);
+
+      const chatCryptoContext = await this.prepareEncryptedChatContext(currentAddress, keys);
+      await getNetworkParams();
+      let balance = getLibBalanceWei();
+      let fee = getTransactionFeeWei({ allowNull: true });
+      if (isCurrentReceipt() && fee !== null && balance < this.paymentMessageToll(contact) + fee) {
+        // A first-time recipient was checked against live LIB, which can be
+        // higher than the saved wallet balance.
+        const live = await queryNetwork(`/account/${longAddress(keys.address)}/balance`);
+        balance = live?.balance;
+        fee = getTransactionFeeWei({ allowNull: true });
+      }
+      if (!isCurrentRecipient()) throw new Error('The account or recipient changed during receipt preparation.');
+      if (!isCurrentReceipt()) return;
+      if (Number(contact.tollRequiredToSend) === 2) throw new Error('This recipient has blocked messages.');
+      const tollInLib = this.paymentMessageToll(contact);
+      if (!retry && tollInLib > approvedTollWei) throw new IntentsPaymentTollIncreasedError(tollInLib);
+      if (fee === null || typeof balance !== 'bigint' || balance < tollInLib + fee) {
+        throw new Error('Not enough LIB for the message fee.');
+      }
+      built = await this.buildEncryptedStructuredChatTx(
+        currentAddress,
+        // Rebuilt from the parsed claim, so a retry sends what the card shows.
+        buildTransferMessage(payment),
+        tollInLib,
+        keys,
+        chatCryptoContext
+      );
+      if (!isCurrentRecipient()) throw new Error('The account or recipient changed during receipt preparation.');
+      if (!isCurrentReceipt()) return;
+      if (Number(contact.tollRequiredToSend) === 2) throw new Error('This recipient has blocked messages.');
+      const latestTollWei = this.paymentMessageToll(contact);
+      if (!retry && latestTollWei > approvedTollWei) throw new IntentsPaymentTollIncreasedError(latestTollWei);
+    } catch (error) {
+      const currentReceipt = isCurrentReceipt();
+      // Chat sync can finish a previous attempt while Retry is checking the toll.
+      if (retry && !currentReceipt && isCurrentRecipient()) return;
+      // Nothing was submitted. Keep a failed card -- under a local id when
+      // there was never a transaction -- so the receipt is not lost with
+      // this screen.
+      if (currentReceipt) {
+        placeCard(card?.txid || bin2hex(generateRandomBytes(32)), card?.timestamp || getTransactionTimestamp(), 'failed');
+      }
+      throw error;
+    }
+
+    const { payload, chatMessageObj, txid } = built;
+    placeCard(txid, payload.sent_timestamp, 'sent');
+
+    const response = await injectTx(chatMessageObj, txid, { deferTollTooLowToast: !retry });
+    if (!response?.result?.success) {
+      if (isCurrentRecipient()) {
+        updateTransactionStatus(txid, currentAddress, 'failed', 'message');
+        this.appendChatModal();
+        saveState();
+      }
+      const reason = response?.result?.reason;
+      if (!retry && !response?.transportFailure && isRecipientTollTooLowFailure(reason)) {
+        throw new IntentsPaymentTollRejectedError(reason);
+      }
+      throw new Error(reason || 'The chat receipt was rejected.');
+    }
+  }
+
+  /** Retry a payment card's failed receipt. Only the message; never the money. */
+  async retryIntentsPaymentMessage(address, message) {
+    // A second tap while the first is still going: that one will answer.
+    if (intentsReceiptsInFlight.has(message.payment?.intentHash)) return;
+    try {
+      await this.sendIntentsPaymentMessage(address, message.payment, undefined, { retry: true });
+    } catch (error) {
+      console.error('Payment receipt retry failed:', error);
+      showToast(`The payment message did not go through: ${error?.message || 'try again'}`, 0, 'error');
+    }
+  }
+
+  /**
    * Cancel editing mode without sending: clears hidden edit txid and restores UI state
    */
   cancelEdit() {
@@ -17296,7 +24317,7 @@ class ChatModal {
       if (editInput) editInput.value = '';
       // Clear input text and reset height
       this.messageInput.value = '';
-      this.messageInput.style.height = '48px';
+      this.resizeMessageInput();
       this.messageByteCounter.style.display = 'none';
       // Clear any saved draft
       if (typeof this.debouncedSaveDraft === 'function') {
@@ -17510,13 +24531,130 @@ class ChatModal {
     return `https://maps.google.com/?q=${query}`;
   }
 
+  renderEvmPaymentDetailLink(value, url, label) {
+    const code = `<code>${escapeHtml(value)}</code>`;
+    if (!url) return code;
+    return `<a href="${escapeHtmlAttribute(url)}" target="_blank" rel="noopener noreferrer" title="${escapeHtmlAttribute(value)}" aria-label="View ${escapeHtmlAttribute(label)} ${escapeHtmlAttribute(value)} in block explorer">${code} <span aria-hidden="true">↗</span></a>`;
+  }
+
+  renderEvmPaymentMessage(item, messageTimeHTML) {
+    const payment = parseEvmTransferMessage(item.payment);
+    if (!payment) return '';
+    const verified = item.paymentVerified || 'unchecked';
+    const walletNetwork = evmAssets.getNetwork(payment.networkId);
+    const networkName = walletNetwork?.id === payment.networkId && walletNetwork.chainId === payment.chainId
+      ? walletNetwork.name : `EVM chain ${payment.chainId}`;
+    const transactionHash = payment.transactionHash;
+    const transactionUrl = evmAssets.getPaymentExplorerUrl(payment);
+    return `
+      <div class="intents-payment-message evm-payment-message" data-verified="${escapeHtmlAttribute(verified)}" data-evm-payment="${escapeHtmlAttribute(evmPaymentId(payment))}">
+        <div class="payment-receipt-heading">
+          ${payment.assetKind === 'native' && payment.symbol === 'ETH' ? '<img class="payment-receipt-logo" src="./media/ethereum_logo.png" alt="" width="20" height="20">' : ''}
+          <div class="evm-payment-label">Payment ${item.my ? 'sent' : 'received'}</div>
+        </div>
+        <div class="intents-payment-amount">${item.my ? '−' : '+'}${escapeHtml(evmPaymentAmount(payment))} <span class="evm-payment-unit">${escapeHtml(payment.symbol)}</span></div>
+        <div class="intents-payment-chain">${escapeHtml(networkName)}</div>
+        ${payment.note ? `<section class="evm-payment-note" aria-label="Payment note"><div class="evm-payment-label">Note</div><div class="intents-payment-note">${escapeHtml(payment.note)}</div></section>` : ''}
+        <div class="evm-payment-meta">
+          <div class="intents-payment-verified">${escapeHtml(paymentStatusLabel(verified))}</div>
+          <div class="evm-payment-footer">
+            ${messageTimeHTML}
+          </div>
+        </div>
+        <details class="evm-payment-details">
+          <summary>Payment details</summary>
+          <dl>
+            <div><dt>Network</dt><dd>${escapeHtml(networkName)} · Chain ID ${payment.chainId}</dd></div>
+            <div><dt>Transaction</dt><dd>${this.renderEvmPaymentDetailLink(transactionHash, transactionUrl, 'transaction')}</dd></div>
+          </dl>
+        </details>
+      </div>`;
+  }
+
+  renderIntentsPaymentMessage(item, messageTimeHTML) {
+    const payment = item.payment;
+    if (!payment) return '';
+    const verified = item.paymentVerified || 'unchecked';
+    const exactAmount = `${payment.amount} ${payment.symbol}`;
+    return `
+      <div class="intents-payment-message intents-payment-receipt" data-verified="${escapeHtmlAttribute(verified)}" data-intent-hash="${escapeHtmlAttribute(payment.intentHash)}">
+        <div class="payment-receipt-heading">
+          <img class="payment-receipt-logo" src="./media/near_logo.png" alt="" width="20" height="20">
+          <div class="intents-payment-label">Payment ${item.my ? 'sent' : 'received'}</div>
+        </div>
+        <div class="intents-payment-amount" title="${escapeHtmlAttribute(exactAmount)}">${item.my ? '−' : '+'}${escapeHtml(formatDisplayAmount(payment.amount))} <span class="intents-payment-unit">${escapeHtml(payment.symbol)}</span></div>
+        ${payment.chainName ? `<div class="intents-payment-chain">${escapeHtml(payment.chainName)}</div>` : ''}
+        ${payment.note ? `<section class="intents-payment-note-section" aria-label="Payment note"><div class="intents-payment-label">Note</div><div class="intents-payment-note">${escapeHtml(payment.note)}</div></section>` : ''}
+        <div class="intents-payment-meta">
+          <div class="intents-payment-verified">${escapeHtml(paymentStatusLabel(verified))}</div>
+          <div class="intents-payment-footer">
+            ${messageTimeHTML}
+          </div>
+        </div>
+        <details class="intents-payment-details">
+          <summary>Payment details</summary>
+          <dl>
+            <div><dt>Amount</dt><dd>${escapeHtml(exactAmount)}</dd></div>
+            ${payment.chainName ? `<div><dt>Network</dt><dd>${escapeHtml(payment.chainName)}</dd></div>` : ''}
+            ${payment.assetId ? `<div><dt>Asset</dt><dd><code>${escapeHtml(payment.assetId)}</code></dd></div>` : ''}
+            ${payment.intentHash ? `<div><dt>Intent</dt><dd><code>${escapeHtml(payment.intentHash)}</code></dd></div>` : ''}
+            ${payment.transactionHash ? `<div><dt>Transaction</dt><dd><code>${escapeHtml(payment.transactionHash)}</code></dd></div>` : ''}
+          </dl>
+        </details>
+      </div>`;
+  }
+
+  renderLibPaymentTransaction(transactionId) {
+    const code = `<code>${escapeHtml(transactionId)}</code>`;
+    const explorerUrl = normalizeHttpsUrl(network.explorerUrl);
+    if (!explorerUrl) return code;
+
+    const url = new URL(explorerUrl);
+    url.pathname = `${url.pathname.replace(/\/+$/, '')}/transaction/${transactionId}`;
+    url.search = '';
+    url.hash = '';
+    return `<a href="${escapeHtmlAttribute(url.href)}" target="_blank" rel="noopener noreferrer" title="${escapeHtmlAttribute(transactionId)}" aria-label="View transaction ${escapeHtmlAttribute(transactionId)} in block explorer">${code} <span aria-hidden="true">↗</span></a>`;
+  }
+
+  renderLibPaymentMessage(item, messageTimeHTML) {
+    const amount = big2str(item.amount, 18);
+    const exactAmount = `${formatDisplayAmount(amount, 18)} ${item.symbol || 'LIB'}`;
+    const transactionId = normalizeTransactionId(item.txid);
+    return `
+      <div class="lib-payment-message">
+        <div class="lib-payment-heading">
+          <img class="lib-payment-logo" src="./media/liberdus_logo_50.png" alt="" width="20" height="20">
+          <div class="lib-payment-label">Payment ${item.my ? 'sent' : 'received'}</div>
+        </div>
+        <div class="payment-header">
+          <span class="payment-direction">${item.my ? '-' : '+'}</span>
+          <span class="payment-amount" title="${escapeHtmlAttribute(exactAmount)}">${escapeHtml(formatDisplayAmount(amount, 6))} <span class="lib-payment-unit">${escapeHtml(item.symbol || 'LIB')}</span></span>
+        </div>
+        <div class="lib-payment-network">Liberdus</div>
+        ${item.message ? `<section class="lib-payment-note" aria-label="Payment note"><div class="lib-payment-label">Note</div><div class="payment-memo">${linkifyUrls(item.message)}</div></section>` : ''}
+        <div class="lib-payment-meta">
+          ${item.status === 'failed' ? '<div class="lib-payment-status">Payment failed</div>' : ''}
+          ${messageTimeHTML}
+        </div>
+        ${transactionId ? `<details class="lib-payment-details">
+          <summary>Payment details</summary>
+          <dl>
+            <div><dt>Amount</dt><dd>${escapeHtml(exactAmount)}</dd></div>
+            <div><dt>Transaction</dt><dd>${this.renderLibPaymentTransaction(transactionId)}</dd></div>
+          </dl>
+        </details>` : ''}
+      </div>`;
+  }
+
   renderChatMessageHTML(item, { contact, lastReadTs }) {
     const timeString = formatTime(item.timestamp);
     // Use a consistent timestamp attribute for potential future use (e.g., message jumping)
-    const timestampAttribute = `data-message-timestamp="${item.timestamp}"`;
+    const timestampAttribute = `data-message-timestamp="${escapeHtmlAttribute(item.timestamp)}"`;
     // Add txid attribute if available
-    const txidAttribute = item.txid ? `data-txid="${item.txid}"` : '';
-    const statusAttribute = item.status ? `data-status="${item.status}"` : '';
+    const txidAttribute = item.txid ? `data-txid="${escapeHtmlAttribute(item.txid)}"` : '';
+    const statusAttribute = item.status ? `data-status="${escapeHtmlAttribute(item.status)}"` : '';
+    const showEditedDot = !item.my && item.edited && item.edited_timestamp && item.edited_timestamp > lastReadTs && !isDeleted(item);
+    const messageTimeHTML = `<div class="message-time">${timeString}${item.edited ? ' <span class="message-edited-label">edited</span>' : ''}${showEditedDot ? ' <span class="edited-new-dot" title="Edited since last read"></span>' : ''}</div>`;
 
     if (item.type === 'update_toll_required') {
       const statusText = escapeHtml(getUpdateTollRequiredPreviewText(item, contact));
@@ -17529,23 +24667,10 @@ class ChatModal {
 
     // Check if it's a payment based on the presence of the amount property (BigInt)
     if (typeof item.amount === 'bigint') {
-      // Assuming LIB (18 decimals) for now. TODO: Handle different asset decimals if needed.
-      // Format amount correctly using big2str
-      const amountStr = big2str(item.amount, 18);
-      const amountNum = parseFloat(amountStr);
-      const amountDisplay = `${amountNum.toFixed(6)} ${item.symbol || 'LIB'}`;
-      const directionText = item.my ? '-' : '+';
       const messageClass = item.my ? 'sent' : 'received';
-      const showEditedDot = !item.my && item.edited && item.edited_timestamp && item.edited_timestamp > lastReadTs && !isDeleted(item);
-      // --- Render Payment Transaction ---
       return `
           <div class="message ${messageClass} payment-info" ${timestampAttribute} ${txidAttribute} ${statusAttribute}>
-            <div class="payment-header">
-              <span class="payment-direction">${directionText}</span>
-              <span class="payment-amount">${amountDisplay}</span>
-            </div>
-            ${item.message ? `<div class="payment-memo">${linkifyUrls(item.message)}</div>` : ''}
-            <div class="message-time">${timeString}${item.edited ? ' <span class="message-edited-label">edited</span>' : ''}${showEditedDot ? ' <span class="edited-new-dot" title="Edited since last read"></span>' : ''}</div>
+            ${this.renderLibPaymentMessage(item, messageTimeHTML)}
           </div>
         `;
     }
@@ -17557,7 +24682,7 @@ class ChatModal {
       // Render deleted message with special styling
       return `
                     <div class="message ${messageClass} deleted-message" ${timestampAttribute} ${txidAttribute} ${statusAttribute}>
-                        <div class="message-content deleted-content">${item.message}</div>
+                        <div class="message-content deleted-content">${escapeHtml(item.message)}</div>
                         <div class="message-time">${timeString}</div>
                     </div>
                 `;
@@ -17567,11 +24692,12 @@ class ChatModal {
 
     let replyHTML = '';
     // --- Render Reply Quote if present ---
-    if (item.replyId) {
+    const replyId = normalizeTransactionId(item.replyId);
+    if (replyId) {
       const replyText = escapeHtml(item.replyMessage || 'View original message');
       // Determine owner label: "You" if the referenced message is ours, else contact name
       const ownerIsMineHint = item.replyOwnerIsMine;
-      const targetMsg = contact.messages.find((message) => message.txid === item.replyId);
+      const targetMsg = contact.messages.find((message) => message.txid === replyId);
       // Use both item.my and replyOwnerIsMine to determine from current viewer's perspective
       // item.my: true if reply is from current user (viewer's perspective)
       // replyOwnerIsMine: true if original message was from sender's perspective
@@ -17584,7 +24710,7 @@ class ChatModal {
       const replyOwnerLabel = `<span class="reply-quote-label ${ownerClass}">${escapeHtml(ownerText)}</span>`;
 
       replyHTML = `
-                <div class="reply-quote ${ownerClass}" data-reply-txid="${escapeHtml(item.replyId)}">
+                <div class="reply-quote ${ownerClass}" data-reply-txid="${escapeHtmlAttribute(replyId)}">
                   ${replyOwnerLabel}
                   <div class="reply-quote-text">${replyText}</div>
                 </div>
@@ -17593,36 +24719,39 @@ class ChatModal {
 
     // --- Render Attachments if present ---
     let attachmentsHTML = '';
+    let hasMediaAttachment = false;
     if (item.xattach && Array.isArray(item.xattach) && item.xattach.length > 0) {
       attachmentsHTML = item.xattach.map(att => {
-        const fileUrl = att.url || '#';
-        const fileName = att.name || 'Attachment';
+        const fileUrl = normalizeResourceUrl(att.url || '#', window.location.href) || '#';
+        const previewUrl = normalizeResourceUrl(att.pUrl || '', window.location.href);
+        const fileName = typeof att.name === 'string' && att.name ? att.name.slice(0, 255) : 'Attachment';
+        const encodedFileName = encodeAttachmentName(fileName);
+        const mimeType = att.type ? normalizeMimeType(att.type) : '';
         const fileSize = att.size ? this.formatFileSize(att.size) : '';
-        const fileType = att.type ? att.type.split('/').pop().toUpperCase() : '';
-        const isImage = att.type && att.type.startsWith('image/');
-        const isVideo = att.type && att.type.startsWith('video/');
-        const hasThumbnail = isImage || isVideo;
-        const fileTypeIcon = this.getFileTypeForIcon(att.type || '', fileName);
-        const paddingStyle = hasThumbnail ? 'padding: 5px 5px;' : 'padding: 10px 12px;';
+        const fileType = mimeType ? mimeType.split('/').pop().toUpperCase() : '';
+        const isImage = mimeType.startsWith('image/');
+        const isVideo = mimeType.startsWith('video/');
+        const isMedia = isImage || isVideo;
+        hasMediaAttachment = hasMediaAttachment || isMedia;
+        const fileTypeIcon = this.getFileTypeForIcon(mimeType, fileName);
         return `
-                <div class="attachment-row" style="display: flex; ${hasThumbnail ? 'flex-direction: column;' : 'align-items: center;'} background: #f5f5f7; border-radius: 12px; ${paddingStyle} margin-bottom: 6px;"
-                  data-url="${fileUrl}"
-                  data-p-url="${att.pUrl || ''}"
-                  data-name="${encodeURIComponent(fileName)}"
-                  data-type="${att.type || ''}"
+                <div class="attachment-row ${isMedia ? 'attachment-row--media' : 'attachment-row--file'}"
+                  data-url="${escapeHtmlAttribute(fileUrl)}"
+                  data-p-url="${escapeHtmlAttribute(previewUrl)}"
+                  data-name="${escapeHtmlAttribute(encodedFileName)}"
+                  data-type="${escapeHtmlAttribute(mimeType)}"
                   ${isImage ? 'data-image-attachment="true"' : ''}
                   ${isVideo ? 'data-video-attachment="true"' : ''}
                 >
-                  <div class="attachment-icon-container" style="${hasThumbnail ? 'margin-bottom: 10px; flex-direction: column;' : 'margin-right: 14px; flex-shrink: 0;'}">
-                    <div class="attachment-icon" data-file-type="${fileTypeIcon}"></div>
-                    ${hasThumbnail ? '<div class="attachment-preview-hint">Click for options</div>' : ''}
+                  <div class="attachment-icon-container">
+                    <div class="attachment-icon" data-file-type="${escapeHtmlAttribute(fileTypeIcon)}"></div>
+                    ${isMedia ? '<div class="attachment-preview-hint">Click for options</div>' : ''}
                   </div>
-                  <div style="min-width:0;">
-                    <span class="attachment-label" style="font-weight:500;color:#222;display:block;word-wrap:break-word;">
-                      ${fileName}
-                    </span><br>
-                    <span class="attachment-meta" style="color: #888;">${fileType}${fileType && fileSize ? ' · ' : ''}${fileSize}</span>
-                  </div>
+                  ${isMedia ? '' : `
+                  <div class="attachment-details">
+                    <span class="attachment-label">${escapeHtml(fileName)}</span>
+                    <span class="attachment-meta">${escapeHtml(fileType)}${fileType && fileSize ? ' · ' : ''}${escapeHtml(fileSize)}</span>
+                  </div>`}
                 </div>
               `;
       }).join('');
@@ -17654,15 +24783,13 @@ class ChatModal {
         } else {
           // Build scheduled label if in the future
           const scheduleHTML = this.buildCallScheduleHTML(callTimeMs);
+          const callJoinUrl = buildCallJoinUrl(item.message, myAccount.username);
           // Render call message with a left circular phone icon (clickable) and plain text to the right
-          // TODO - remove the href and instead have it call a function which will open the URL and at the time of opening it adds the callUrlParam and username
           messageTextHTML = `
                   <div class="call-message">
-                    <a href='${item.message}${callUrlParams}"${myAccount.username}"' target="_blank" rel="noopener noreferrer" class="call-message-phone-button" aria-label="Join Video Call">
-                      <span class="sr-only">Join Video Call</span>
-                    </a>
+                    ${callJoinUrl ? `<a href="${escapeHtmlAttribute(callJoinUrl)}" target="_blank" rel="noopener noreferrer" class="call-message-phone-button" aria-label="Join Video Call"><span class="sr-only">Join Video Call</span></a>` : ''}
                     <div>
-                      <div class="call-message-text">Join Video Call</div>
+                      <div class="call-message-text">${callJoinUrl ? 'Join Video Call' : 'Call link unavailable'}</div>
                       ${scheduleHTML}
                     </div>
                   </div>`;
@@ -17674,9 +24801,10 @@ class ChatModal {
         const durationSeconds = this.getPositiveDurationSeconds(item.duration);
         const currentTime = this.formatVoiceProgressTime(0, durationSeconds);
         const duration = formatVoiceTimer(durationSeconds);
+        const voiceUrl = normalizeResourceUrl(item.url || '', window.location.href);
         // Use audio encryption keys for playback, fall back to message encryption keys if not available
         messageTextHTML = `
-              <div class="voice-message" data-url="${item.url || ''}" data-name="voice-message" data-type="audio/webm" data-duration="${durationSeconds}">
+              <div class="voice-message" data-url="${escapeHtmlAttribute(voiceUrl)}" data-name="voice-message" data-type="audio/webm" data-duration="${escapeHtmlAttribute(durationSeconds)}">
                 <div class="voice-message-controls">
                   <div class="voice-message-top-row">
                     <button class="voice-message-play-button" aria-label="Play voice message">
@@ -17695,6 +24823,12 @@ class ChatModal {
               </div>`;
         break;
       }
+      case EVM_CHAT_MESSAGE_TYPE:
+        messageTextHTML = this.renderEvmPaymentMessage(item, messageTimeHTML);
+        break;
+      case INTENTS_CHAT_MESSAGE_TYPE:
+        messageTextHTML = this.renderIntentsPaymentMessage(item, messageTimeHTML);
+        break;
       case 'location': {
         const latitude = Number(item.latitude);
         const longitude = Number(item.longitude);
@@ -17724,14 +24858,15 @@ class ChatModal {
         }
     }
 
-    const callTimeAttribute = messageType === 'call' && item.callTime ? `data-call-time="${item.callTime}"` : '';
-    const showEditedDot = !item.my && item.edited && item.edited_timestamp && item.edited_timestamp > lastReadTs && !isDeleted(item);
+    const callTimeAttribute = messageType === 'call' && item.callTime ? `data-call-time="${escapeHtmlAttribute(item.callTime)}"` : '';
+    const evmPayment = messageType === EVM_CHAT_MESSAGE_TYPE && messageTextHTML !== '';
+    const intentsPayment = messageType === INTENTS_CHAT_MESSAGE_TYPE && messageTextHTML !== '';
     return `
-            <div class="message ${messageClass}" ${timestampAttribute} ${txidAttribute} ${statusAttribute} ${callTimeAttribute}>
+            <div class="message ${messageClass}${hasMediaAttachment ? ' has-media-attachment' : ''}${evmPayment ? ' evm-payment-bubble' : ''}${intentsPayment ? ' intents-payment-bubble' : ''}" ${timestampAttribute} ${txidAttribute} ${statusAttribute} ${callTimeAttribute}>
               ${replyHTML}
               ${attachmentsHTML}
               ${messageTextHTML}
-              <div class="message-time">${timeString}${item.edited ? ' <span class="message-edited-label">edited</span>' : ''}${showEditedDot ? ' <span class="edited-new-dot" title="Edited since last read"></span>' : ''}</div>
+              ${evmPayment || intentsPayment ? '' : messageTimeHTML}
             </div>
           `;
   }
@@ -17818,9 +24953,34 @@ class ChatModal {
       0
     );
 
+    const expandedPayments = new Set(Array.from(
+      this.messagesList.querySelectorAll('.evm-payment-details[open]'),
+      (details) => details.parentElement.dataset.evmPayment
+    ));
+    const expandedLibPayments = new Set(Array.from(
+      this.messagesList.querySelectorAll('.lib-payment-details[open]'),
+      (details) => details.closest('.message').dataset.txid
+    ));
+    const expandedIntentsPayments = new Set(Array.from(
+      this.messagesList.querySelectorAll('.intents-payment-details[open]'),
+      (details) => details.parentElement.dataset.intentHash
+    ));
     // Replace the list once to avoid one DOM mutation per message.
     this.messagesList.innerHTML = range.html;
+    for (const details of this.messagesList.querySelectorAll('.evm-payment-details')) {
+      if (expandedPayments.has(details.parentElement.dataset.evmPayment)) details.open = true;
+    }
+    for (const details of this.messagesList.querySelectorAll('.lib-payment-details')) {
+      if (expandedLibPayments.has(details.closest('.message').dataset.txid)) details.open = true;
+    }
+    for (const details of this.messagesList.querySelectorAll('.intents-payment-details')) {
+      if (expandedIntentsPayments.has(details.parentElement.dataset.intentHash)) details.open = true;
+    }
     this.syncAllRenderedReactionChips();
+    // Straight after rendering, ahead of the early returns below: it used to
+    // sit at the end of this method, which only the highlight path reaches,
+    // so an ordinary open left every received payment on "Checking…".
+    void verifyVisibleChatPayments();
     const shouldKeepBottomAnchored = !skipAutoScroll && !highlightNewMessage;
 
     // --- 4.5. Load thumbnails for image attachments (async, non-blocking) ---
@@ -18012,20 +25172,13 @@ class ChatModal {
    * @param {string} text - The draft message text to save
    */
   saveDraft(text) {
-    if (this.address && myData.contacts[this.address]) {
-      // Sanitize the text before saving
-      const sanitizedText = escapeHtml(text);
-      myData.contacts[this.address].draft = sanitizedText;
-      
-      // Save or clear reply state
-      this.saveReplyState(myData.contacts[this.address]);
-      
-      // Save or clear attachment state
-      this.saveAttachmentState(myData.contacts[this.address]);
+    const contact = this.address && myData.contacts[this.address];
+    if (!contact) return;
 
-      // Save or clear retry state
-      this.saveRetryState(myData.contacts[this.address]);
-    }
+    contact.draft = text;
+    this.saveReplyState(contact);
+    this.saveAttachmentState(contact);
+    this.saveRetryState(contact);
   }
 
   /**
@@ -18034,7 +25187,7 @@ class ChatModal {
   loadDraft(address) {
     // Always clear the input first
     this.messageInput.value = '';
-    this.messageInput.style.height = '48px';
+    this.resizeMessageInput();
     
     // Clear any existing reply state
     this.cancelReply();
@@ -18050,9 +25203,7 @@ class ChatModal {
     const contact = myData.contacts[address];
     if (contact?.draft) {
       this.messageInput.value = contact.draft;
-      // Trigger resize
-      this.messageInput.style.height = Math.min(this.messageInput.scrollHeight, 120) + 'px';
-      // trigger input event to update the byte counter
+      // Resize and update the composer controls.
       this.messageInput.dispatchEvent(new Event('input'));
     }
     this.toggleSendButtonVisibility();
@@ -18183,12 +25334,42 @@ class ChatModal {
 
     let loadingToastId;
     let thumbnailBlob = null;
+    const owner = MediaCacheOwnership.getOwnerKey();
     
     // Normalize file type (fallback to extension detection for missing MIME types)
     const normalizedType = this.getMimeTypeFromFilename(file.name, file.type);
+
+    const clearLoadingToast = () => {
+      if (!loadingToastId) return;
+      hideToast(loadingToastId);
+      this.untrackAttachmentLoadingToast(uploadContactAddress, loadingToastId);
+      loadingToastId = null;
+    };
+
+    // Enter the busy state and show the loading toast before any slow work.
+    // Image and video thumbnails can take seconds to generate, so doing this
+    // first gives immediate feedback and blocks a second attach or a send meanwhile.
+    this.isEncrypting = true;
+    this.sendButton.disabled = true; // Disable send button during thumbnailing and encryption
+    this.addAttachmentButton.disabled = true;
+    loadingToastId = showToast(
+      `Attaching "${file.name}" to ${uploadContactName}...`,
+      0,
+      'loading',
+      false,
+      { dedupe: false }
+    );
+    this.trackAttachmentLoadingToast(uploadContactAddress, loadingToastId);
     
-    // Generate thumbnail for images before encryption
     const isImage = normalizedType.startsWith('image/');
+    const isVideo = normalizedType.startsWith('video/');
+    if (isImage || isVideo) {
+      // Decoding a large image or video frame can block the main thread for seconds.
+      // showToast() reveals its toast on a 10ms timer, so let that run and paint first.
+      await waitForPaint(20);
+    }
+
+    // Generate thumbnail for images before encryption
     if (isImage) {
       try {
         thumbnailBlob = await thumbnailCache.generateThumbnail(file);
@@ -18198,7 +25379,6 @@ class ChatModal {
     }
 
     // Generate thumbnail for videos before encryption
-    const isVideo = normalizedType.startsWith('video/');
     if (isVideo && !thumbnailBlob) {
       try {
         thumbnailBlob = await thumbnailCache.extractVideoThumbnail(file);
@@ -18208,12 +25388,6 @@ class ChatModal {
     }
 
     const capturedThumbnailBlob = thumbnailBlob;
-    const clearLoadingToast = () => {
-      if (!loadingToastId) return;
-      hideToast(loadingToastId);
-      this.untrackAttachmentLoadingToast(uploadContactAddress, loadingToastId);
-      loadingToastId = null;
-    };
     const refreshChatsScreenIfActive = () => {
       if (chatsScreen?.isActive?.()) {
         chatsScreen.updateChatList();
@@ -18224,18 +25398,6 @@ class ChatModal {
     // This ensures processIncomingAttachmentFiles can properly await each upload
     return new Promise((resolve, reject) => {
       try {
-        this.isEncrypting = true;
-        this.sendButton.disabled = true; // Disable send button during encryption
-        this.addAttachmentButton.disabled = true;
-        loadingToastId = showToast(
-          `Attaching "${file.name}" to ${uploadContactName}...`,
-          0,
-          'loading',
-          false,
-          { dedupe: false }
-        );
-        this.trackAttachmentLoadingToast(uploadContactAddress, loadingToastId);
-        
         // Generate random encryption key for this attachment
         const encKey = generateRandomBytes(32);
 
@@ -18308,7 +25470,7 @@ class ChatModal {
             
             // Cache thumbnail if we generated one - use captured variable
             if (capturedThumbnailBlob && (isImage || isVideo)) {
-              thumbnailCache.save(attachmentUrl, capturedThumbnailBlob, file.type).catch(err => {
+              thumbnailCache.save(attachmentUrl, capturedThumbnailBlob, file.type, owner).catch(err => {
                 console.warn('Failed to cache thumbnail for attached file:', err);
               });
             }
@@ -18539,7 +25701,7 @@ class ChatModal {
   removeAttachment(index) {
     if (this.fileAttachments && index >= 0 && index < this.fileAttachments.length) {
       const removedFile = this.fileAttachments.splice(index, 1)[0];
-      this.purgeThumbnail([removedFile]);
+      void this.purgeAttachmentCaches([removedFile]);
       this.showAttachmentPreview(); // Refresh the preview
       showToast(`"${removedFile.name}" removed`, 2000, 'info');
 
@@ -18660,7 +25822,9 @@ class ChatModal {
       }
 
       const thumbnailImage = new Image();
-      thumbnailImage.alt = 'Thumbnail';
+      const encodedFileName = attachmentRow.dataset.name;
+      const fileName = encodedFileName ? decodeURIComponent(encodedFileName) : '';
+      thumbnailImage.alt = fileName ? `Preview of ${fileName}` : 'Attachment preview';
       thumbnailImage.className = 'attachment-thumbnail';
       thumbnailImage.src = thumbnailUrl;
 
@@ -18707,7 +25871,13 @@ class ChatModal {
     if (!url || url === '#') return false;
 
     try {
-      const thumbnailBlob = await thumbnailCache.get(url);
+      const owner = MediaCacheOwnership.getOwnerKey();
+      let thumbnailBlob = await thumbnailCache.get(url, owner);
+      if (!thumbnailBlob && attachmentRow.dataset.pUrl) {
+        const item = this.getMessageRecordFromRenderedChild(attachmentRow);
+        thumbnailBlob = await this.decryptAttachmentToBlob(item, attachmentRow, attachmentRow.dataset.pUrl);
+        await thumbnailCache.save(url, thumbnailBlob, 'image/jpeg', owner);
+      }
       if (!thumbnailBlob || !attachmentRow.isConnected) return false;
       return this.updateThumbnailInPlace(attachmentRow, thumbnailBlob);
     } catch (error) {
@@ -18757,34 +25927,6 @@ class ChatModal {
   }
 
   /**
-   * Determines if a file type can be viewed in a browser
-   * @param {string} mimeType - The MIME type of the file
-   * @returns {boolean} True if the file type can be viewed in a browser, false otherwise
-   */
-  isViewableInBrowser(mimeType) {
-    if (!mimeType) return false;
-
-    const normalizedMime = mimeType.toLowerCase().trim();
-
-    // Exclude vCard types (VCF). Many servers report vcf as a text/* subtype
-    // but vCard files shouldn't be opened inline in the browser here.
-    if (normalizedMime.includes('vcard')) return false;
-
-    const viewableTypes = [
-      'image/',           // All images
-      'text/',            // Text files
-      'application/pdf',  // PDFs
-      'video/',           // Videos
-      'audio/',           // Audio files
-      'application/json', // JSON
-      'application/xml',  // XML
-      'text/xml'          // XML (alternative)
-    ];
-
-    return viewableTypes.some(type => normalizedMime.startsWith(type));
-  }
-
-  /**
    * Triggers a file download
    * @param {string} blobUrl - The URL of the file to download
    * @param {string} filename - The name of the file to download
@@ -18806,9 +25948,10 @@ class ChatModal {
    * @param {Object} item - message object from myData.contacts[address].messages[idx]
    * @param {HTMLElement} linkEl - element with data-* fields (attachment row or voice message element)
    * @param {string} [urlOverride] - optional URL to fetch instead of linkEl.dataset.url (used for pUrl thumbnails)
+   * @param {AbortSignal} [signal] - allows the media viewer to cancel its own download
    * @returns {Promise<Blob>}
    */
-  async decryptAttachmentToBlob(item, linkEl, urlOverride = null) {
+  async decryptAttachmentToBlob(item, linkEl, urlOverride = null, signal = this.abortController.signal) {
     if (!item || !linkEl) throw new Error('Missing item or attachment element');
 
     // Use urlOverride if provided, otherwise use the main attachment URL
@@ -18816,78 +25959,43 @@ class ChatModal {
     const fetchUrl = urlOverride || mainUrl;
     if (!mainUrl || mainUrl === '#') throw new Error('Missing attachment url');
 
+    const attachment = Array.isArray(item.xattach) ? item.xattach.find(candidate => candidate?.url === mainUrl) : null;
+    const key = await this.getAttachmentDecryptionKey(item, attachment);
+    const blobType = urlOverride ? 'image/jpeg' : (linkEl.dataset.type || 'application/octet-stream');
+    return this.downloadAttachmentBlob(fetchUrl, key, blobType, signal);
+  }
+
+  async getAttachmentDecryptionKey(item, attachment, address = this.address) {
     const isVoice = item.type === 'vm';
-    let dhkey;
-    
-    // 1) Get encryption key
-    if (isVoice) {
-      // Voice message: use audio keys from the message item (no encKey for voice messages)
-      const selfKey = item.audioSelfKey || item.selfKey;
-      const pqEncSharedKey = item.audioPqEncSharedKey || item.pqEncSharedKey;
-      
-      if (item.my) {
-        if (!selfKey) throw new Error('Missing selfKey for decrypt');
-        const password = myAccount.keys.secret + myAccount.keys.pqSeed;
-        dhkey = hex2bin(decryptData(selfKey, password, true));
-      } else {
-        if (!pqEncSharedKey) throw new Error('Missing pqEncSharedKey for decrypt');
-        const ok = await ensureContactKeys(this.address);
-        const senderPublicKey = myData.contacts[this.address]?.public;
-        if (!ok || !senderPublicKey) throw new Error(`No public key found for sender ${this.address}`);
-        const pqCipher = (typeof pqEncSharedKey === 'string') ? base642bin(pqEncSharedKey) : pqEncSharedKey;
-        dhkey = dhkeyCombined(
-          myAccount.keys.secret,
-          senderPublicKey,
-          myAccount.keys.pqSeed,
-          pqCipher
-        ).dhkey;
-      }
-    } else {
-      // Attachment: look up attachment entry by main url
-      const att = Array.isArray(item.xattach) ? item.xattach.find((a) => a?.url === mainUrl) : null;
-      if (!att) throw new Error('Attachment entry not found');
-      
-      // Use encKey if available (new attachments), otherwise fall back to DH-derived keys (migrated/legacy)
-      if (att.encKey) {
-        dhkey = base642bin(att.encKey);
-      } else {
-        const selfKey = att.selfKey;
-        const pqEncSharedKey = att.pqEncSharedKey;
-        
-        if (item.my) {
-          if (!selfKey) throw new Error('Missing selfKey for decrypt');
-          const password = myAccount.keys.secret + myAccount.keys.pqSeed;
-          dhkey = hex2bin(decryptData(selfKey, password, true));
-        } else {
-          if (!pqEncSharedKey) throw new Error('Missing pqEncSharedKey for decrypt');
-          const ok = await ensureContactKeys(this.address);
-          const senderPublicKey = myData.contacts[this.address]?.public;
-          if (!ok || !senderPublicKey) throw new Error(`No public key found for sender ${this.address}`);
-          const pqCipher = (typeof pqEncSharedKey === 'string') ? base642bin(pqEncSharedKey) : pqEncSharedKey;
-          dhkey = dhkeyCombined(
-            myAccount.keys.secret,
-            senderPublicKey,
-            myAccount.keys.pqSeed,
-            pqCipher
-          ).dhkey;
-        }
-      }
+    if (!isVoice) {
+      if (!attachment) throw new Error('Attachment entry not found');
+      if (attachment.encKey) return base642bin(attachment.encKey);
     }
 
-    // 2) Download encrypted bytes (use fetchUrl which may be pUrl or main url)
-    const res = await fetch(fetchUrl, { signal: this.abortController.signal });
+    const account = myAccount;
+    const { secret, pqSeed } = account.keys;
+    if (item.my) {
+      const selfKey = isVoice ? item.audioSelfKey || item.selfKey : attachment.selfKey;
+      if (!selfKey) throw new Error('Missing selfKey for decrypt');
+      return hex2bin(decryptData(selfKey, secret + pqSeed, true));
+    }
+
+    const pqEncSharedKey = isVoice ? item.audioPqEncSharedKey || item.pqEncSharedKey : attachment.pqEncSharedKey;
+    if (!pqEncSharedKey) throw new Error('Missing pqEncSharedKey for decrypt');
+    const ok = await ensureContactKeys(address);
+    const senderPublicKey = myAccount === account && myData?.contacts?.[address]?.public;
+    if (!ok || !senderPublicKey) throw new Error(`No public key found for sender ${address}`);
+    const pqCipher = typeof pqEncSharedKey === 'string' ? base642bin(pqEncSharedKey) : pqEncSharedKey;
+    return dhkeyCombined(secret, senderPublicKey, pqSeed, pqCipher).dhkey;
+  }
+
+  async downloadAttachmentBlob(url, key, type, signal = this.abortController.signal) {
+    const res = await fetch(url, { signal });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const cipherBin = new Uint8Array(await res.arrayBuffer());
-
-    // 3) Decrypt
-    const cipherB64 = bin2base64(cipherBin);
-    const plainB64 = decryptChacha(dhkey, cipherB64);
+    const plainB64 = decryptChacha(key, bin2base64(cipherBin));
     if (!plainB64) throw new Error('decryptChacha returned null');
-    const clearBin = base642bin(plainB64);
-
-    // 4) Blob - use image/jpeg for thumbnails (urlOverride), otherwise use original type
-    const blobType = urlOverride ? 'image/jpeg' : (linkEl.dataset.type || 'application/octet-stream');
-    return new Blob([clearBin], { type: blobType });
+    return new Blob([base642bin(plainB64)], { type });
   }
 
   /**
@@ -18915,29 +26023,69 @@ class ChatModal {
     }
   }
 
+  /**
+   * Uses the full-media cache for regular chat images and videos.
+   * @param {Object} item - message containing the attachment metadata
+   * @param {HTMLElement} linkEl - rendered attachment row
+   * @param {AbortSignal} [signal] - the video viewer's current open request
+   * @returns {Promise<Blob>}
+   */
+  async getAttachmentBlob(item, linkEl, signal = this.abortController.signal) {
+    const url = linkEl.dataset.url;
+    if (!url || url === '#') throw new Error('Missing attachment url');
+    const attachment = item.type !== 'vm' && Array.isArray(item.xattach)
+      ? item.xattach.find(candidate => candidate?.url === url)
+      : null;
+    let downloadAndDecrypt = () => this.decryptAttachmentToBlob(item, linkEl, null, signal);
+    if (!FullMediaCache.supportsMimeType(attachment?.type)) return downloadAndDecrypt();
+
+    const account = myAccount;
+    let keyFingerprint;
+    const mimeType = normalizeMimeType(attachment.type);
+    if (mimeType.startsWith('video/')) {
+      const key = await this.getAttachmentDecryptionKey(item, attachment);
+      if (key.length !== 32) throw new Error('Invalid video decryption key');
+      keyFingerprint = hashBytes(key);
+      downloadAndDecrypt = () => this.downloadAttachmentBlob(url, key, mimeType, signal);
+    }
+    return fullMediaCache.getOrCache({
+      attachment,
+      keyFingerprint,
+      downloadAndDecrypt,
+      shouldCache: () => myAccount === account && !signal?.aborted && !isDeleted(item)
+        && !removeAccountModal.isRemoving && !removeAccountsModal.isRemovingAll
+        && Array.isArray(item.xattach) && item.xattach.includes(attachment),
+    });
+  }
+
   async handleAttachmentDownload(item, linkEl) {
     let loadingToastId;
     try {
-      loadingToastId = showToast(`Decrypting attachment...`, 0, 'loading');
-      const blob = await this.decryptAttachmentToBlob(item, linkEl);
-      const blobUrl = URL.createObjectURL(blob);
+      const owner = MediaCacheOwnership.getOwnerKey();
+      const isImage = item.type !== 'vm' && (linkEl.dataset.type || '').startsWith('image/');
+      loadingToastId = showToast(isImage ? 'Preparing image...' : 'Preparing attachment...', 0, 'loading');
+      const blob = await this.getAttachmentBlob(item, linkEl);
       const filename = decodeURIComponent(linkEl.dataset.name || 'download');
+      const safePreviewMime = await getSafeAttachmentPreviewMime(blob);
+      const safePreviewBlob = safePreviewMime
+        ? new Blob([blob], { type: safePreviewMime })
+        : null;
 
       // Generate and cache thumbnail for images and videos, then update in place
-      if (blob.type.startsWith('image/') || blob.type.startsWith('video/')) {
+      if (safePreviewMime.startsWith('image/') || safePreviewMime.startsWith('video/')) {
         const attachmentUrl = linkEl.dataset.url;
         const attachmentRow = linkEl.closest('.attachment-row') || linkEl.closest(CHAT_THUMBNAIL_ATTACHMENT_SELECTOR);
         
-        const thumbnailPromise = blob.type.startsWith('image/')
-          ? thumbnailCache.generateThumbnail(blob)
-          : thumbnailCache.extractVideoThumbnail(blob);
+        const thumbnailPromise = safePreviewMime.startsWith('image/')
+          ? thumbnailCache.generateThumbnail(safePreviewBlob)
+          : thumbnailCache.extractVideoThumbnail(safePreviewBlob);
         
         thumbnailPromise
-          .then(thumbnail => thumbnailCache.save(attachmentUrl, thumbnail, blob.type))
+          .then(thumbnail => thumbnailCache.save(attachmentUrl, thumbnail, safePreviewMime, owner))
           .then(async () => {
             // Update thumbnail in place
             if (attachmentRow) {
-              const thumbnailBlob = await thumbnailCache.get(attachmentUrl);
+              const thumbnailBlob = await thumbnailCache.get(attachmentUrl, owner);
               if (thumbnailBlob) {
                 await this.updateThumbnailInPlace(attachmentRow, thumbnailBlob);
               }
@@ -18964,20 +26112,20 @@ class ChatModal {
         reader.readAsDataURL(blob);
       } else {
         // Web browser handling
-        const isViewable = this.isViewableInBrowser(blob.type);
+        const downloadUrl = URL.createObjectURL(blob);
+        const previewUrl = safePreviewBlob ? URL.createObjectURL(safePreviewBlob) : '';
         
         try {
-          if (isViewable) {
-            // Open in new tab and download
-            const newTab = window.open(blobUrl, '_blank');
-            this.triggerFileDownload(blobUrl, filename);
-          } else {
-            // Non-viewable files: download only
-            this.triggerFileDownload(blobUrl, filename);
+          if (previewUrl) {
+            window.open(previewUrl, '_blank', 'noopener,noreferrer');
           }
+          this.triggerFileDownload(downloadUrl, filename);
         } finally {
           // Clean up blob URL after enough time for downloads/tabs to initialize
-          setTimeout(() => URL.revokeObjectURL(blobUrl), 2000);
+          setTimeout(() => {
+            URL.revokeObjectURL(downloadUrl);
+            if (previewUrl) URL.revokeObjectURL(previewUrl);
+          }, 2000);
         }
       }
 
@@ -18994,8 +26142,7 @@ class ChatModal {
    * @returns {boolean} True if keyboard is likely open
    */
   isKeyboardOpen() {
-    // Use the tracked state from resize listener for more reliable detection
-    return this.isKeyboardVisible;
+    return (isMobile() || isIOS()) && this.isKeyboardVisible;
   }
 
   /**
@@ -19072,6 +26219,7 @@ class ChatModal {
     if (e.target.closest('.voice-message-speed-button')) return;
     if (e.target.closest('.voice-message-seek')) return;
     if (e.target.closest('.reply-quote')) return;
+    if (e.target.closest('.evm-payment-details, .lib-payment-details, .intents-payment-details')) return;
 
     // Check if keyboard is open - if so, don't show context menu
     if (this.isKeyboardOpen()) {
@@ -19126,6 +26274,12 @@ class ChatModal {
     const messageRecord = this.getMessageRecordFromElement(messageEl);
     const isDeletedLocalOnly =
       messageEl.classList.contains('deleted-message') && isDeletedForMeOnly(messageRecord);
+    const evmMessage = messageRecord?.type === EVM_CHAT_MESSAGE_TYPE && !messageRecord.deleted;
+    const evmActions = evmMessage ? evmAssets.getPaymentActions(messageRecord.payment, messageRecord) : {};
+    this.contextMenu.querySelector('[data-action="evm-check"]').style.display = evmActions.checkAgain ? 'flex' : 'none';
+    this.contextMenu.querySelector('[data-action="evm-review"]').style.display = evmActions.retryTransfer ? 'flex' : 'none';
+    const walletTarget = this.getPaymentWalletTarget(messageRecord);
+    this.contextMenu.querySelector('[data-action="wallet"]').style.display = walletTarget ? 'flex' : 'none';
     
     const deleteOption = this.contextMenu.querySelector('[data-action="delete"]');
     if (deleteOption) deleteOption.style.display = 'flex';
@@ -19230,7 +26384,7 @@ class ChatModal {
         const isPayment = messageEl.classList.contains('payment-info');
         const hasMemo = !!messageEl.querySelector('.payment-memo');
         const isVoice = !!messageEl.querySelector('.voice-message');
-        const allowedType = !isPayment || (isPayment && hasMemo);
+        const allowedType = messageRecord?.type !== EVM_CHAT_MESSAGE_TYPE && (!isPayment || hasMemo);
         const show = isMine && !isDeleted && allowedType && !isVoice && !isFailedPayment && ageOk;
         editOption.style.display = show ? 'flex' : 'none';
       }
@@ -19584,7 +26738,7 @@ class ChatModal {
     if (chips.length === 0) return '';
 
     return `
-      <div class="message-reactions" aria-label="Reactions">
+      <div class="message-reactions" role="group" aria-label="Reactions">
         ${chips.join('')}
       </div>
     `;
@@ -19603,7 +26757,6 @@ class ChatModal {
     if (existingContainer) {
       existingContainer.remove();
     }
-    messageEl.classList.remove('has-reactions');
 
     const messageRecord = this.getMessageRecordFromElement(messageEl);
     if (messageRecord && isDeleted(messageRecord)) {
@@ -19613,7 +26766,6 @@ class ChatModal {
     const reactionHtml = this.buildReactionChipsHTML(reactionsForTarget);
     if (!reactionHtml) return;
 
-    messageEl.classList.add('has-reactions');
     messageEl.insertAdjacentHTML('beforeend', reactionHtml);
   }
 
@@ -19761,29 +26913,62 @@ class ChatModal {
         contactInfoModal.open(createDisplayInfo(contact));
         break;
       case 'pay':
-        const payOption = this.headerContextMenu.querySelector('[data-action="pay"]');
-        const username = payOption?.dataset.username || contact.username || this.address;
-        sendAssetFormModal.username = username;
-        sendAssetFormModal.open();
+        payChoiceModal.open(contact, this.headerMenuButton);
         break;
     }
   }
 
   /**
-   * Returns whether "Delete for all" should be available for a given message element.
-   * Mirrors the gating used in the message context menu.
+   * Returns whether "Delete for all" applies to a message. Sending requirements
+   * are checked on tap so both context menus can explain why an action is blocked.
    * @param {HTMLElement} messageEl
    * @param {Object|null} messageRecord
    * @returns {boolean}
    */
   canDeleteMessageForAll(messageEl, messageRecord = null) {
     const isMine = !!messageEl?.classList?.contains('sent');
-    if (!isMine || !this.canSendWithZeroToll()) {
+    if (!isMine) return false;
+
+    const message = messageRecord || this.getMessageRecordFromElement(messageEl);
+    if (!message?.my || !message.txid || isDeletedForAll(message)) return false;
+
+    const status = message.status || messageEl.dataset.status;
+    return !status || status === 'sent';
+  }
+
+  /**
+   * Rechecks a delete request after asynchronous preparation, before it can send.
+   * @param {{account: Object, address: string, message: Object, txid: string}} request
+   * @returns {boolean}
+   */
+  checkDeleteForAllRequirements(request) {
+    const { account, address, message, txid } = request;
+    if (myAccount !== account || this.address !== address || message.txid !== txid) return false;
+
+    if (isDeletedForAll(message)) {
+      showToast('Message already deleted for everyone', 2000, 'info');
+      return false;
+    }
+    if (!message.my) {
+      showToast('You can only delete your own messages for all', 0, 'error');
+      return false;
+    }
+    if (message.status && message.status !== 'sent') {
+      showToast('Only sent messages can be deleted for everyone.', 0, 'error');
+      return false;
+    }
+    if (!isOnline) {
+      showToast('You’re offline. Reconnect to delete this message for everyone.', 0, 'error');
       return false;
     }
 
-    const message = messageRecord || this.getMessageRecordFromElement(messageEl);
-    if (message && isDeletedForAll(message)) {
+    const contact = myData.contacts[address];
+    if (!contact) return false;
+    if (!this.canSendWithZeroToll()) {
+      const reason = contact.tollRequiredToSend === 2
+        ? 'You are blocked by this user.'
+        : 'To delete for all, this person must add you as a connection or set their toll to zero.';
+      showToast(reason, 0, 'error');
       return false;
     }
 
@@ -19805,16 +26990,15 @@ class ChatModal {
     const existingGuard = this.recentDeleteForAllGuardsByTxid.get(targetTxid);
     clearTimeout(existingGuard?.timeoutId);
 
-    const guard = { targetTxid };
-    guard.timeoutId = setTimeout(() => {
-      if (this.recentDeleteForAllGuardsByTxid.get(targetTxid) !== guard) {
-        return;
-      }
-
-      this.recentDeleteForAllGuardsByTxid.delete(targetTxid);
-    }, DELETE_FOR_ALL_ACTION_GUARD_MS);
+    // Keep the reservation until preparation/submission finishes, even if slow.
+    const guard = { targetTxid, timeoutId: null };
     this.recentDeleteForAllGuardsByTxid.set(targetTxid, guard);
     return guard;
+  }
+
+  scheduleDeleteForAllGuardExpiry(guard) {
+    if (this.recentDeleteForAllGuardsByTxid.get(guard.targetTxid) !== guard) return;
+    guard.timeoutId = setTimeout(() => this.clearRecentDeleteForAllGuard(guard), DELETE_FOR_ALL_ACTION_GUARD_MS);
   }
 
   clearRecentDeleteForAllGuard(guard) {
@@ -19841,21 +27025,37 @@ class ChatModal {
   }
 
   /**
-   * Removes cached thumbnails for any image attachments in an xattach array.
-   * Safe to call even if thumbnails don't exist.
-   * @param {any} xattach
+   * Removes cached thumbnails and full media for deleted attachments.
+   * Safe to call even if cached records don't exist.
+   * @param {Array} xattach
+   * @param {Object} [item] - The message, or own attachment context for a draft
+   * @param {string} [address] - The contact whose keys decrypt an incoming attachment
    */
-  purgeThumbnail(xattach) {
+  async purgeAttachmentCaches(xattach, item = { my: true }, address = this.address) {
     if (!Array.isArray(xattach) || !xattach.length) return;
-    for (const att of xattach) {
-      const url = att?.url;
-      const type = att?.type || '';
-      if (!url || url === '#') continue;
-      if (typeof type === 'string' && type.startsWith('image/')) {
-        // Fire-and-forget; deletion errors shouldn't block UI actions
-        void thumbnailCache.delete(url).catch((e) => console.warn('Failed to delete thumbnail:', e));
+
+    await Promise.all(xattach.map(async attachment => {
+      const url = attachment?.url;
+      const mimeType = normalizeMimeType(attachment?.type);
+      if (!url || url === '#' || !FullMediaCache.supportsMimeType(mimeType)) return;
+
+      const thumbnailRemoval = thumbnailCache.delete(url).catch((error) => {
+        console.warn('Failed to delete thumbnail:', error);
+      });
+
+      try {
+        let keyFingerprint;
+        if (mimeType.startsWith('video/')) {
+          const key = await this.getAttachmentDecryptionKey(item, attachment, address);
+          if (key.length !== 32) throw new Error('Invalid video decryption key');
+          keyFingerprint = hashBytes(key);
+        }
+        await fullMediaCache.delete(url, mimeType, keyFingerprint);
+      } catch (error) {
+        console.warn('Failed to delete cached attachment:', error);
       }
-    }
+      await thumbnailRemoval;
+    }));
   }
 
   /**
@@ -20016,6 +27216,11 @@ class ChatModal {
       case 'location':
         void this.handleShareLocationAction();
         break;
+      case 'intents-payment': {
+        const contact = myData.contacts[chatModal.address];
+        void chatPaymentPanel.open(chatModal.address, contact?.username || contact?.name || null);
+        break;
+      }
     }
   }
 
@@ -20342,12 +27547,11 @@ class ChatModal {
 
   /**
    * Shows context menu for an attachment row.
-   * - Images/Videos: "Preview" when no thumbnail exists in IndexedDB; "Save" when it exists
-   * - Non-images/videos: always "Save"
+   * Images and eligible videos include Open; all attachment types include Save.
    * @param {Event} e
    * @param {HTMLElement} attachmentRow
    */
-  async showAttachmentContextMenu(e, attachmentRow) {
+  showAttachmentContextMenu(e, attachmentRow) {
     if (!this.imageAttachmentContextMenu || !attachmentRow) return;
     e.preventDefault();
     e.stopPropagation();
@@ -20358,7 +27562,7 @@ class ChatModal {
     this.currentImageAttachmentRow = attachmentRow;
 
     // Toggle delete-for-all visibility similar to regular message context menu gating
-    const { messageEl, url } = this.getAttachmentContextFromRow(attachmentRow);
+    const { messageEl } = this.getAttachmentContextFromRow(attachmentRow);
 
     // Show copy only if parent message has actual message text
     const copyOption = this.imageAttachmentContextMenu.querySelector('[data-action="copy"]');
@@ -20373,29 +27577,8 @@ class ChatModal {
       deleteForAllOption.style.display = canDeleteForAll ? 'flex' : 'none';
     }
 
-    const isImageAttachment = attachmentRow.dataset.imageAttachment === 'true';
-    const isVideoAttachment = attachmentRow.dataset.videoAttachment === 'true';
-    const hasThumbnailSupport = isImageAttachment || isVideoAttachment;
-
-    // Decide Preview/Save vs Save:
-    // - Images/Videos: Show both Preview and Save when no thumbnail exists; Show only Save when it exists
-    // - Non-images/videos: always Save (no thumbnail concept)
-    let hasThumb = true;
-    if (hasThumbnailSupport) {
-      hasThumb = false;
-      if (url !== '#') {
-        try {
-          const thumb = await thumbnailCache.get(url);
-          hasThumb = !!thumb;
-        } catch (_) {
-          hasThumb = false;
-        }
-      }
-    }
-
-    // Show Preview only for images/videos without a thumbnail; Save is always visible
-    const previewOpt = this.imageAttachmentContextMenu.querySelector('[data-action="preview"]');
-    if (previewOpt) previewOpt.style.display = (hasThumbnailSupport && !hasThumb) ? '' : 'none';
+    const openOption = this.imageAttachmentContextMenu.querySelector('[data-action="open"]');
+    if (openOption) openOption.style.display = this.getAttachmentPreviewKind(attachmentRow) ? 'flex' : 'none';
 
     // Show Import Contacts option for VCF files
     const importContactsOpt = this.imageAttachmentContextMenu.querySelector('[data-action="import-contacts"]');
@@ -20427,11 +27610,11 @@ class ChatModal {
       case 'import-contacts':
         void this.openImportContactsModal(row);
         break;
-      case 'preview':
-        void this.previewMediaAttachment(row);
+      case 'open':
+        void this.openMediaAttachment(row);
         break;
       case 'save':
-        void this.saveImageAttachment(row);
+        void this.saveAttachment(row);
         break;
       case 'share':
         shareAttachmentModal.open(messageEl);
@@ -20490,49 +27673,66 @@ class ChatModal {
   }
 
   /**
-   * Preview a media attachment (image or video): download + decrypt thumbnail from pUrl + cache in IndexedDB.
-   * Does NOT trigger full file download - uses the pre-generated thumbnail from server.
+   * Classifies menu eligibility only; decrypted bytes are verified before display.
+   * @param {HTMLElement} attachmentRow
+   * @returns {'image' | 'video' | null}
+   */
+  getAttachmentPreviewKind(attachmentRow) {
+    if (attachmentRow.dataset.imageAttachment === 'true') return 'image';
+    const type = normalizeMimeType(attachmentRow.dataset.type);
+    return ['video/mp4', 'video/webm', 'video/ogg', 'video/quicktime'].includes(type) ? 'video' : null;
+  }
+
+  /**
+   * Opens media promptly, using a cached full-size Blob when available.
    * @param {HTMLElement} attachmentRow
    */
-  async previewMediaAttachment(attachmentRow) {
-    let loadingToastId;
+  async openMediaAttachment(attachmentRow) {
+    const kind = this.getAttachmentPreviewKind(attachmentRow);
+    if (!kind) return;
+
+    let requestId;
     try {
       const { item, url } = this.getAttachmentContextFromRow(attachmentRow);
       if (url === '#') return;
-      
-      // Get pUrl from data attributes
-      const pUrl = attachmentRow.dataset.pUrl;
-      if (!pUrl) {
-        showToast('Preview not available for this attachment', 2000, 'info');
+
+      const filename = decodeURIComponent(attachmentRow.dataset.name || 'Attachment');
+      requestId = fullImageModal.openLoading(filename, kind, attachmentRow.dataset.thumbnailUrl || '');
+      if (requestId === null) return;
+
+      const signal = kind === 'video' ? fullImageModal.abortController.signal : undefined;
+      const blob = await this.getAttachmentBlob(item, attachmentRow, signal);
+      if (!fullImageModal.isCurrentRequest(requestId)) return;
+      const safePreviewMime = await getSafeAttachmentPreviewMime(blob);
+      if (!fullImageModal.isCurrentRequest(requestId)) return;
+      const isVerified = kind === 'image'
+        ? safePreviewMime.startsWith('image/')
+        : ['video/mp4', 'video/webm', 'video/ogg', 'video/quicktime'].includes(safePreviewMime);
+      if (!isVerified) {
+        fullImageModal.showError('This attachment cannot be previewed safely.', requestId);
         return;
       }
-      
-      loadingToastId = showToast(`Loading preview...`, 0, 'loading');
-      
-      // Decrypt thumbnail using pUrl (reuses same key derivation as main file)
-      const thumbnailBlob = await this.decryptAttachmentToBlob(item, attachmentRow, pUrl);
-      
-      // Cache and display thumbnail
-      await thumbnailCache.save(url, thumbnailBlob, 'image/jpeg');
-      await this.updateThumbnailInPlace(attachmentRow, thumbnailBlob);
-      
-      hideToast(loadingToastId);
+      const previewBlob = new Blob([blob], { type: safePreviewMime });
+      if (kind === 'video') {
+        fullImageModal.showVideo(previewBlob, requestId);
+      } else {
+        fullImageModal.showImage(previewBlob, requestId);
+      }
     } catch (err) {
-      console.error('Preview failed:', err);
-      hideToast(loadingToastId);
-      this.handleAttachmentError(err, 'Preview failed.');
+      if (requestId !== undefined && !fullImageModal.isCurrentRequest(requestId)) return;
+      console.error('Media open failed:', err);
+      if (requestId !== undefined) fullImageModal.showError('Unable to load this attachment.', requestId);
+      this.handleAttachmentError(err, 'Failed to open attachment.');
     }
   }
 
   /**
-   * Save an image attachment using the existing download/decrypt flow.
+   * Save an attachment from the context menu.
    * @param {HTMLElement} attachmentRow
    */
-  async saveImageAttachment(attachmentRow) {
-    // Reuse normal attachment download flow (decrypt + download)
+  async saveAttachment(attachmentRow) {
     const { item } = this.getAttachmentContextFromRow(attachmentRow);
 
-    // Concurent download prevention
     if (this.attachmentDownloadInProgress) return;
     this.attachmentDownloadInProgress = true;
     try {
@@ -20540,6 +27740,68 @@ class ChatModal {
     } finally {
       this.attachmentDownloadInProgress = false;
     }
+  }
+
+  // Recheck eligibility on click; the background checker may have changed it.
+  handleEvmPaymentAction(action, messageEl) {
+    const message = this.getMessageRecordFromElement(messageEl);
+    if (message?.type !== EVM_CHAT_MESSAGE_TYPE || message.deleted) return;
+    const actions = evmAssets.getPaymentActions(message.payment, message);
+    if (action === 'evm-review' && actions.retryTransfer) {
+      void evmAssets.reviewPayment(message.payment, myData.contacts[this.address]?.username || `0x${this.address}`);
+    } else if (action === 'evm-retry' && actions.retryMessage) {
+      void evmAssets.recoverPayment(evmPaymentId(message.payment));
+    } else if (action === 'evm-check' && actions.checkAgain) {
+      void recheckEvmPayment(message.payment);
+      showToast('Status checks restarted.', 5000, 'info');
+    } else {
+      showToast('Payment status changed. Reopen the message menu for available actions.', 0, 'error');
+    }
+  }
+
+  getPaymentWalletTarget(message) {
+    if (!message || isDeleted(message) || message.status === 'failed') return null;
+    if (typeof message.amount === 'bigint') return { type: 'lib' };
+    if (message.type === EVM_CHAT_MESSAGE_TYPE) return parseEvmTransferMessage(message.payment);
+    if (message.type === INTENTS_CHAT_MESSAGE_TYPE) return parseTransferMessage(message.payment);
+    return null;
+  }
+
+  async openPaymentWallet(messageEl) {
+    const target = this.getPaymentWalletTarget(this.getMessageRecordFromElement(messageEl));
+    if (!target) return;
+
+    if (target.type === 'lib') {
+      this.close();
+      await footer.switchView('wallet');
+      return;
+    }
+
+    const requestId = ++this.paymentWalletRequestId;
+    const account = myAccount;
+    const isCurrent = () => this.paymentWalletRequestId === requestId
+      && myAccount === account && findTopModal() === this.modal;
+    // Send from the asset details goes back to the person in this chat.
+    const contact = myData?.contacts?.[this.address];
+    const recipient = contact ? { username: contact.username || '', address: contact.address } : null;
+
+    if (target.type === EVM_CHAT_MESSAGE_TYPE) {
+      const { walletNetwork, asset } = await evmAssets.resolvePaymentAsset(target);
+      if (!isCurrent()) return;
+      if (asset) {
+        evmAssets.assetDetailsModal.open(walletNetwork.id, asset.key, { recipient });
+        return;
+      }
+    } else {
+      const asset = await multichain.resolvePaymentAsset(target);
+      if (!isCurrent()) return;
+      if (asset) {
+        multichain.assetModal.open(asset.key, { recipient });
+        return;
+      }
+    }
+
+    showToast('This asset is unavailable in your wallet.', 3000, 'warning');
   }
 
   /**
@@ -20551,6 +27813,14 @@ class ChatModal {
     if (!messageEl) return;
     
     switch (action) {
+      case 'wallet':
+        this.closeContextMenu();
+        void this.openPaymentWallet(messageEl);
+        return;
+      case 'evm-check':
+      case 'evm-review':
+        this.handleEvmPaymentAction(action, messageEl);
+        break;
       case 'save':
         void this.saveVoiceMessage(messageEl);
         break;
@@ -20953,10 +28223,7 @@ class ChatModal {
       
       // Manually resize textarea after browser has updated layout
       // requestAnimationFrame ensures scrollHeight is accurate
-      requestAnimationFrame(() => {
-        this.messageInput.style.height = '48px';
-        this.messageInput.style.height = Math.min(this.messageInput.scrollHeight, 120) + 'px';
-      });
+      requestAnimationFrame(() => this.resizeMessageInput());
       
       // Toggle button visibility to show send button since input has content
       this.toggleSendButtonVisibility();
@@ -21019,6 +28286,14 @@ class ChatModal {
    */
   getMessageTextForReply(messageEl) {
     if (!messageEl) return '';
+    const intentsPayment = messageEl.querySelector('.intents-payment-receipt');
+    if (intentsPayment) {
+      const amount = intentsPayment.querySelector('.intents-payment-amount').textContent.trim();
+      const chain = intentsPayment.querySelector('.intents-payment-chain')?.textContent;
+      const note = intentsPayment.querySelector('.intents-payment-note')?.textContent;
+      const time = intentsPayment.querySelector('.message-time').textContent.trim();
+      return [amount, chain, note, time].filter(Boolean).join(' · ');
+    }
     const voice = messageEl.querySelector('.voice-message');
     if (voice) {
       const ts = parseInt(messageEl.dataset.messageTimestamp || '', 10);
@@ -21177,27 +28452,14 @@ class ChatModal {
       ? messageRecord.message.trim()
       : '';
     const anchorHref = messageEl.querySelector('.call-message a')?.href?.trim() || '';
-    const callUrl = recordUrl || anchorHref.split('#')[0];
+    const callUrl = normalizeCallUrl(recordUrl || anchorHref);
     if (!callUrl) return '';
 
-    const urlToCopy = callUrl.includes('#') ? callUrl : `${callUrl}${callUrlParams}`;
-    return this.removeCallDisplayNameParam(urlToCopy);
-  }
-
-  removeCallDisplayNameParam(callUrl) {
-    const [baseUrl, hash = ''] = callUrl.split('#');
-    if (!hash) return callUrl;
-
-    const filteredHash = hash
-      .split('&')
-      .filter((param) => !param.startsWith('userInfo.displayName='))
-      .join('&');
-
-    return filteredHash ? `${baseUrl}#${filteredHash}` : baseUrl;
+    return `${callUrl}${callUrlParams}`;
   }
 
     /**
-   * Copies message content to clipboard
+     * Copies message content to clipboard
    * @param {HTMLElement} messageEl - The message element
    */
   async copyMessageContent(messageEl) {
@@ -21272,14 +28534,17 @@ class ChatModal {
       return showToast('This call is being deleted.', 2000, 'warning');
     }
 
-    const callUrl = messageEl.querySelector('.call-message a')?.href;
+    const callUrl = buildCallJoinUrl(
+      messageEl.querySelector('.call-message a')?.href,
+      myAccount.username
+    );
     if (!callUrl) return showToast('Call link not found', 2000, 'error');
     // Gate future scheduled calls (context menu path)
     if (this.gateScheduledCall(messageEl)) {
       this.closeContextMenu();
       return;
     }
-    window.open(callUrl+`${callUrlParams}"${myAccount.username}"`, '_blank');
+    window.open(callUrl, '_blank', 'noopener,noreferrer');
     this.closeContextMenu();
   }
 
@@ -21334,8 +28599,8 @@ class ChatModal {
           DELETED_MESSAGE_LOCAL_TEXT
         );
       }
-      // Remove cached thumbnails for image attachments, then remove attachments
-      this.purgeThumbnail(message.xattach);
+      // Remove cached media for attachments, then remove attachments
+      void this.purgeAttachmentCaches(message.xattach, message);
       delete message.xattach;
       purgeContactReactionsForTarget(contact, message.txid);
       purgePendingReactionsForTarget(this.address, message.txid);
@@ -21367,59 +28632,48 @@ class ChatModal {
     const { txid, messageTimestamp: timestamp } = messageEl.dataset;
     
     if (!timestamp && !txid) return;
-    
+
+    let deleteForAllGuard = null;
+    let submissionAttempted = false;
     try {
-      // Get the message object from contact.messages
-      const contact = myData.contacts[this.address];
+      const account = myAccount;
+      const address = this.address;
+      const contact = myData.contacts[address];
       if (!contact) return;
 
       const message = this.getMessageRecordFromElement(messageEl);
       if (!message) return;
 
-      const targetTxid = message.txid;
-      if (!targetTxid) {
+      const request = { account, address, message, txid: message.txid };
+      if (!request.txid) {
         return showToast('Cannot delete message: missing message id', 0, 'error');
       }
-      
-      if (isDeletedForAll(message)) {
-        return showToast('Message already deleted for everyone', 2000, 'info');
-      }
+      if (this.hasRecentDeleteForAllForTarget(request.txid)) return;
+      if (!this.checkDeleteForAllRequirements(request)) return;
 
-      // Check if the message was sent by the current user
-      if (!message.my) {
-        return showToast('You can only delete your own messages for all', 0, 'error');
-      }
-
-      if (this.hasRecentDeleteForAllForTarget(targetTxid)) return;
-
-      if (!confirm('Delete this message for all participants?')) return;
-      const deleteForAllGuard = this.markRecentDeleteForAllForTarget(targetTxid);
-
-      // Create and send a "delete" message
-      const keys = myAccount.keys;
+      const keys = account?.keys;
       if (!keys) {
-        this.clearRecentDeleteForAllGuard(deleteForAllGuard);
         showToast('Keys not found', 0, 'error');
         return;
       }
 
-      const tollInLib = contact.tollRequiredToSend == 0 ? 0n : getEffectiveTollLibWei(this.toll);
-
-      const sufficientBalance = await validateBalance(tollInLib);
-      if (!sufficientBalance) {
-        this.clearRecentDeleteForAllGuard(deleteForAllGuard);
-        const msg = `Insufficient balance for fee${tollInLib > 0n ? ' and toll' : ''}. Go to the wallet to add more LIB.`;
-        showToast(msg, 0, 'error');
+      deleteForAllGuard = this.markRecentDeleteForAllForTarget(request.txid);
+      const feeBalanceStatus = await getFeeBalanceStatus();
+      if (!this.checkDeleteForAllRequirements(request)) return;
+      if (!feeBalanceStatus.success) {
+        showFeeBalanceFailureToast(feeBalanceStatus.reason);
         return;
       }
 
+      if (!confirm('Delete this message for all participants?')) return;
+
       // Ensure recipient keys are available
-      const ok = await ensureContactKeys(this.address);
+      const ok = await ensureContactKeys(address);
+      if (!this.checkDeleteForAllRequirements(request)) return;
       const recipientPubKey = contact.public;
       const pqRecPubKey = contact.pqPublic;
       if (!ok || !recipientPubKey || !pqRecPubKey) {
-        this.clearRecentDeleteForAllGuard(deleteForAllGuard);
-        console.warn(`No public/PQ key found for recipient ${this.address}`);
+        console.warn(`No public/PQ key found for recipient ${address}`);
         showToast('Failed to get recipient key', 0, 'error');
         return;
       }
@@ -21430,7 +28684,7 @@ class ChatModal {
       // Create delete message payload
       const deleteObj = {
         type: 'delete',
-        txid: targetTxid  // ID of the message to delete
+        txid: request.txid  // ID of the message to delete
       };
 
       // Encrypt the message
@@ -21447,11 +28701,14 @@ class ChatModal {
       };
 
       // Prepare and send the delete message transaction
-      const deleteMessageObj = await this.createChatMessage(this.address, payload, tollInLib, keys);
+      const deleteMessageObj = await this.createChatMessage(address, payload, 0n, keys);
+      if (!this.checkDeleteForAllRequirements(request)) return;
       await signObj(deleteMessageObj, keys);
+      if (!this.checkDeleteForAllRequirements(request)) return;
       const deleteTxid = getTxid(deleteMessageObj);
 
       // Send the delete transaction
+      submissionAttempted = true;
       const response = await injectTx(deleteMessageObj, deleteTxid);
 
       if (!response || !response.result || !response.result.success) {
@@ -21476,6 +28733,11 @@ class ChatModal {
     } catch (error) {
       console.error('Delete for all error:', error);
       showToast('Failed to delete message. Please try again.', 0, 'error');
+    } finally {
+      if (deleteForAllGuard) {
+        if (submissionAttempted) this.scheduleDeleteForAllGuardExpiry(deleteForAllGuard);
+        else this.clearRecentDeleteForAllGuard(deleteForAllGuard);
+      }
     }
   }
 
@@ -21673,22 +28935,22 @@ class ChatModal {
     await this.updateTollValue(address);
     await this.updateTollRequired(address);
 
-    if (!this.isActive() || this.address !== address) {
-      saveState();
-      return;
+    this.saveRecipientTollState(address, contact);
+  }
+
+  saveRecipientTollState(address, contact) {
+    if (this.isActive() && this.address === address) {
+      this.blockedByRecipient = Number(contact.tollRequiredToSend) === 2;
+      this.updateTollAmountUI(address);
+      this.addAttachmentButton.disabled = this.isEncrypting || this.isEditingMessage() || this.blockedByRecipient;
+      this.voiceRecordButton.disabled = this.blockedByRecipient || !isOnline;
     }
-
-    this.blockedByRecipient = Number(contact.tollRequiredToSend) === 2;
-    this.updateTollAmountUI(address);
-    this.addAttachmentButton.disabled = this.isEncrypting || this.isEditingMessage() || this.blockedByRecipient;
-    this.voiceRecordButton.disabled = this.blockedByRecipient || !isOnline;
-
     saveState();
   }
 
   /**
    * Opens a lightweight chooser to select calling now or scheduling for later.
-   * Returns 0 for immediate call or a corrected future timestamp (ms since epoch) using timeSkew.
+   * Returns 0 for immediate call or an absolute future Unix timestamp in milliseconds.
    * Returns null if user cancels.
    * @returns {Promise<number|null>}
    */
@@ -21699,7 +28961,7 @@ class ChatModal {
           if (choice === null) return resolve(null);
           if (choice === 'now') return resolve(0);
           // schedule
-          callScheduleDateModal.open((dateTs) => {
+          openCallScheduleDatePicker((dateTs) => {
             if (dateTs === null) {
               // back to choice
               return openChoice();
@@ -21752,17 +29014,16 @@ class ChatModal {
       const randomHex = bin2hex(randomBytes).slice(0, 20);
 
       // Create the Meet URL
-      const callUrl = `https://meet.liberdus.com/${randomHex}`;
+      const callUrl = `${network.meetUrl.replace(/\/+$/, '')}/${randomHex}`;
       
       // Send a call message to the contact with callTime (0 or future timestamp)
       const success = await this.sendCallMessage(callUrl, chosenCallTime);
       
       if (success) {
         if (chosenCallTime === 0) {
-          window.open(callUrl + `${callUrlParams}"${myAccount.username}"`, '_blank');
+          window.open(buildCallJoinUrl(callUrl, myAccount.username), '_blank', 'noopener,noreferrer');
         } else {
-          const when = new Date(chosenCallTime - timeSkew); // convert back to local wall-clock for display
-          showToast(`Call scheduled for ${when.toLocaleString()}`, 3000, 'success');
+          showToast(`Call scheduled for ${this.formatLocalDateTime(chosenCallTime)}`, 3000, 'success');
         }
       }
       
@@ -21820,7 +29081,7 @@ class ChatModal {
       const callObj = {
         type: 'call',
         url: meetUrl,
-        // callTime: 0 for immediate, or corrected future timestamp (ms since epoch)
+        // callTime: 0 for immediate, or an absolute future Unix timestamp in milliseconds
         callTime: normalizedCallTime
       };
 
@@ -22413,9 +29674,8 @@ class ChatModal {
   }
 
   formatLocalDateTime(ts) {
-    const localMs = (typeof ts === 'number' ? ts : Number(ts)) - timeSkew;
-    const minute = 60 * 1000;
-    const roundedMs = Math.round(localMs / minute) * minute;
+    const minuteMs = 60 * 1000;
+    const roundedMs = Math.round(Number(ts) / minuteMs) * minuteMs;
     return new Date(roundedMs).toLocaleString(undefined, {
       year: 'numeric',
       month: 'numeric',
@@ -22443,6 +29703,394 @@ class ChatModal {
 }
 
 const chatModal = new ChatModal();
+
+class FullImageModal {
+  constructor() {
+    this.objectUrl = null;
+    this.requestId = 0;
+    this.abortController = null;
+    this.rotationDegrees = 0;
+    this.scale = 1;
+    this.translateX = 0;
+    this.translateY = 0;
+    this.touchGesture = null;
+    this.dragPointerId = null;
+    this.chromeHideTimer = null;
+  }
+
+  load() {
+    this.modal = document.getElementById('fullImageModal');
+    this.header = this.modal.querySelector('.modal-header');
+    this.closeButton = document.getElementById('closeFullImageModal');
+    this.rotateButton = document.getElementById('fullImageRotate');
+    this.title = document.getElementById('fullImageModalTitle');
+    this.viewer = document.getElementById('fullImageViewer');
+    this.loading = document.getElementById('fullImageLoading');
+    this.loadingText = document.getElementById('fullImageLoadingText');
+    this.error = document.getElementById('fullImageError');
+    this.image = document.getElementById('fullImageViewerImage');
+    this.video = document.getElementById('fullImageViewerVideo');
+    this.zoomControls = document.getElementById('fullImageZoomControls');
+    this.zoomInButton = document.getElementById('fullImageZoomIn');
+    this.zoomOutButton = document.getElementById('fullImageZoomOut');
+
+    assert(this.modal && this.header && this.closeButton && this.rotateButton && this.title
+      && this.viewer && this.loading && this.loadingText && this.error && this.image && this.video
+      && this.zoomControls && this.zoomInButton && this.zoomOutButton,
+      'Media modal elements are required');
+
+    this.closeButton.addEventListener('click', () => this.close());
+    this.rotateButton.addEventListener('click', () => this.rotateMedia());
+    this.zoomInButton.addEventListener('click', () => this.zoomBy(0.5));
+    this.zoomOutButton.addEventListener('click', () => this.zoomBy(-0.5));
+    this.viewer.addEventListener('touchstart', (event) => this.handleTouchStart(event), { passive: false });
+    this.viewer.addEventListener('touchmove', (event) => this.handleTouchMove(event), { passive: false });
+    this.viewer.addEventListener('touchend', (event) => this.handleTouchEnd(event));
+    this.viewer.addEventListener('touchcancel', (event) => this.handleTouchEnd(event));
+    this.viewer.addEventListener('pointerdown', (event) => this.handlePointerDown(event));
+    this.viewer.addEventListener('pointermove', (event) => this.handlePointerMove(event));
+    this.viewer.addEventListener('pointerup', (event) => this.handlePointerEnd(event));
+    this.viewer.addEventListener('pointercancel', (event) => this.handlePointerEnd(event));
+    for (const type of ['pointermove', 'pointerdown', 'pointerup', 'pointercancel', 'touchstart', 'touchend', 'touchcancel']) {
+      this.modal.addEventListener(type, () => this.revealChrome(), { passive: true });
+    }
+    for (const controls of [this.header, this.zoomControls]) {
+      controls.addEventListener('pointerenter', () => this.revealChrome());
+      controls.addEventListener('pointerleave', () => this.revealChrome());
+    }
+    this.modal.addEventListener('focusin', () => {
+      if (this.modal.querySelector(':focus-visible')) this.revealChrome();
+    });
+    // Native video controls can blur themselves when they auto-hide.
+    this.modal.addEventListener('focusout', () => queueMicrotask(() => this.scheduleChromeHide()));
+    document.addEventListener('keydown', (event) => {
+      if (!this.modal.classList.contains('active')) return;
+      if (event.key !== 'Escape') {
+        this.revealChrome();
+        return;
+      }
+      event.preventDefault();
+      this.close();
+    });
+    this.updateZoomControls();
+  }
+
+  canHideChrome() {
+    const controlsHovered = window.matchMedia('(hover: hover)').matches
+      && (this.header.matches(':hover') || this.zoomControls.matches(':hover'));
+    return this.modal.classList.contains('active') && this.loading.hidden && this.error.hidden
+      && this.touchGesture === null && this.dragPointerId === null
+      && !controlsHovered && !this.modal.querySelector(':focus-visible');
+  }
+
+  revealChrome() {
+    this.modal.classList.remove('is-chrome-hidden');
+    this.scheduleChromeHide();
+  }
+
+  scheduleChromeHide() {
+    clearTimeout(this.chromeHideTimer);
+    this.chromeHideTimer = null;
+    if (this.modal.classList.contains('is-chrome-hidden') || !this.canHideChrome()) return;
+
+    this.chromeHideTimer = setTimeout(() => {
+      this.chromeHideTimer = null;
+      if (this.canHideChrome()) this.modal.classList.add('is-chrome-hidden');
+    }, 3000);
+  }
+
+  /** @returns {number | null} Identifies this open until close or replacement. */
+  openLoading(filename, kind = 'image', poster = '') {
+    const isAlreadyOpen = this.modal.classList.contains('active');
+    if (!isAlreadyOpen && !openModal(this.modal)) return null;
+
+    this.clearMedia();
+    const requestId = ++this.requestId;
+    this.abortController = new AbortController();
+    this.title.textContent = filename;
+    this.image.alt = filename;
+    this.modal.classList.toggle('is-video', kind === 'video');
+    this.loadingText.textContent = kind === 'video' ? 'Loading video...' : 'Loading image...';
+    this.loading.hidden = false;
+    this.viewer.setAttribute('aria-busy', 'true');
+    if (kind === 'video' && poster) {
+      this.video.poster = poster;
+      this.video.hidden = false;
+    }
+    return requestId;
+  }
+
+  isCurrentRequest(requestId) {
+    return this.requestId === requestId && this.modal.classList.contains('active');
+  }
+
+  showImage(blob, requestId) {
+    if (!this.isCurrentRequest(requestId)) return;
+    const objectUrl = URL.createObjectURL(blob);
+    this.objectUrl = objectUrl;
+    this.image.onload = () => {
+      if (!this.isCurrentRequest(requestId) || this.objectUrl !== objectUrl) return;
+      this.loading.hidden = true;
+      this.image.hidden = false;
+      this.rotateButton.hidden = false;
+      this.viewer.setAttribute('aria-busy', 'false');
+      this.updateZoomControls();
+      this.revealChrome();
+    };
+    this.image.onerror = () => {
+      this.showError('Unable to display image.', requestId);
+    };
+    this.image.src = objectUrl;
+  }
+
+  showVideo(blob, requestId) {
+    if (!this.isCurrentRequest(requestId)) return;
+
+    this.video.onloadedmetadata = () => {
+      if (!this.isCurrentRequest(requestId)) return;
+      this.loading.hidden = true;
+      this.rotateButton.hidden = false;
+      this.viewer.setAttribute('aria-busy', 'false');
+      this.revealChrome();
+    };
+    this.video.onerror = () => {
+      this.showError('Unable to play this video on this device.', requestId);
+    };
+    this.objectUrl = URL.createObjectURL(blob);
+    this.video.hidden = false;
+    this.video.src = this.objectUrl;
+    this.video.load();
+  }
+
+  showError(message, requestId) {
+    if (!this.isCurrentRequest(requestId)) return;
+    ++this.requestId;
+    this.clearMedia();
+    this.error.textContent = `${message} Close this viewer and choose Save from the attachment options.`;
+    this.error.hidden = false;
+  }
+
+  getTouchMidpoint(touches) {
+    return {
+      x: (touches[0].clientX + touches[1].clientX) / 2,
+      y: (touches[0].clientY + touches[1].clientY) / 2,
+    };
+  }
+
+  getTouchDistance(touches) {
+    return Math.hypot(
+      touches[0].clientX - touches[1].clientX,
+      touches[0].clientY - touches[1].clientY,
+    );
+  }
+
+  startPinch(touches) {
+    const midpoint = this.getTouchMidpoint(touches);
+    const viewerRect = this.viewer.getBoundingClientRect();
+    const centerX = viewerRect.left + viewerRect.width / 2;
+    const centerY = viewerRect.top + viewerRect.height / 2;
+
+    this.touchGesture = {
+      type: 'pinch',
+      startDistance: Math.max(this.getTouchDistance(touches), 1),
+      startScale: this.scale,
+      anchorX: (midpoint.x - centerX - this.translateX) / this.scale,
+      anchorY: (midpoint.y - centerY - this.translateY) / this.scale,
+    };
+  }
+
+  startPan(touch) {
+    this.touchGesture = {
+      type: 'pan',
+      startX: touch.clientX,
+      startY: touch.clientY,
+      translateX: this.translateX,
+      translateY: this.translateY,
+    };
+  }
+
+  handleTouchStart(event) {
+    if (this.image.hidden || event.target.closest('.full-image-zoom-controls')) return;
+
+    if (event.touches.length === 2) {
+      event.preventDefault();
+      this.startPinch(event.touches);
+    } else if (event.touches.length === 1 && this.scale > 1) {
+      this.startPan(event.touches[0]);
+    }
+  }
+
+  handleTouchMove(event) {
+    if (this.image.hidden) return;
+    if (event.touches.length === 2) {
+      event.preventDefault();
+      if (this.touchGesture?.type !== 'pinch') this.startPinch(event.touches);
+
+      const midpoint = this.getTouchMidpoint(event.touches);
+      const viewerRect = this.viewer.getBoundingClientRect();
+      const centerX = viewerRect.left + viewerRect.width / 2;
+      const centerY = viewerRect.top + viewerRect.height / 2;
+      this.scale = Math.min(4, Math.max(1,
+        this.touchGesture.startScale * this.getTouchDistance(event.touches) / this.touchGesture.startDistance));
+      this.translateX = midpoint.x - centerX - this.touchGesture.anchorX * this.scale;
+      this.translateY = midpoint.y - centerY - this.touchGesture.anchorY * this.scale;
+      this.constrainTranslation();
+      this.applyTransform();
+    } else if (event.touches.length === 1 && this.touchGesture?.type === 'pan') {
+      event.preventDefault();
+      this.panTo(event.touches[0]);
+    }
+  }
+
+  handleTouchEnd(event) {
+    if (this.image.hidden) return;
+    if (event.touches.length === 1 && this.scale > 1) {
+      this.startPan(event.touches[0]);
+    } else if (event.touches.length === 0) {
+      this.touchGesture = null;
+    }
+  }
+
+  handlePointerDown(event) {
+    if (event.pointerType === 'touch' || event.button !== 0 || event.target !== this.image
+      || this.image.hidden || this.scale <= 1) return;
+
+    event.preventDefault();
+    this.dragPointerId = event.pointerId;
+    this.startPan(event);
+    this.viewer.setPointerCapture?.(event.pointerId);
+    this.viewer.classList.add('is-dragging');
+  }
+
+  handlePointerMove(event) {
+    if (event.pointerId !== this.dragPointerId || this.touchGesture?.type !== 'pan') return;
+    event.preventDefault();
+    this.panTo(event);
+  }
+
+  handlePointerEnd(event) {
+    if (event.pointerId !== this.dragPointerId) return;
+
+    if (this.viewer.hasPointerCapture?.(event.pointerId)) {
+      this.viewer.releasePointerCapture(event.pointerId);
+    }
+    this.dragPointerId = null;
+    this.touchGesture = null;
+    this.viewer.classList.remove('is-dragging');
+  }
+
+  panTo(point) {
+    this.translateX = this.touchGesture.translateX + point.clientX - this.touchGesture.startX;
+    this.translateY = this.touchGesture.translateY + point.clientY - this.touchGesture.startY;
+    this.constrainTranslation();
+    this.applyTransform();
+  }
+
+  constrainTranslation() {
+    const sideways = this.rotationDegrees % 180 !== 0;
+    const width = sideways ? this.image.clientHeight : this.image.clientWidth;
+    const height = sideways ? this.image.clientWidth : this.image.clientHeight;
+    const maxX = Math.max(0, (width * this.scale - this.viewer.clientWidth) / 2);
+    const maxY = Math.max(0, (height * this.scale - this.viewer.clientHeight) / 2);
+    this.translateX = Math.min(maxX, Math.max(-maxX, this.translateX));
+    this.translateY = Math.min(maxY, Math.max(-maxY, this.translateY));
+  }
+
+  applyTransform() {
+    const zoomed = this.scale > 1;
+    this.image.style.translate = zoomed ? `${this.translateX}px ${this.translateY}px` : '';
+    this.image.style.scale = zoomed ? this.scale : '';
+    this.viewer.classList.toggle('is-zoomed', zoomed);
+    this.updateZoomControls();
+  }
+
+  zoomBy(amount) {
+    if (this.image.hidden) return;
+
+    const previousScale = this.scale;
+    this.scale = Math.min(4, Math.max(1, this.scale + amount));
+    const scaleRatio = this.scale / previousScale;
+    this.translateX *= scaleRatio;
+    this.translateY *= scaleRatio;
+    this.constrainTranslation();
+    this.applyTransform();
+  }
+
+  updateZoomControls() {
+    if (!this.zoomInButton || !this.zoomOutButton) return;
+
+    const imageUnavailable = this.image.hidden;
+    this.zoomControls.hidden = imageUnavailable;
+    this.zoomInButton.disabled = imageUnavailable || this.scale >= 4;
+    this.zoomOutButton.disabled = imageUnavailable || this.scale <= 1;
+  }
+
+  rotateMedia() {
+    if (this.rotateButton.hidden) return;
+
+    this.setRotation((this.rotationDegrees + 90) % 360);
+    this.resetZoom();
+  }
+
+  setRotation(degrees) {
+    this.rotationDegrees = degrees;
+    this.viewer.style.setProperty('--media-rotation', `${degrees}deg`);
+    this.viewer.classList.toggle('is-rotated', degrees !== 0);
+    this.viewer.classList.toggle('is-sideways', degrees % 180 !== 0);
+  }
+
+  resetZoom() {
+    this.scale = 1;
+    this.translateX = 0;
+    this.translateY = 0;
+    this.touchGesture = null;
+    this.dragPointerId = null;
+    this.viewer.classList.remove('is-dragging');
+    this.applyTransform();
+  }
+
+  clearMedia() {
+    clearTimeout(this.chromeHideTimer);
+    this.chromeHideTimer = null;
+    this.modal?.classList.remove('is-chrome-hidden');
+    this.abortController?.abort();
+    this.abortController = null;
+    if (!this.image) return;
+
+    this.video.onloadedmetadata = null;
+    this.video.onerror = null;
+    this.video.pause();
+    this.video.removeAttribute('src');
+    this.video.removeAttribute('poster');
+    this.video.load();
+    this.video.hidden = true;
+    this.image.onload = null;
+    this.image.onerror = null;
+    this.image.removeAttribute('src');
+    this.image.hidden = true;
+    this.loading.hidden = true;
+    this.error.hidden = true;
+    this.viewer.setAttribute('aria-busy', 'false');
+    this.image.alt = '';
+    this.rotateButton.hidden = true;
+    this.setRotation(0);
+    this.resetZoom();
+
+    if (this.objectUrl) {
+      URL.revokeObjectURL(this.objectUrl);
+      this.objectUrl = null;
+    }
+  }
+
+  close() {
+    ++this.requestId;
+    this.modal?.classList.remove('active');
+    this.clearMedia();
+    if (this.title) this.title.textContent = 'Media';
+  }
+}
+
+const fullImageModal = new FullImageModal();
 
 class CallInviteModal {
   constructor() {
@@ -22628,7 +30276,7 @@ class CallInviteModal {
 
     this.contactsList.innerHTML = '';
     this.emptyState.style.display = 'none';
-    this.modal.classList.add('active');
+    openModal(this.modal);
 
     const currentChatAddress = chatModal.address || '';
     const myAddress = myAccount?.keys?.address || '';
@@ -22974,7 +30622,7 @@ class ShareAttachmentModal {
 
     this.contactsList.innerHTML = '';
     this.emptyState.style.display = 'none';
-    this.modal.classList.add('active');
+    openModal(this.modal);
 
     // Build contacts list (exclude self and current chat contact) and group by status
     const currentChatAddress = chatModal.address;
@@ -23385,13 +31033,13 @@ class ShareContactsModal {
     this.closeButton = document.getElementById('closeShareContactsModal');
 
     // Event listeners
-    this.closeButton.addEventListener('click', () => this.handleClose());
+    this.closeButton.addEventListener('click', () => this.close());
     this.allNoneButton.addEventListener('click', () => this.toggleAllNone());
     this.doneButton.addEventListener('click', withButtonCooldown(this.doneButton, BUTTON_COOLDOWN_MS, null, () => this.handleDone()));
     this.contactsList.addEventListener('click', (e) => this.handleContactClick(e));
     this.actionButton.addEventListener('click', () => {
       if (this.recipientAddress) {
-        this.close();
+        this.forceClose();
         friendModal.setAddress(this.recipientAddress);
         friendModal.open();
       }
@@ -23421,7 +31069,7 @@ class ShareContactsModal {
     this.actionButton.style.display = 'none';
 
     // Show modal
-    this.modal.classList.add('active');
+    openModal(this.modal);
 
     // Check if account is private - show restriction message if so
     if (isPrivateAccount()) {
@@ -23547,6 +31195,7 @@ class ShareContactsModal {
    * @returns {Promise<string>} Avatar HTML
    */
   async getContactAvatarHtmlForShare(contact, size = 40) {
+    const owner = MediaCacheOwnership.getOwnerKey();
     const address = contact?.address;
     if (!address) return generateIdenticon('', size);
 
@@ -23555,13 +31204,13 @@ class ShareContactsModal {
     try {
       // Priority 1: Contact's provided avatar
       if (contact?.avatarId) {
-        const url = await contactAvatarCache.getBlobUrl(contact.avatarId);
+        const url = await contactAvatarCache.getBlobUrl(contact.avatarId, owner);
         if (url) return makeImg(url);
       }
 
       // Priority 2: User-selected avatar for this contact
       if (contact?.mineAvatarId) {
-        const url = await contactAvatarCache.getBlobUrl(contact.mineAvatarId);
+        const url = await contactAvatarCache.getBlobUrl(contact.mineAvatarId, owner);
         if (url) return makeImg(url);
       }
     } catch (err) {
@@ -23677,19 +31326,19 @@ class ShareContactsModal {
   /**
    * Handles back/close button click with warning if contacts are selected
    */
-  handleClose() {
+  close() {
     if (this.selectedContacts.size > 0 && !this.warningShown) {
       this.warningShown = true;
       showToast('You have contacts selected. Click back again to discard.', 0, 'warning');
       return;
     }
-    this.close();
+    this.forceClose();
   }
 
   /**
    * Closes the modal
    */
-  close() {
+  forceClose() {
     this.modal.classList.remove('active');
     // Reset warning state so it can be shown again on next open
     this.warningShown = false;
@@ -23708,17 +31357,17 @@ class ShareContactsModal {
    * @param {Object} contact - Contact object
    * @returns {Promise<Blob|null>} Avatar blob or null if not available
    */
-  async getContactAvatarBlobForShare(contact) {
+  async getContactAvatarBlobForShare(contact, owner) {
     try {
       // Priority 1: Contact's provided avatar
       if (contact?.avatarId) {
-        const blob = await contactAvatarCache.get(contact.avatarId);
+        const blob = await contactAvatarCache.get(contact.avatarId, owner);
         if (blob) return blob;
       }
 
       // Priority 2: User-selected avatar for this contact
       if (contact?.mineAvatarId) {
-        const blob = await contactAvatarCache.get(contact.mineAvatarId);
+        const blob = await contactAvatarCache.get(contact.mineAvatarId, owner);
         if (blob) return blob;
       }
     } catch (err) {
@@ -23735,6 +31384,8 @@ class ShareContactsModal {
    */
   async generateVcfContent() {
     const vcards = [];
+    const contacts = Array.from(this.selectedContacts, address => myData.contacts[address]).filter(Boolean);
+    const owner = MediaCacheOwnership.getOwnerKey();
 
     // First card contains X-LIBERDUS-NETID
     vcards.push([
@@ -23745,10 +31396,7 @@ class ShareContactsModal {
     ].join('\r\n'));
 
     // Generate vCard for each selected contact
-    for (const address of this.selectedContacts) {
-      const contact = myData.contacts[address];
-      if (!contact) continue;
-
+    for (const contact of contacts) {
       const lines = [
         'BEGIN:VCARD',
         'VERSION:3.0',
@@ -23763,7 +31411,7 @@ class ShareContactsModal {
       }
 
       // PHOTO - base64 of avatar blob
-      const avatarBlob = await this.getContactAvatarBlobForShare(contact);
+      const avatarBlob = await this.getContactAvatarBlobForShare(contact, owner);
       if (avatarBlob) {
         const base64 = await contactAvatarCache.blobToBase64(avatarBlob);
         if (base64) {
@@ -23841,7 +31489,7 @@ class ShareContactsModal {
       // Update attachment preview in chat modal
       chatModal.showAttachmentPreview();
 
-      this.close();
+      this.forceClose();
     } catch (err) {
       console.error('Failed to generate/upload VCF:', err);
       showToast('Failed to share contacts', 0, 'error');
@@ -23877,13 +31525,13 @@ class ImportContactsModal {
     this.closeButton = document.getElementById('closeImportContactsModal');
 
     // Event listeners
-    this.closeButton.addEventListener('click', () => this.handleClose());
+    this.closeButton.addEventListener('click', () => this.close());
     this.allNoneButton.addEventListener('click', () => this.toggleAllNone());
     this.doneButton.addEventListener('click', withButtonCooldown(this.doneButton, BUTTON_COOLDOWN_MS, null, () => this.handleDone()));
     this.contactsList.addEventListener('click', (e) => this.handleContactClick(e));
     this.actionButton.addEventListener('click', () => {
       if (this.recipientAddress) {
-        this.close();
+        this.forceClose();
         friendModal.setAddress(this.recipientAddress);
         friendModal.open();
       }
@@ -23919,7 +31567,7 @@ class ImportContactsModal {
     this.actionButton.style.display = 'none';
 
     // Show modal
-    this.modal.classList.add('active');
+    openModal(this.modal);
 
     // Check if account is private - show restriction message if so
     if (isPrivateAccount()) {
@@ -23966,7 +31614,7 @@ class ImportContactsModal {
       const netId = this.extractNetId(vcfContent);
       if (netId && netId !== network.netid) {
         showToast('Network ID mismatch - contacts are from a different network', 0, 'error');
-        this.close();
+        this.forceClose();
         return;
       }
 
@@ -23997,7 +31645,7 @@ class ImportContactsModal {
       console.error('Failed to load VCF:', err);
       logsModal.log('❌ Failed to load VCF:', err?.message || String(err));
       showToast('Failed to load contacts file', 0, 'error');
-      this.close();
+      this.forceClose();
     }
   }
 
@@ -24397,19 +32045,19 @@ class ImportContactsModal {
   /**
    * Handles back/close button click with warning if contacts are selected
    */
-  handleClose() {
+  close() {
     if (this.selectedContacts.size > 0 && !this.warningShown) {
       this.warningShown = true;
       showToast('You have contacts selected. Click back again to discard.', 0, 'warning');
       return;
     }
-    this.close();
+    this.forceClose();
   }
 
   /**
    * Closes the modal
    */
-  close() {
+  forceClose() {
     this.modal.classList.remove('active');
     this.warningShown = false;
     this.parsedContacts = [];
@@ -24435,6 +32083,7 @@ class ImportContactsModal {
 
     this.doneButton.classList.add('loading');
     try {
+      const owner = MediaCacheOwnership.getOwnerKey();
       let importedCount = 0;
       let failedCount = 0;
       const failedContacts = [];
@@ -24504,7 +32153,7 @@ class ImportContactsModal {
               const mimeType = parsedContact.photoType === 'png' ? 'image/png' : 'image/jpeg';
               const avatarBlob = contactAvatarCache.base64ToBlob(parsedContact.photoBase64, mimeType);
               const mineId = bin2hex(generateRandomBytes(16));
-              await contactAvatarCache.save(mineId, avatarBlob);
+              await contactAvatarCache.save(mineId, avatarBlob, owner);
               existingContact.mineAvatarId = mineId;
               existingContact.hasAvatar = true;
               existingContact.useAvatar = 'mine';
@@ -24554,7 +32203,7 @@ class ImportContactsModal {
             const avatarBlob = contactAvatarCache.base64ToBlob(parsedContact.photoBase64, mimeType);
             // Generate ID like user-uploaded avatars for consistency
             const mineId = bin2hex(generateRandomBytes(16));
-            await contactAvatarCache.save(mineId, avatarBlob);
+            await contactAvatarCache.save(mineId, avatarBlob, owner);
             contactRecord.mineAvatarId = mineId;
             contactRecord.hasAvatar = true;
             contactRecord.useAvatar = 'mine';
@@ -24595,7 +32244,7 @@ class ImportContactsModal {
         showToast('Only 20 contacts can be imported at a time. Please import the remaining contacts in another batch.', 0, 'warning');
       }
 
-      this.close();
+      this.forceClose();
 
     } catch (err) {
       console.error('Failed to import contacts:', err);
@@ -24621,11 +32270,12 @@ function roundToMinuteMs(ms) {
   return Math.round(ms / 60000) * 60000;
 }
 
-function formatTimeInTimeZone(ms, tz) {
+function formatTimeInTimeZone(ms, tz, withDate = false) {
   if (!tz || !ms) return '';
   try {
     const fmt = new Intl.DateTimeFormat(undefined, {
       timeZone: tz,
+      ...(withDate ? { year: 'numeric', month: 'short', day: '2-digit' } : {}),
       hour: '2-digit',
       minute: '2-digit',
       timeZoneName: 'short'
@@ -24633,6 +32283,89 @@ function formatTimeInTimeZone(ms, tz) {
     return fmt.format(new Date(ms));
   } catch (e) {
     return '';
+  }
+}
+
+function formatDateTimeInTimeZone(ms, tz) {
+  return formatTimeInTimeZone(ms, tz, true);
+}
+
+class PayChoiceModal {
+  load() {
+    this.modal = document.getElementById('payChoiceModal');
+    this.recipientLabel = document.getElementById('payChoiceRecipient');
+    this.backButton = document.getElementById('closePayChoiceModal');
+    this.cancelButton = document.getElementById('cancelPayChoice');
+    this.backButton.addEventListener('click', () => this.close());
+    this.cancelButton.addEventListener('click', () => this.close());
+    document.getElementById('payChoiceLibBtn').addEventListener('click', () => this.select('lib'));
+    document.getElementById('payChoiceEvmBtn').addEventListener('click', () => this.select('evm'));
+    document.getElementById('payChoiceNearBtn').addEventListener('click', () => this.select('near'));
+    this.modal.addEventListener('keydown', (event) => this.handleKeydown(event));
+    new MutationObserver(() => this.openSelectedAsset()).observe(this.modal, { attributeFilter: ['class'] });
+  }
+
+  /** @param {{username?: string | null, address: string}} contact */
+  open(contact, trigger = document.activeElement) {
+    if (!openModal(this.modal)) return;
+    const recipient = { username: contact.username || '', address: contact.address };
+    this.recipient = recipient;
+    this.returnFocus = trigger;
+    this.recipientLabel.textContent = recipient.username
+      ? `To @${recipient.username}`
+      : 'This contact has no saved username. Enter a recipient in the Send form.';
+    requestAnimationFrame(() => {
+      if (this.recipient === recipient) this.backButton.focus();
+    });
+  }
+
+  /** @param {'lib' | 'evm' | 'near'} assetGroup */
+  select(assetGroup) {
+    if (!this.recipient || this.selectedAssetGroup) return;
+    this.selectedAssetGroup = assetGroup;
+    this.openSelectedAsset();
+  }
+
+  openSelectedAsset() {
+    const { recipient, selectedAssetGroup } = this;
+    // Keep early taps until the modal transition guard allows the next open.
+    if (!selectedAssetGroup || !this.modal.classList.contains('is-transition-complete')) return;
+    this.close();
+    switch (selectedAssetGroup) {
+      case 'lib':
+        void sendAssetFormModal.open({ input: recipient.username, expectedAddress: recipient.address });
+        break;
+      case 'evm':
+        void evmAssets.assetsModal.open({ recipient });
+        break;
+      case 'near':
+        void multichain.assetsModal.open({ recipient });
+        break;
+    }
+  }
+
+  handleKeydown(event) {
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      this.close();
+      return;
+    }
+    if (event.key !== 'Tab') return;
+    const first = this.backButton;
+    const last = this.cancelButton;
+    if (event.target === (event.shiftKey ? first : last)) {
+      event.preventDefault();
+      (event.shiftKey ? last : first).focus();
+    }
+  }
+
+  close() {
+    if (!this.recipient) return;
+    this.modal.classList.remove('active');
+    this.recipient = null;
+    this.selectedAssetGroup = null;
+    this.returnFocus?.focus({ preventScroll: true });
+    this.returnFocus = null;
   }
 }
 
@@ -24663,17 +32396,15 @@ class CallScheduleChoiceModal {
 
     const onNow = () => this._select('now');
     const onSchedule = () => this._select('schedule');
-    const onCancel = () => this._select(null);
-
     if (this.nowBtn) this.nowBtn.addEventListener('click', withButtonCooldown(this.nowBtn, BUTTON_COOLDOWN_MS, null, onNow));
     if (this.scheduleBtn) this.scheduleBtn.addEventListener('click', withButtonCooldown(this.scheduleBtn, BUTTON_COOLDOWN_MS, null, onSchedule));
-    if (this.cancelBtn) this.cancelBtn.addEventListener('click', onCancel);
-    if (this.closeBtn) this.closeBtn.addEventListener('click', onCancel);
+    if (this.cancelBtn) this.cancelBtn.addEventListener('click', () => this.close());
+    if (this.closeBtn) this.closeBtn.addEventListener('click', () => this.close());
   }
 
   open(onSelect) {
     this.onSelect = onSelect;
-    this.modal?.classList.add('active');
+    openModal(this.modal);
     this._startRecipientTimeUpdates();
   }
 
@@ -24683,6 +32414,10 @@ class CallScheduleChoiceModal {
     const cb = this.onSelect;
     this.onSelect = null;
     if (cb) cb(value);
+  }
+
+  close() {
+    this._select(null);
   }
 
   _startRecipientTimeUpdates() {
@@ -24725,130 +32460,268 @@ class CallScheduleChoiceModal {
 }
 
 /**
- * Call Schedule Date Modal
- * Lets user pick date/time and submit
+ * Shared picker for whole-minute durations.
  */
-class CallScheduleDateModal {
+class DurationPickerModal {
+  load() {
+    this.modal = document.getElementById('durationPickerModal');
+    if (!this.modal) return;
+    this.title = document.getElementById('durationPickerModalTitle');
+    this.form = document.getElementById('durationPickerForm');
+    this.daysSelect = document.getElementById('durationPickerDays');
+    this.hoursSelect = document.getElementById('durationPickerHours');
+    this.minutesSelect = document.getElementById('durationPickerMinutes');
+    this.preview = document.getElementById('durationPickerPreview');
+    this.submitButton = document.getElementById('confirmDurationPicker');
+    this.cancelButton = document.getElementById('cancelDurationPicker');
+    this.closeButton = document.getElementById('closeDurationPickerModal');
+
+    this.form?.addEventListener('submit', withButtonCooldown(
+      this.submitButton,
+      BUTTON_COOLDOWN_MS,
+      null,
+      () => this._submitValue(),
+    ));
+    this.form?.addEventListener('change', () => this._updateAvailableOptions());
+    this.cancelButton?.addEventListener('click', () => this.close());
+    this.closeButton?.addEventListener('click', () => this.close());
+  }
+
+  open({
+    initialDurationMs = 0,
+    maxDurationMs,
+    onDone,
+    title = 'Select Duration',
+    selectionFormatter = null,
+  }) {
+    if (typeof onDone !== 'function') throw new Error('Duration picker callback is required');
+    if (!Number.isSafeInteger(maxDurationMs) || maxDurationMs < 0) {
+      throw new Error('Duration picker maximum is required');
+    }
+    this.returnFocus = document.activeElement;
+    this.options = { maxDurationMs, onDone, selectionFormatter };
+    if (this.title) this.title.textContent = title;
+    this._populateOptions(maxDurationMs);
+    const safeInitialMs = Math.min(Math.max(0, initialDurationMs), maxDurationMs);
+    const initialParts = millisecondsToDurationParts(safeInitialMs) || { days: 0, hours: 0, minutes: 0 };
+    this.daysSelect.value = String(initialParts.days);
+    this.hoursSelect.value = String(initialParts.hours);
+    this.minutesSelect.value = String(initialParts.minutes);
+    openModal(this.modal);
+    this._updateAvailableOptions();
+    requestAnimationFrame(() => PopupSelect.focus(this.daysSelect));
+  }
+
+  close() {
+    this._closeWith(null);
+  }
+
+  _populateOptions(maxDurationMs) {
+    this.daysSelect.replaceChildren();
+    this.hoursSelect.replaceChildren();
+    this.minutesSelect.replaceChildren();
+    for (let day = 0; day <= DURATION_PICKER_MAX_DAYS; day++) {
+      this.daysSelect.add(new Option(String(day), String(day)));
+    }
+    for (let hour = 0; hour < 24; hour++) this.hoursSelect.add(new Option(String(hour), String(hour)));
+    for (let minute = 0; minute < 60; minute++) this.minutesSelect.add(new Option(String(minute), String(minute)));
+  }
+
+  _selectedDurationMs() {
+    return durationPartsToMilliseconds(
+      this.daysSelect?.value,
+      this.hoursSelect?.value,
+      this.minutesSelect?.value,
+    );
+  }
+
+  _updateAvailableOptions() {
+    const maxDurationMs = this.options?.maxDurationMs ?? 0;
+    const days = Number(this.daysSelect?.value || 0);
+    const hours = Number(this.hoursSelect?.value || 0);
+    Array.from(this.daysSelect?.options || []).forEach((option) => {
+      option.disabled = durationPartsToMilliseconds(Number(option.value), 0, 0) > maxDurationMs;
+    });
+    if (this.daysSelect?.selectedOptions[0]?.disabled) this.daysSelect.value = '0';
+    const selectedDays = Number(this.daysSelect?.value || days || 0);
+    Array.from(this.hoursSelect?.options || []).forEach((option) => {
+      option.disabled = durationPartsToMilliseconds(selectedDays, Number(option.value), 0) > maxDurationMs;
+    });
+    if (this.hoursSelect?.selectedOptions[0]?.disabled) this.hoursSelect.value = '0';
+    const selectedHours = Number(this.hoursSelect?.value || hours || 0);
+    Array.from(this.minutesSelect?.options || []).forEach((option) => {
+      option.disabled = durationPartsToMilliseconds(selectedDays, selectedHours, Number(option.value)) > maxDurationMs;
+    });
+    if (this.minutesSelect?.selectedOptions[0]?.disabled) this.minutesSelect.value = '0';
+    PopupSelect.syncAll(this.form);
+    this._updatePreview();
+  }
+
+  _updatePreview() {
+    const durationMs = this._selectedDurationMs();
+    const selection = typeof this.options?.selectionFormatter === 'function'
+      ? this.options.selectionFormatter(durationMs)
+      : {
+        preview: `Duration: ${formatDurationParts(durationMs)} (${durationMs} ms)`,
+        submitLabel: `Submit: ${durationMs} ms`,
+      };
+    if (this.preview) this.preview.textContent = selection?.preview || '';
+    if (this.submitButton) this.submitButton.textContent = selection?.submitLabel || 'Submit';
+  }
+
+  _submitValue() {
+    const durationMs = this._selectedDurationMs();
+    if (!Number.isSafeInteger(durationMs) || durationMs < 0 || durationMs > this.options.maxDurationMs) {
+      showToast('Choose a duration within the allowed maximum', 2500, 'error');
+      return;
+    }
+    this._closeWith(durationMs);
+  }
+
+  _closeWith(value) {
+    this.modal?.classList.remove('active');
+    const onDone = this.options?.onDone;
+    const returnFocus = this.returnFocus;
+    this.options = null;
+    this.returnFocus = null;
+    if (onDone) onDone(value);
+    returnFocus?.focus();
+  }
+}
+
+/**
+ * Shared date/time picker used by scheduling flows.
+ */
+class DateTimePickerModal {
   constructor() {
     this.modal = null;
+    this.title = null;
     this.form = null;
     this.dateInput = null;
     this.hourSelect = null;
     this.minuteSelect = null;
     this.ampmSelect = null;
-    this.recipientTime = null;
+    this.preview = null;
     this.submitBtn = null;
+    this.immediateBtn = null;
     this.cancelBtn = null;
     this.closeBtn = null;
-    this.onDone = null; // function(timestamp|null)
-    this.DEFAULT_OFFSET_MINUTES = 0;
-    this.maxDaysOut = 400;
-    this.clockTimer = new ClockTimer('callScheduleCurrentTime');
+    this.options = null;
+    this.returnFocus = null;
+    this.clockTimer = new ClockTimer('dateTimePickerCurrentTime');
     this._onCancel = this._onCancel.bind(this);
     this._onInputChange = this._onInputChange.bind(this);
   }
 
   load() {
-    this.modal = document.getElementById('callScheduleDateModal');
+    this.modal = document.getElementById('dateTimePickerModal');
     if (!this.modal) return;
-    this.form = document.getElementById('callScheduleDateForm');
-    this.dateInput = document.getElementById('callScheduleDate');
-    this.hourSelect = document.getElementById('callScheduleHour');
-    this.minuteSelect = document.getElementById('callScheduleMinute');
-    this.ampmSelect = document.getElementById('callScheduleAmPm');
-    this.recipientTime = document.getElementById('callScheduleConvertedTime');
-    this.submitBtn = document.getElementById('confirmCallSchedule');
-    this.cancelBtn = document.getElementById('cancelCallScheduleDate');
-    this.closeBtn = document.getElementById('closeCallScheduleDateModal');
+    this.title = document.getElementById('dateTimePickerModalTitle');
+    this.form = document.getElementById('dateTimePickerForm');
+    this.dateInput = document.getElementById('dateTimePickerDate');
+    this.hourSelect = document.getElementById('dateTimePickerHour');
+    this.minuteSelect = document.getElementById('dateTimePickerMinute');
+    this.ampmSelect = document.getElementById('dateTimePickerAmPm');
+    this.preview = document.getElementById('dateTimePickerPreview');
+    this.submitBtn = document.getElementById('confirmDateTimePicker');
+    this.immediateBtn = document.getElementById('clearDateTimePicker');
+    this.cancelBtn = document.getElementById('cancelDateTimePicker');
+    this.closeBtn = document.getElementById('closeDateTimePickerModal');
 
-    const wrappedConfirm = withButtonCooldown(this.submitBtn, BUTTON_COOLDOWN_MS, null, async () => {
-      this._submitValue();
-    });
+    this._populateTimeOptions();
+
+    const wrappedConfirm = withButtonCooldown(this.submitBtn, BUTTON_COOLDOWN_MS, null, async () => this._submitValue());
     if (this.form) this.form.addEventListener('submit', wrappedConfirm);
-    if (this.submitBtn) this.submitBtn.addEventListener('click', wrappedConfirm);
+    if (this.immediateBtn) this.immediateBtn.addEventListener('click', () => this._closeWith(0));
     if (this.cancelBtn) this.cancelBtn.addEventListener('click', this._onCancel);
     if (this.closeBtn) this.closeBtn.addEventListener('click', this._onCancel);
-
-    // Live update of converted time preview (single listener for all inputs)
     if (this.form) this.form.addEventListener('change', this._onInputChange);
   }
 
-  open(onDone) {
-    this.onDone = onDone;
-    const defaultDate = this._getDefaultDate();
-    // Populate hours 1-12 (12-hour format)
-    if (this.hourSelect) {
-      this.hourSelect.innerHTML = '';
-      for (let h = 1; h <= 12; h++) {
-        const opt = document.createElement('option');
-        opt.value = this._pad2(h);
-        opt.textContent = this._pad2(h);
-        this.hourSelect.appendChild(opt);
-      }
-      const hour24 = defaultDate.getHours();
-      const hour12 = ((hour24 % 12) === 0) ? 12 : (hour24 % 12);
-      this.hourSelect.value = this._pad2(hour12);
-    }
-    // Set AM/PM
-    if (this.ampmSelect) {
-      const hour24 = defaultDate.getHours();
-      this.ampmSelect.value = hour24 >= 12 ? 'PM' : 'AM';
-    }
-    // Populate 5-minute list starting with 00, going to 55
-    if (this.minuteSelect) {
-      this.minuteSelect.innerHTML = '';
-      const defaultMinute = defaultDate.getMinutes();
-      
-      // Always populate 00, 05, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55
-      for (let i = 0; i < 12; i++) {
-        const m = i * 5;
-        const opt = document.createElement('option');
-        opt.value = this._pad2(m);
-        opt.textContent = this._pad2(m);
-        this.minuteSelect.appendChild(opt);
-      }
-      
-      // Pre-select the closest future time (round up to next 5-minute interval)
-      const roundedMinute = Math.ceil(defaultMinute / 5) * 5;
-      this.minuteSelect.value = this._pad2(roundedMinute % 60);
-      
-      // Handle hour rollover when minute rounds to 60
-      if (roundedMinute === 60 && this.hourSelect && this.ampmSelect) {
-        const currentHour12 = parseInt(this.hourSelect.value);
-        const isAM = this.ampmSelect.value === 'AM';
-        
-        if (currentHour12 === 12) {
-          this.hourSelect.value = '01';
-          this.ampmSelect.value = isAM ? 'PM' : 'AM';
-        } else {
-          this.hourSelect.value = this._pad2(currentHour12 + 1);
-        }
-      }
-    }
-    // Set local date input
+  open({
+    onDone,
+    title = 'Select Date and Time',
+    initialTimestamp = 0,
+    minTimestamp = 0,
+    maxTimestamp = 0,
+    allowImmediate = false,
+    selectionFormatter = null,
+    minError = 'Please choose a date and time in the future',
+    maxError = 'Selected date and time is too far in the future',
+  }) {
+    if (typeof onDone !== 'function') throw new Error('Date/time picker callback is required');
+    this.returnFocus = document.activeElement;
+    this.options = {
+      onDone,
+      minTimestamp,
+      maxTimestamp,
+      selectionFormatter,
+      minError,
+      maxError,
+    };
+
+    if (this.title) this.title.textContent = title;
+    if (this.immediateBtn) this.immediateBtn.classList.toggle('hidden', !allowImmediate);
+
+    const currentMinTimestamp = typeof minTimestamp === 'function' ? minTimestamp() : minTimestamp;
+    const defaultTimestamp = initialTimestamp > 0
+      ? initialTimestamp
+      : Math.max(Date.now(), currentMinTimestamp);
+    const defaultDate = new Date(this._roundUpToNextFiveMinutes(defaultTimestamp));
+    this._setFormValue(defaultDate);
+
     if (this.dateInput) {
-      const max = new Date();
-      max.setDate(max.getDate() + this.maxDaysOut);
-      this.dateInput.max = this._formatDateInput(max);
-
-      this.dateInput.value = this._formatDateInput(defaultDate);
+      this.dateInput.min = currentMinTimestamp > 0
+        ? this._formatDateInput(new Date(currentMinTimestamp))
+        : '';
+      this.dateInput.max = maxTimestamp > 0
+        ? this._formatDateInput(new Date(maxTimestamp))
+        : '';
     }
-    this.modal?.classList.add('active');
-    this.clockTimer.start();
 
-    // Render the initial converted time preview
-    this._updateConvertedTimePreview();
+    openModal(this.modal);
+    this.clockTimer.start();
+    this._updatePreview();
+    requestAnimationFrame(() => this.dateInput?.focus());
   }
 
   _onCancel() {
+    this.close();
+  }
+
+  close() {
     this._closeWith(null);
   }
 
   _onInputChange() {
-    this._updateConvertedTimePreview();
+    this._updatePreview();
   }
 
-  _getSelectedCorrectedTimestamp() {
+  _populateTimeOptions() {
+    if (this.hourSelect) {
+      for (let hour = 1; hour <= 12; hour++) {
+        this.hourSelect.add(new Option(this._pad2(hour), this._pad2(hour)));
+      }
+    }
+    if (this.minuteSelect) {
+      for (let minute = 0; minute < 60; minute += 5) {
+        this.minuteSelect.add(new Option(this._pad2(minute), this._pad2(minute)));
+      }
+    }
+  }
+
+  _setFormValue(date) {
+    if (this.dateInput) this.dateInput.value = this._formatDateInput(date);
+    if (this.hourSelect) {
+      const hour12 = date.getHours() % 12 || 12;
+      this.hourSelect.value = this._pad2(hour12);
+    }
+    if (this.minuteSelect) this.minuteSelect.value = this._pad2(date.getMinutes());
+    if (this.ampmSelect) this.ampmSelect.value = date.getHours() >= 12 ? 'PM' : 'AM';
+    PopupSelect.syncAll(this.form);
+  }
+
+  _getSelectedTimestamp() {
     if (!this.dateInput || !this.hourSelect || !this.minuteSelect || !this.ampmSelect) return 0;
     const dateVal = this.dateInput.value;
     const hourVal = this.hourSelect.value;
@@ -24863,93 +32736,55 @@ class CallScheduleDateModal {
 
     const hour24 = this._convert12To24(hour12, ampmVal);
     const { year, month, day } = parsed;
-    const localMs = new Date(year, month - 1, day, hour24, minute, 0, 0).getTime();
-    return localMs + timeSkew;
+    const selectedDate = new Date(year, month - 1, day, hour24, minute, 0, 0);
+    if (
+      selectedDate.getFullYear() !== year
+      || selectedDate.getMonth() !== month - 1
+      || selectedDate.getDate() !== day
+      || selectedDate.getHours() !== hour24
+      || selectedDate.getMinutes() !== minute
+    ) {
+      return NaN;
+    }
+    return selectedDate.getTime();
   }
 
-  _updateConvertedTimePreview() {
-    if (!this.recipientTime) return;
-
-    const tz = getActiveChatContactTimeZone();
-    const tsRaw = this._getSelectedCorrectedTimestamp();
-    // Display-only: stabilize at the chosen minute even if timeSkew includes seconds.
-    const ts = tsRaw ? roundToMinuteMs(tsRaw) : 0;
-
-    if (!tz || !ts) {
-      this.recipientTime.textContent = '';
-      this.recipientTime.style.display = 'none';
-      return;
-    }
-
-    const s = (() => {
-      if (!tz || !ts) return '';
-      try {
-        const fmt = new Intl.DateTimeFormat(undefined, {
-          timeZone: tz,
-          year: 'numeric',
-          month: 'short',
-          day: '2-digit',
-          hour: '2-digit',
-          minute: '2-digit',
-          timeZoneName: 'short'
-        });
-        return fmt.format(new Date(ts));
-      } catch (e) {
-        return '';
-      }
-    })();
-
-    if (!s) {
-      this.recipientTime.textContent = '';
-      this.recipientTime.style.display = 'none';
-      return;
-    }
-
-    this.recipientTime.textContent = `Recipient time: ${s}`;
-    this.recipientTime.style.display = '';
+  _updatePreview() {
+    if (!this.preview) return;
+    const timestamp = this._getSelectedTimestamp();
+    const selection = timestamp && typeof this.options?.selectionFormatter === 'function'
+      ? this.options.selectionFormatter(timestamp)
+      : null;
+    const preview = selection?.preview || '';
+    this.preview.textContent = preview;
+    this.preview.style.display = preview ? '' : 'none';
+    if (this.submitBtn) this.submitBtn.textContent = selection?.submitLabel || 'Submit';
   }
 
   _submitValue() {
-    if (!this.dateInput || !this.hourSelect || !this.minuteSelect || !this.ampmSelect) return;
-    const dateVal = this.dateInput.value;
-    const hourVal = this.hourSelect.value;
-    const minuteVal = this.minuteSelect.value;
-    const ampmVal = this.ampmSelect.value;
-    if (!dateVal || hourVal === '' || minuteVal === '') {
-      showToast('Please pick a date and time', 0, 'error');
+    const timestamp = this._getSelectedTimestamp();
+    if (Number.isNaN(timestamp)) {
+      showToast('That local time does not exist. Choose another time.', 0, 'error');
       return;
     }
-    const parsed = this._parseDateInput(dateVal);
-    const hour12 = Number(hourVal);
-    const minute = Number(minuteVal);
-    if (!parsed || Number.isNaN(hour12) || Number.isNaN(minute)) {
+    if (!timestamp || !Number.isSafeInteger(timestamp)) {
       showToast('Invalid date/time selected', 0, 'error');
       return;
     }
-    const hour24 = this._convert12To24(hour12, ampmVal);
-    const { year, month, day } = parsed;
-    const localMs = new Date(year, month - 1, day, hour24, minute, 0, 0).getTime();
-    const corrected = localMs + timeSkew;
-    const nowCorrected = getCorrectedTimestamp();
-    const minAllowed = nowCorrected - 5 * 60 * 1000;
-
-    // Max 400 days out
-    const d = new Date(nowCorrected);
-    d.setDate(d.getDate() + this.maxDaysOut);
-    const maxAllowed = d.getTime();
-
-    if (corrected < minAllowed) {
-      showToast('Please choose a date or time in the future', 0, 'error');
+    const minTimestamp = typeof this.options?.minTimestamp === 'function'
+      ? this.options.minTimestamp()
+      : this.options?.minTimestamp;
+    if (minTimestamp > 0 && timestamp < minTimestamp) {
+      showToast(this.options.minError, 0, 'error');
       return;
     }
-    if (corrected > maxAllowed) {
-      showToast(`Please choose a date within the next ${this.maxDaysOut} days`, 0, 'error');
+    if (this.options?.maxTimestamp > 0 && timestamp > this.options.maxTimestamp) {
+      showToast(this.options.maxError, 0, 'error');
       return;
     }
-    this._closeWith(corrected);
+    this._closeWith(timestamp);
   }
 
-  // Helpers
   _pad2(n) { return n < 10 ? '0' + n : '' + n; }
 
   _formatDateInput(d) {
@@ -24957,23 +32792,8 @@ class CallScheduleDateModal {
   }
 
   _roundUpToNextFiveMinutes(ms) {
-    const d = new Date(ms);
-    d.setSeconds(0, 0);
-    const minutes = d.getMinutes();
-    const rounded = Math.ceil(minutes / 5) * 5;
-    if (rounded === 60) {
-      d.setHours(d.getHours() + 1, 0, 0, 0);
-    } else {
-      d.setMinutes(rounded, 0, 0);
-    }
-    return d.getTime();
-  }
-
-  _getDefaultDate() {
-    const nowMs = Date.now();
-    const offsetMs = this.DEFAULT_OFFSET_MINUTES * 60 * 1000;
-    const defaultMs = this._roundUpToNextFiveMinutes(nowMs + offsetMs);
-    return new Date(defaultMs);
+    const intervalMs = 5 * 60 * 1000;
+    return Math.ceil(ms / intervalMs) * intervalMs;
   }
 
   _parseDateInput(val) {
@@ -24993,20 +32813,44 @@ class CallScheduleDateModal {
   _closeWith(value) {
     this.clockTimer.stop();
     if (this.modal) this.modal.classList.remove('active');
-    const cb = this.onDone;
-    this.onDone = null;
-
-    // Hide converted time preview when closing
-    if (this.recipientTime) {
-      this.recipientTime.textContent = '';
-      this.recipientTime.style.display = 'none';
+    const onDone = this.options?.onDone;
+    const returnFocus = this.returnFocus;
+    this.options = null;
+    this.returnFocus = null;
+    if (this.preview) {
+      this.preview.textContent = '';
+      this.preview.style.display = 'none';
     }
-    if (cb) cb(value);
+    if (onDone) onDone(value);
+    returnFocus?.focus();
   }
 }
 
+const CALL_SCHEDULE_MAX_DAYS = 400;
+const payChoiceModal = new PayChoiceModal();
 const callScheduleChoiceModal = new CallScheduleChoiceModal();
-const callScheduleDateModal = new CallScheduleDateModal();
+const dateTimePickerModal = new DateTimePickerModal();
+const durationPickerModal = new DurationPickerModal();
+
+function openCallScheduleDatePicker(onDone) {
+  const now = getCorrectedTimestamp();
+  const maximum = new Date(now);
+  maximum.setDate(maximum.getDate() + CALL_SCHEDULE_MAX_DAYS);
+  const recipientTimeZone = getActiveChatContactTimeZone();
+
+  dateTimePickerModal.open({
+    onDone,
+    title: 'Schedule Call',
+    initialTimestamp: now,
+    minTimestamp: () => getCorrectedTimestamp() - 5 * 60 * 1000,
+    maxTimestamp: maximum.getTime(),
+    selectionFormatter: (timestamp) => {
+      const formatted = formatDateTimeInTimeZone(roundToMinuteMs(timestamp), recipientTimeZone);
+      return { preview: formatted ? `Recipient time: ${formatted}` : '' };
+    },
+    maxError: `Please choose a date within the next ${CALL_SCHEDULE_MAX_DAYS} days`,
+  });
+}
 
 /**
  * Failed Message Context Menu Class
@@ -25053,12 +32897,13 @@ class FailedMessageMenu {
     // Check if this is a video call message and hide retry option
     const isVideoCall = !!messageEl.querySelector('.call-message');
     const retryOption = this.menu.querySelector('[data-action="retry"]');
-    
-    if (isVideoCall) {
-      retryOption.style.display = 'none';
-    } else {
-      retryOption.style.display = 'flex';
-    }
+    const message = chatModal.getMessageRecordFromElement(messageEl);
+    const evmMessage = message?.type === EVM_CHAT_MESSAGE_TYPE;
+    const actions = evmMessage ? evmAssets.getPaymentActions(message.payment, message) : {};
+    retryOption.style.display = !isVideoCall && (!evmMessage || actions.retryMessage) ? 'flex' : 'none';
+    retryOption.querySelector('.context-menu-text').textContent = evmMessage ? 'Retry message' : 'Retry';
+    this.menu.querySelector('[data-action="evm-review"]').style.display = actions.retryTransfer ? 'flex' : 'none';
+    this.menu.querySelector('[data-action="evm-check"]').style.display = actions.checkAgain ? 'flex' : 'none';
 
     // Use shared positioning utility
     chatModal.positionContextMenu(this.menu, messageEl);
@@ -25092,6 +32937,10 @@ class FailedMessageMenu {
     chatModal.clearPendingLocation();
 
     switch (action) {
+      case 'evm-review':
+      case 'evm-check':
+        chatModal.handleEvmPaymentAction(action, messageEl);
+        break;
       case 'retry':
         this.handleFailedMessageRetry(messageEl);
         break;
@@ -25114,6 +32963,18 @@ class FailedMessageMenu {
     const message = (txid && contact && Array.isArray(contact.messages))
       ? contact.messages.find(msg => msg.txid === txid)
       : null;
+
+    // A payment's receipt: send the message again from the card's own record.
+    // The money already moved, so this never goes near the transfer.
+    if (message?.type === INTENTS_CHAT_MESSAGE_TYPE && message.my && message.payment) {
+      void chatModal.retryIntentsPaymentMessage(chatModal.address, message);
+      return;
+    }
+
+    if (message?.type === EVM_CHAT_MESSAGE_TYPE) {
+      chatModal.handleEvmPaymentAction('evm-retry', messageEl);
+      return;
+    }
 
     // Voice message retry: resend the same voice message (no re-upload)
     if (voiceEl) {
@@ -25229,10 +33090,7 @@ class FailedMessageMenu {
       
       // Manually resize textarea after browser has updated layout
       // requestAnimationFrame ensures scrollHeight is accurate
-      requestAnimationFrame(() => {
-        chatModal.messageInput.style.height = '48px';
-        chatModal.messageInput.style.height = Math.min(chatModal.messageInput.scrollHeight, 120) + 'px';
-      });
+      requestAnimationFrame(() => chatModal.resizeMessageInput());
       
       chatModal.toggleSendButtonVisibility();
       chatModal.messageInput.focus();
@@ -25814,7 +33672,7 @@ class NewChatModal {
     this.recipientInput = document.getElementById('chatRecipient');
     this.submitButton = document.querySelector('#newChatForm button[type="submit"]');
 
-    this.closeNewChatModalButton.addEventListener('click', this.closeNewChatModal.bind(this));
+    this.closeNewChatModalButton.addEventListener('click', this.close.bind(this));
     this.newChatForm.addEventListener('submit', withButtonCooldown(
       this.submitButton,
       BUTTON_COOLDOWN_MS,
@@ -25849,7 +33707,7 @@ class NewChatModal {
    * @returns {void}
    */
   openNewChatModal() {
-    this.modal.classList.add('active');
+    openModal(this.modal);
     footer.closeNewChatButton();
     this.usernameAvailable.style.display = 'none';
     this.submitButton.disabled = true;
@@ -25865,7 +33723,7 @@ class NewChatModal {
    * It will close the modal and reset the form
    * @returns {void}
    */
-  closeNewChatModal() {
+  close() {
     this.modal.classList.remove('active');
     this.newChatForm.reset();
     if (chatsScreen.isActive()) {
@@ -25969,14 +33827,14 @@ class NewChatModal {
     chatsData.contacts[recipientAddress].username = username;
 
     // Close new chat modal and open chat modal
-    this.closeNewChatModal();
+    this.close();
     chatModal.open(recipientAddress);
   }
 
   // Open camera scanner and fill username from scanned QR
   scanUsernameFromQR() {
     try {
-      scanQRModal.fillFunction = (data) => {
+      qrScanModal.open((data) => {
         const user = this.parseUsernameFromQRData(data);
         if (user) {
           this.recipientInput.value = normalizeUsername(user);
@@ -25984,8 +33842,7 @@ class NewChatModal {
         } else {
           showToast('QR does not contain a username', 0, 'error');
         }
-      };
-      scanQRModal.open();
+      });
     } catch (e) {
       console.error('Error starting QR scan:', e);
       showToast('Unable to start camera for scanning.', 0, 'error');
@@ -26140,6 +33997,7 @@ class CreateAccountModal {
   constructor() {
     this.checkTimeout = null;
     this.isCreatingAccount = false;
+    this.isUsernameAvailable = false;
   }
 
   load() {
@@ -26156,39 +34014,26 @@ class CreateAccountModal {
     this.togglePrivateKeyVisibility = document.getElementById('togglePrivateKeyVisibility');
     this.migrateAccountsSection = document.getElementById('migrateAccountsSection');
     this.migrateAccountsButton = document.getElementById('migrateAccountsButton');
-    this.toggleMoreOptions = document.getElementById('toggleMoreOptions');
-    this.moreOptionsSection = document.getElementById('moreOptionsSection');
+    this.advancedSection = document.getElementById('advancedOptions');
+    this.advancedSummary = document.getElementById('advancedOptionsSummary');
     this.privateAccountCheckbox = document.getElementById('togglePrivateAccount');
     this.privateAccountHelpButton = document.getElementById('privateAccountHelpButton');
     this.privateAccountTemplate = document.getElementById('privateAccountHelpMessageTemplate');
+    this.controls = this.modal.querySelectorAll('button, input');
 
     // Setup event listeners
-    this.form.addEventListener('submit', withButtonCooldown(
-      [
-        this.submitButton,
-        this.migrateAccountsButton,
-        this.toggleButton,
-        this.usernameInput,
-        this.privateKeyInput,
-        this.backButton,
-        this.privateAccountCheckbox
-      ],
-      BUTTON_COOLDOWN_MS,
-      null,
-      (e) => this.handleSubmit(e)
-    ));
+    this.form.addEventListener('submit', (event) => this.handleSubmit(event));
     this.usernameInput.addEventListener('input', (e) => this.handleUsernameInput(e));
     this.toggleButton.addEventListener('change', () => this.handleTogglePrivateKeyInput());
-    this.toggleMoreOptions.addEventListener('change', () => this.handleToggleMoreOptions());
+    this.advancedSection.addEventListener('toggle', () => this.handleAdvancedToggle());
+    this.advancedSummary.addEventListener('click', (event) => {
+      if (this.isCreatingAccount) event.preventDefault();
+    });
     this.backButton.addEventListener('click', () => this.closeWithReload());
 
     // Add listener for the password visibility toggle
     this.togglePrivateKeyVisibility.addEventListener('click', () => {
-      // Toggle the type attribute
-      const type = this.privateKeyInput.getAttribute('type') === 'password' ? 'text' : 'password';
-      this.privateKeyInput.setAttribute('type', type);
-      // Toggle the visual state class on the button
-      this.togglePrivateKeyVisibility.classList.toggle('toggled-visible');
+      this.setPrivateKeyVisibility(this.privateKeyInput.type === 'password');
     });
 
     // Add listener for the private account help button
@@ -26199,17 +34044,19 @@ class CreateAccountModal {
       showToast(message, 0, 'info', true);
     });
 
-    this.migrateAccountsButton.addEventListener('click', async () => await migrateAccountsModal.open());
+    this.migrateAccountsButton.addEventListener('click', () => migrateAccountsModal.open());
   }
 
   open() {
+    if (this.isCreatingAccount) return;
+
     if (migrateAccountsModal.hasMigratableAccounts()) {
       this.migrateAccountsSection.style.display = 'block';
     } else {
       this.migrateAccountsSection.style.display = 'none';
     }
 
-    this.modal.classList.add('active');
+    openModal(this.modal);
     enterFullscreen();
     // Delay focus to ensure transition completes (modal transition is 300ms)
     setTimeout(() => {
@@ -26219,12 +34066,16 @@ class CreateAccountModal {
 
   // we still need to keep this since it can be called by other modals
   close() {
+    if (this.isCreatingAccount) return;
+
     // reload the welcome page so that if accounts were migrated the signin button will be shown
     this.modal.classList.remove('active');
   }
 
   // this is called by the back button on the create account modal
   closeWithReload() {
+    if (this.isCreatingAccount) return;
+
     // reload the welcome page so that if accounts were migrated the signin button will be shown
     const newUrl = window.location.href.split('?')[0];
     window.location.replace(newUrl);
@@ -26232,21 +34083,37 @@ class CreateAccountModal {
   }
 
   openWithReset() {
+    if (this.isCreatingAccount) return;
+
     // Clear form fields
     this.usernameInput.value = '';
-    this.privateKeyInput.value = '';
     this.usernameAvailable.style.display = 'none';
-    this.privateKeyError.style.display = 'none';
+    this.isUsernameAvailable = false;
+    this.refreshSubmitButton();
     
-    // Reset More Options section
-    this.toggleMoreOptions.checked = false;
-    this.moreOptionsSection.style.display = 'none';
-    this.toggleButton.checked = false;
-    this.privateKeySection.style.display = 'none';
-    this.privateAccountCheckbox.checked = false;
+    this.advancedSection.open = false;
+    this.resetAdvancedOptions();
     
     // Open the modal
     this.open();
+  }
+
+  /**
+   * Open the recreate flow with the saved username and private key exposed.
+   * @param {string} username
+   * @param {string} privateKey
+   */
+  openWithPrivateKey(username, privateKey) {
+    if (this.isCreatingAccount) return;
+
+    this.resetAdvancedOptions();
+    this.usernameInput.value = username;
+    this.advancedSection.open = true;
+    this.toggleButton.checked = true;
+    this.privateKeySection.hidden = false;
+    this.privateKeyInput.value = privateKey;
+    this.open();
+    this.usernameInput.dispatchEvent(new Event('input'));
   }
 
   /**
@@ -26266,12 +34133,31 @@ class CreateAccountModal {
     return this.modal?.classList.contains('active') || false;
   }
 
-  startAccountCreationUnloadWarning() {
-    this.isCreatingAccount = true;
+  setAccountCreationInProgress(isInProgress) {
+    this.isCreatingAccount = isInProgress;
+    this.refreshControlStates();
   }
 
-  stopAccountCreationUnloadWarning() {
-    this.isCreatingAccount = false;
+  refreshControlStates() {
+    this.controls.forEach((control) => {
+      const requiresConnection = control.hasAttribute('data-requires-connection');
+      const isMigrationBusy =
+        control === this.migrateAccountsButton &&
+        (migrateAccountsModal.isOpening || migrateAccountsModal.isMigrating);
+      control.disabled = this.isCreatingAccount || isMigrationBusy || (requiresConnection && !isOnline);
+    });
+    this.advancedSummary.setAttribute('aria-disabled', String(this.isCreatingAccount));
+    this.advancedSection.classList.toggle('is-disabled', this.isCreatingAccount);
+    this.refreshSubmitButton();
+  }
+
+  refreshSubmitButton() {
+    this.submitButton.disabled =
+      this.isCreatingAccount ||
+      migrateAccountsModal.isOpening ||
+      migrateAccountsModal.isMigrating ||
+      !this.isUsernameAvailable ||
+      !isOnline;
   }
 
   handleUsernameInput(e) {
@@ -26285,7 +34171,8 @@ class CreateAccountModal {
 
     // Reset display
     this.usernameAvailable.style.display = 'none';
-    this.submitButton.disabled = true;
+    this.isUsernameAvailable = false;
+    this.refreshSubmitButton();
 
     // Check if username is too short
     if (username.length < 3) {
@@ -26298,47 +34185,60 @@ class CreateAccountModal {
     // Check network availability
     this.checkTimeout = setTimeout(async () => {
       const taken = await checkUsernameAvailability(username);
+      if (username !== normalizeUsername(this.usernameInput.value)) return;
+
       if (taken == 'taken') {
         this.usernameAvailable.textContent = 'taken';
         this.usernameAvailable.style.color = '#dc3545';
         this.usernameAvailable.style.display = 'inline';
-        this.submitButton.disabled = true;
+        this.isUsernameAvailable = false;
       } else if (taken == 'available') {
         this.usernameAvailable.textContent = 'available';
         this.usernameAvailable.style.color = '#28a745';
         this.usernameAvailable.style.display = 'inline';
-        this.submitButton.disabled = false;
+        this.isUsernameAvailable = true;
       } else {
         this.usernameAvailable.textContent = 'network error';
         this.usernameAvailable.style.color = '#dc3545';
         this.usernameAvailable.style.display = 'inline';
-        this.submitButton.disabled = true;
+        this.isUsernameAvailable = false;
       }
+      this.refreshSubmitButton();
     }, 1000);
   }
 
   handleTogglePrivateKeyInput() {
-    const isChecked = this.toggleButton.checked;
-    this.privateKeySection.style.display = isChecked ? 'block' : 'none';
-    this.privateKeyInput.value = '';
-    
-    if (!isChecked) {
-      this.privateKeyError.style.display = 'none';
+    if (this.toggleButton.checked) {
+      this.privateKeySection.hidden = false;
+      return;
     }
+
+    this.resetPrivateKeyOption();
   }
-  
-  handleToggleMoreOptions() {
-    const isChecked = this.toggleMoreOptions.checked;
-    this.moreOptionsSection.style.display = isChecked ? 'block' : 'none';
-    
-    if (!isChecked) {
-      // Reset private key options when more options is unchecked
-      this.toggleButton.checked = false;
-      // Hide private key section if More Options is unchecked
-      this.privateKeySection.style.display = 'none';
-      this.privateKeyInput.value = '';
-      this.privateKeyError.style.display = 'none';
-    }
+
+  handleAdvancedToggle() {
+    if (this.advancedSection.open) return;
+    this.resetAdvancedOptions();
+  }
+
+  resetAdvancedOptions() {
+    this.privateAccountCheckbox.checked = false;
+    this.resetPrivateKeyOption();
+  }
+
+  resetPrivateKeyOption() {
+    this.toggleButton.checked = false;
+    this.privateKeySection.hidden = true;
+    this.privateKeyInput.value = '';
+    this.privateKeyError.style.display = 'none';
+    this.setPrivateKeyVisibility(false);
+  }
+
+  setPrivateKeyVisibility(isVisible) {
+    this.privateKeyInput.type = isVisible ? 'text' : 'password';
+    this.togglePrivateKeyVisibility.classList.toggle('toggled-visible', isVisible);
+    this.togglePrivateKeyVisibility.setAttribute('aria-label', isVisible ? 'Hide private key' : 'Show private key');
+    this.togglePrivateKeyVisibility.setAttribute('aria-pressed', String(isVisible));
   }
 
   validatePrivateKey(key) {
@@ -26378,6 +34278,14 @@ class CreateAccountModal {
 
   async handleSubmit(event) {
     event.preventDefault();
+
+    if (
+      this.isCreatingAccount ||
+      migrateAccountsModal.isOpening ||
+      migrateAccountsModal.isMigrating ||
+      migrateAccountsModal.isActive() ||
+      !this.isUsernameAvailable
+    ) return;
     
     // Validate username at submit time after normalization
     const username = normalizeUsername(this.usernameInput.value);
@@ -26425,8 +34333,6 @@ class CreateAccountModal {
       this.privateKeyError.style.display = 'none'; // Ensure hidden if generated
     }
 
-    this.startAccountCreationUnloadWarning();
-
     // Generate uncompressed public key
     const publicKey = getPublicKey(privateKey);
     const publicKeyHex = bin2hex(publicKey);
@@ -26435,6 +34341,8 @@ class CreateAccountModal {
     // Generate address from public key
     const address = generateAddress(publicKey);
     const addressHex = bin2hex(address);
+
+    this.setAccountCreationInProgress(true);
 
     // If a private key was provided, check if the derived address already exists on the network
     if (providedPrivateKey) {
@@ -26449,7 +34357,7 @@ class CreateAccountModal {
           this.privateKeyError.textContent = 'An account already exists for this private key.';
           this.privateKeyError.style.color = '#dc3545';
           this.privateKeyError.style.display = 'inline';
-          this.stopAccountCreationUnloadWarning();
+          this.setAccountCreationInProgress(false);
           return; // Stop the account creation process
         } else {
           this.privateKeyError.style.display = 'none';
@@ -26459,7 +34367,7 @@ class CreateAccountModal {
         this.privateKeyError.textContent = 'Network error checking key. Please try again.';
         this.privateKeyError.style.color = '#dc3545';
         this.privateKeyError.style.display = 'inline';
-        this.stopAccountCreationUnloadWarning();
+        this.setAccountCreationInProgress(false);
         return; // Stop process on error
       }
     }
@@ -26498,7 +34406,7 @@ class CreateAccountModal {
       if (waitingToastId) hideToast(waitingToastId);
       showToast(`Failed to fetch network parameters, try again later.`, 0, 'error');
       console.error('Failed to fetch network parameters, using defaults:', error);
-      this.stopAccountCreationUnloadWarning();
+      this.setAccountCreationInProgress(false);
       return;
     }
 
@@ -26522,16 +34430,15 @@ class CreateAccountModal {
         await new Promise((resolve) => setTimeout(resolve, 1000));
         if (waitingToastId) hideToast(waitingToastId);
 //        showToast('Account created successfully!', 3000, 'success');
-        this.close();
-        welcomeScreen.close();
         // TODO: may not need to get set since gets set in `getChats`. Need to check signin flow.
         //getChats.lastCall = getCorrectedTimestamp();
         // Store updated accounts back in localStorage
         existingAccounts.netids[netid].usernames[username] = { address: myAccount.keys.address };
         localStorage.setItem('accounts', stringify(existingAccounts));
         saveState();
-        this.stopAccountCreationUnloadWarning();
-
+        this.setAccountCreationInProgress(false);
+        this.close();
+        welcomeScreen.close();
         // Refresh wallet balance immediately after account creation for fee-dependent screens.
         try {
           myData.wallet.timestamp = 0;
@@ -26555,7 +34462,7 @@ class CreateAccountModal {
         }
 
         clearMyData();
-        this.stopAccountCreationUnloadWarning();
+        this.setAccountCreationInProgress(false);
 
         // Note: `checkPendingTransactions` will also remove the item from `myData.pending` if it's rejected by the service.
         return;
@@ -26575,7 +34482,7 @@ class CreateAccountModal {
       }
 
       clearMyData();
-      this.stopAccountCreationUnloadWarning();
+      this.setAccountCreationInProgress(false);
 
       // no toast here since injectTx will show it
       return;
@@ -26592,8 +34499,10 @@ const createAccountModal = new CreateAccountModal();
  * @returns {void}
  */
 class SendAssetFormModal {
+  static USERNAME_PATTERN = /^[a-z0-9]{3,15}$/i;
+
   constructor() {
-    this.username = null;
+    this.session = null;
     this.sendAssetFormModalCheckTimeout = null;
     this.foundAddressObject = { address: null };
     this.needTollInfo = false;
@@ -26612,10 +34521,10 @@ class SendAssetFormModal {
     this.usernameInput = document.getElementById('sendToAddress');
     this.amountInput = document.getElementById('sendAmount');
     this.memoInput = document.getElementById('sendMemo');
+    this.memoGroup = document.getElementById('sendMemoGroup');
     this.retryTxIdInput = document.getElementById('retryOfPaymentTxId');
     this.usernameAvailable = document.getElementById('sendToAddressError');
     this.submitButton = document.querySelector('#sendForm button[type="submit"]');
-    this.assetSelectDropdown = document.getElementById('sendAsset');
     this.balanceSymbol = document.getElementById('balanceSymbol');
     this.availableBalance = document.getElementById('availableBalance');
     this.toggleBalanceButton = document.getElementById('toggleBalance');
@@ -26625,26 +34534,34 @@ class SendAssetFormModal {
     this.transactionFee = document.getElementById('transactionFee');
     this.balanceWarning = document.getElementById('balanceWarning');
     this.memoLabel = document.querySelector('label[for="sendMemo"]');
-    this.memoByteCounter = document.querySelector('.memo-byte-counter');
+    this.memoByteCounter = this.memoGroup.querySelector('.memo-byte-counter');
 
     // TODO add comment about which send form this is for chat or assets
     this.closeSendAssetFormModalButton.addEventListener('click', this.close.bind(this));
     this.sendForm.addEventListener('submit', withButtonCooldown(
       this.submitButton,
       BUTTON_COOLDOWN_MS,
-      null,
+      () => this.refreshSendButtonDisabledState(),
       (e) => this.handleSendFormSubmit(e)
     ));
-    // TODO: need to add check that it's not a back/delete key
-    this.usernameInput.addEventListener('input', async (e) => {
-      this.handleSendToAddressInput(e);
+    this.usernameInput.addEventListener('input', (event) => {
+      const value = this.usernameInput.value;
+      if (!event.isTrusted && !isValidEthereumAddress(value.trim())) {
+        this.usernameInput.value = normalizeUsername(value);
+      }
+      this.handleSendToAddressInput();
+    });
+    this.contactAutocomplete = new ContactAutocomplete({
+      input: this.usernameInput,
+      list: document.getElementById('sendToAddressSuggestions'),
+      getContacts: () => this.getAutocompleteContacts(),
+      onSelect: (contact) => {
+        this.usernameInput.value = contact.username;
+        this.handleSendToAddressInput(contact.address);
+      },
     });
 
     this.availableBalance.addEventListener('click', this.fillAmount.bind(this));
-    this.assetSelectDropdown.addEventListener('change', () => {
-      // updateSendAddresses();
-      this.updateAvailableBalance();
-    });
     // amount input listener for normalizing
     this.amountInput.addEventListener('input', () => this.amountInput.value = normalizeUnsignedFloat(this.amountInput.value));
     // amount input listener for real-time balance validation
@@ -26669,51 +34586,85 @@ class SendAssetFormModal {
     this.scanQRButton = document.getElementById('scanQRButton');
     this.uploadQRButton = document.getElementById('uploadQRButton');
     this.qrFileInput = document.getElementById('qrFileInput');
-    this.scanQRButton.addEventListener('click', () => scanQRModal.open());
+    this.scanQRButton.addEventListener('click', () => this.scanQR());
     this.uploadQRButton.addEventListener('click', () => {this.qrFileInput.click();});
-    this.qrFileInput.addEventListener('change', (event) => this.handleQRFileSelect(event, this));
+    this.qrFileInput.addEventListener('change', (event) => this.readQRFile(event));
   }
 
   /**
    * Opens the send asset modal
-   * @returns {Promise<void>}
+   * @param {{input: string, expectedAddress?: string}} [recipientToRestore]
+   * @returns {Promise<boolean>}
    */
-  async open() {
-    this.modal.classList.add('active');
-    this.memoValidation = {};
+  async open(recipientToRestore) {
+    if (this.isActive()) return false;
+    this.reset();
+    this.memoInput.setCustomValidity('');
+    this.memoValidation = this.validateMemoSize('');
     this.memoByteCounter.textContent = '';
     this.memoByteCounter.style.display = 'none';
-
-    // Clear fields when opening the modal
-    this.usernameInput.value = '';
-    this.amountInput.value = '';
-    this.memoInput.value = '';
-    this.retryTxIdInput.value = '';
-    this.tollMemoSpan.textContent = '';
-    this.foundAddressObject.address = null;
-
     this.usernameAvailable.style.display = 'none';
+    this.balanceWarning.textContent = '';
+    this.balanceWarning.style.display = 'none';
     this.submitButton.disabled = true;
-    scanQRModal.fillFunction = this.fillFromQR.bind(this); // set function to handle filling the payment form from QR data
+    this.balanceSymbol.textContent = 'LIB';
+    this.balanceAmount.textContent = 'Loading…';
+    this.transactionFee.textContent = 'Loading…';
 
-    if (this.username) {
-      this.usernameInput.value = this.username;
-      setTimeout(() => {
-        this.usernameInput.dispatchEvent(new Event('input'));
-      }, 500);
-      this.username = null;
+    if (!openModal(this.modal)) return false;
+    const session = this.session = { account: myAccount };
+    if (recipientToRestore) {
+      this.usernameInput.value = recipientToRestore.input;
+      this.handleSendToAddressInput(recipientToRestore.expectedAddress);
     }
+    try {
+      await walletScreen.updateWalletBalances();
+      if (!this.isCurrentSession(session)) return false;
+      await this.updateAvailableBalance();
+    } catch (error) {
+      if (!this.isCurrentSession(session)) return false;
+      this.balanceAmount.textContent = 'Unavailable';
+      this.transactionFee.textContent = 'Unavailable';
+      this.submitButton.disabled = true;
+      showToast('Unable to refresh LIB balance', 3000, 'warning');
+    }
+    return this.isCurrentSession(session);
+  }
 
-    await walletScreen.updateWalletBalances(); // Refresh wallet balances first
-    // Get wallet data
-    const wallet = myData.wallet;
-    // Populate assets dropdown
-    this.assetSelectDropdown.innerHTML = wallet.assets
-      .map((asset, index) => `<option value="${index}">${asset.name} (${asset.symbol})</option>`)
-      .join('');
+  isCurrentSession(session) {
+    return Boolean(session && this.session === session);
+  }
 
-    // Update addresses for first asset
-    this.updateSendAddresses();
+  getAmountWei() {
+    const amountWei = SendAssetFormModal.toLibWei(this.amountInput.value.trim(), this.balanceSymbol.textContent);
+    return amountWei !== null && amountWei > 0n ? amountWei : null;
+  }
+
+  static toLibWei(amount, unit) {
+    try {
+      if (unit === 'USD') {
+        return EthNum.usdToWei(amount, parameters?.current?.stabilityFactorStr);
+      }
+      const decimal = /^(?:\d+(?:\.\d*)?|\.\d+)$/;
+      if (unit !== 'LIB' || !decimal.test(amount)) return null;
+      return EthNum.toWei(amount);
+    } catch {
+      return null;
+    }
+  }
+
+  reset() {
+    sendAssetConfirmModal.close();
+    this.contactAutocomplete?.close();
+    this.session = null;
+    clearTimeout(this.sendAssetFormModalCheckTimeout);
+    this.sendAssetFormModalCheckTimeout = null;
+    this.foundAddressObject = { address: null };
+    this.needTollInfo = false;
+    this.tollInfo = {};
+    this.sendForm?.reset();
+    if (this.tollMemoSpan) this.tollMemoSpan.textContent = '';
+    this.modal?.classList.remove('active');
   }
 
   /**
@@ -26722,20 +34673,35 @@ class SendAssetFormModal {
    */
   async close() {
     chatsScreen.updateChatList();
-    this.modal.classList.remove('active');
-    this.sendForm.reset();
-    this.username = null;
+    this.reset();
   }
 
-  /**
-   * Invoked when the user types in the username input
-   * It will check if the username is too short, available, or not available
-   * @param {Event} e - The event object
-   * @returns {void}
-   */
-  async handleSendToAddressInput(e) {
+  getAutocompleteContacts() {
+    if (!this.session || !myAccount) return [];
+    const ownAddress = normalizeAddress(myAccount.keys.address);
+    return Object.entries(myData?.contacts || {})
+      .filter(([address, contact]) => /^[a-f0-9]{40}$/i.test(address)
+        && address.toLowerCase() !== ownAddress && !isFaucetAddress(address)
+        && typeof contact?.username === 'string' && SendAssetFormModal.USERNAME_PATTERN.test(contact.username))
+      .map(([address, contact]) => ({
+        ...contact,
+        address,
+        username: contact.username.toLowerCase(),
+        displayName: getContactDisplayName(contact),
+      }));
+  }
+
+  async handleSendToAddressInput(expectedAddress) {
+    const session = this.session;
+    if (!this.isCurrentSession(session)) return;
     this.submitButton.disabled = true;
-    const rawInput = e.target.value.trim();
+    const rawInput = this.usernameInput.value;
+    const unresolvedRecipient = this.foundAddressObject = { address: null, input: rawInput, expectedAddress };
+    this.tollInfo = {};
+    this.needTollInfo = false;
+    this.clearFormInfo();
+    const usernameAvailable = this.usernameAvailable;
+    usernameAvailable.style.display = 'none';
 
     // Cancel any queued lookup before handling a new recipient value.
     if (this.sendAssetFormModalCheckTimeout) {
@@ -26743,36 +34709,40 @@ class SendAssetFormModal {
       this.sendAssetFormModalCheckTimeout = null;
     }
 
-    if (isValidEthereumAddress(rawInput)) {
-      this.clearFormInfo();
-      this.foundAddressObject.address = null;
-      this.usernameAvailable.textContent = 'address not supported';
-      this.usernameAvailable.style.color = '#dc3545';
-      this.usernameAvailable.style.display = 'inline';
-      await this.refreshSendButtonDisabledState();
-      return;
-    }
-
-    // Check availability on input changes
-    const username = normalizeUsername(e.target.value);
-    e.target.value = username;
-    const usernameAvailable = this.usernameAvailable;
-
-    this.clearFormInfo();
-    this.foundAddressObject.address = null;
-
-    // Check if username is too short
-    if (username.length < 3) {
-      usernameAvailable.textContent = 'too short';
+    if (isValidEthereumAddress(rawInput.trim())) {
+      usernameAvailable.textContent = 'address not supported';
       usernameAvailable.style.color = '#dc3545';
       usernameAvailable.style.display = 'inline';
       await this.refreshSendButtonDisabledState();
       return;
     }
 
-    // Check network availability
+    // Preserve the query in the field and resolve only username-shaped input.
+    const username = rawInput.trim().replace(/^@/, '').toLowerCase();
+    if (!SendAssetFormModal.USERNAME_PATTERN.test(username)) {
+      if (/^[a-z0-9]{1,2}$/.test(username)) {
+        usernameAvailable.textContent = 'too short';
+        usernameAvailable.style.color = '#dc3545';
+        usernameAvailable.style.display = 'inline';
+      }
+      await this.refreshSendButtonDisabledState();
+      return;
+    }
+
     this.sendAssetFormModalCheckTimeout = setTimeout(async () => {
-      const taken = await checkUsernameAvailability(username, myAccount.keys.address, this.foundAddressObject);
+      this.sendAssetFormModalCheckTimeout = null;
+      const found = { ...unresolvedRecipient, username };
+      if (!this.isCurrentSession(session)) return;
+      const taken = await checkUsernameAvailability(username, session.account.keys.address, found);
+      if (!this.isCurrentSession(session) || this.foundAddressObject !== unresolvedRecipient
+        || this.usernameInput.value !== rawInput) return;
+      if (expectedAddress && taken === 'taken' && normalizeAddress(found.address) !== normalizeAddress(expectedAddress)) {
+        usernameAvailable.textContent = 'contact changed';
+        usernameAvailable.style.color = '#dc3545';
+        usernameAvailable.style.display = 'inline';
+        return;
+      }
+      this.foundAddressObject = found;
       if (taken == 'taken') {
         usernameAvailable.textContent = 'found';
         usernameAvailable.style.color = '#28a745';
@@ -26801,6 +34771,9 @@ class SendAssetFormModal {
   }
 
   async validateForm() {
+    const session = this.session;
+    const recipient = this.foundAddressObject;
+    if (!this.isCurrentSession(session)) return;
     if (this.needTollInfo) {
       const myAddr = longAddress(myAccount.keys.address);
       const contactAddr = longAddress(this.foundAddressObject.address);
@@ -26812,7 +34785,8 @@ class SendAssetFormModal {
       // query
       const tollInfo_ = await queryNetwork(`/messages/${chatId}/toll`);
       // query account for toll set by receiver
-      const accountData = await queryNetwork(`/account/${this.foundAddressObject.address}`);
+      const accountData = await queryNetwork(`/account/${recipient.address}`);
+      if (!this.isCurrentSession(session) || this.foundAddressObject !== recipient) return;
       const queriedToll = accountData?.account?.data?.toll; // type bigint
       const queriedTollUnit = accountData?.account?.data?.tollUnit; // type string
       this.tollInfo = {
@@ -26919,6 +34893,9 @@ class SendAssetFormModal {
    */
   async handleSendFormSubmit(event) {
     event.preventDefault();
+    this.contactAutocomplete.close();
+    const session = this.session;
+    const recipient = this.foundAddressObject;
 
     const hasPendingTransfer =
       Array.isArray(myData?.pending) &&
@@ -26932,25 +34909,22 @@ class SendAssetFormModal {
       return;
     }
 
-    // Get form values
-    const assetSymbol = this.assetSelectDropdown.options[this.assetSelectDropdown.selectedIndex].text;
-    const amount = this.amountInput.value;
-    const memo = this.memoInput.value;
     const confirmButton = sendAssetConfirmModal.confirmSendButton;
     const cancelButton = sendAssetConfirmModal.cancelButton;
 
+    let recipientAddress;
     // Ensure recipient account type matches sender (public/private).
     try {
-      const recipientRaw = this.foundAddressObject?.address;
-      if (!recipientRaw) {
+      if (!recipient.address || this.usernameInput.value !== recipient.input) {
         showToast('Recipient address not resolved; enter a valid username', 0, 'error');
         return;
       }
-      const recipientAddress = normalizeAddress(recipientRaw);
+      recipientAddress = normalizeAddress(recipient.address);
 
       await getNetworkParams();
       const myIsPrivate = !!myData?.account?.private;
       const recipientAccountRes = await queryNetwork(`/account/${longAddress(recipientAddress)}`);
+      if (!this.isCurrentSession(session) || this.foundAddressObject !== recipient) return;
       if (!recipientAccountRes?.account) {
         showToast('Account not found, try again.', 0, 'error');
         return;
@@ -26961,30 +34935,51 @@ class SendAssetFormModal {
         return;
       }
     } catch (error) {
+      if (!this.isCurrentSession(session)) return;
       console.error('Error checking account type:', error);
       showToast('Error checking account type', 0, 'error');
       return;
     }
 
-    const stabilityFactor = getStabilityFactor();
-
-    // get `usdAmount` and `libAmount`
-    let usdAmount;
-    let libAmount;
-    const isLib = this.balanceSymbol.textContent === 'LIB';
-    if (!isLib) {
-      usdAmount = this.amountInput.value;
-      libAmount = amount / stabilityFactor;
-    } else {
-      usdAmount = amount * stabilityFactor;
-      libAmount = amount;
+    const asset = walletScreen.getLibAsset();
+    if (!asset) {
+      showToast('Liberdus asset is unavailable.', 3000, 'warning');
+      return;
+    }
+    const amountText = this.amountInput.value.trim();
+    const amountUnit = this.balanceSymbol.textContent;
+    const username = recipient.username;
+    const memo = this.memoInput.value.trim();
+    const amountWei = this.getAmountWei();
+    if (amountWei === null) {
+      showToast('Unable to calculate the LIB amount. Check the amount and LIB/USD price.', 3000, 'warning');
+      return;
     }
 
+    const warning = document.createElement('span');
+    const assetIndex = myData.wallet.assets.indexOf(asset);
+    const hasBalance = await validateBalance(amountWei, assetIndex, warning);
+    if (!this.isCurrentSession(session) || this.foundAddressObject !== recipient
+      || this.amountInput.value.trim() !== amountText || this.balanceSymbol.textContent !== amountUnit
+      || this.usernameInput.value !== recipient.input || this.memoInput.value.trim() !== memo) return;
+    this.balanceWarning.textContent = warning.textContent;
+    this.balanceWarning.style.display = warning.style.display;
+    if (!hasBalance || !this.validateToll(amountWei)) return;
+
+    const payment = { amountWei, username, recipientAddress, memo, retryTxId: this.retryTxIdInput.value };
+    if (!sendAssetConfirmModal.open(payment)) return;
+    const libAmount = EthNum.toStr(amountWei);
+    const usdAmount = amountUnit === 'USD' ? Number(amountText) : Number(libAmount) * getStabilityFactor();
+
     // Update confirmation modal with values
-    sendAssetConfirmModal.confirmAmountUSD.textContent = `≈ $${parseFloat(usdAmount).toFixed(6)} USD`;
-    sendAssetConfirmModal.confirmRecipient.textContent = this.usernameInput.value;
-    sendAssetConfirmModal.confirmAmount.textContent = `${libAmount}`;
-    sendAssetConfirmModal.confirmAsset.textContent = assetSymbol;
+    const usdText = Number.isFinite(usdAmount) && usdAmount > 0
+      ? usdAmount.toLocaleString('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: usdAmount < 0.01 ? 6 : 2 })
+      : '';
+    sendAssetConfirmModal.confirmAmountUSD.textContent = usdText ? `≈ ${usdText} USD` : '';
+    sendAssetConfirmModal.confirmRecipient.textContent = username;
+    sendAssetConfirmModal.confirmAmount.textContent = `${libAmount} LIB`;
+    sendAssetConfirmModal.confirmAsset.textContent = asset.name === asset.symbol
+      ? asset.symbol : `${asset.name} (${asset.symbol})`;
 
     // Show/hide memo if present
     const memoGroup = sendAssetConfirmModal.confirmMemoGroup;
@@ -26997,7 +34992,6 @@ class SendAssetFormModal {
 
     confirmButton.disabled = false;
     cancelButton.disabled = false;
-    sendAssetConfirmModal.open();
   }
 
   /**
@@ -27005,8 +34999,12 @@ class SendAssetFormModal {
    * @returns {void}
    */
   async fillAmount() {
+    const session = this.session;
+    const asset = walletScreen.getLibAsset();
+    if (!asset) return;
+
     await getNetworkParams();
-    const asset = myData.wallet.assets[this.assetSelectDropdown.value];
+    if (!this.isCurrentSession(session)) return;
     const feeInWei = getTransactionFeeWei();
     const maxAmount = BigInt(asset.balance) - feeInWei;
     const maxAmountStr = big2str(maxAmount > 0n ? maxAmount : 0n, 18).slice(0, -16);
@@ -27030,19 +35028,14 @@ class SendAssetFormModal {
    * @returns {void}
    */
   async updateAvailableBalance() {
-    const walletData = myData.wallet;
-    const assetIndex = this.assetSelectDropdown.value;
-
-    // Check if we have any assets
-    if (!walletData.assets || walletData.assets.length === 0) {
+    const selectedAsset = walletScreen.getLibAsset();
+    if (!selectedAsset) {
       this.updateBalanceDisplay(null);
-      // If no assets, amount validation will likely fail or be irrelevant.
-      // Button state should reflect this.
       await this.refreshSendButtonDisabledState();
       return;
     }
 
-    this.updateBalanceDisplay(walletData.assets[assetIndex]);
+    await this.updateBalanceDisplay(selectedAsset);
     await this.refreshSendButtonDisabledState();
   }
 
@@ -27052,13 +35045,15 @@ class SendAssetFormModal {
    * @returns {void}
    */
   async updateBalanceDisplay(asset) {
+    const session = this.session;
     if (!asset) {
-      this.balanceAmount.textContent = '0.0000';
-      this.transactionFee.textContent = '0.00';
+      this.balanceAmount.textContent = 'Unavailable';
+      this.transactionFee.textContent = 'Unavailable';
       return;
     }
 
     await getNetworkParams();
+    if (!this.isCurrentSession(session)) return;
     const txFeeInLIB = getTransactionFeeWei();
     const stabilityFactor = getStabilityFactor();
 
@@ -27082,11 +35077,7 @@ class SendAssetFormModal {
    * @returns {void}
    */
   updateSendAddresses() {
-    const walletData = myData.wallet;
-    // const assetIndex = document.getElementById('sendAsset').value;
-
-    // Check if we have any assets
-    if (!walletData.assets || walletData.assets.length === 0) {
+    if (!walletScreen.getLibAsset()) {
       showToast('No addresses available', 0, 'error');
       return;
     }
@@ -27100,6 +35091,9 @@ class SendAssetFormModal {
    * @returns {Promise<void>}
    */
   async refreshSendButtonDisabledState() {
+    const session = this.session;
+    const recipient = this.foundAddressObject;
+    if (!this.isCurrentSession(session)) return;
     // If offline, keep button disabled
     if (!isOnline) {
       this.submitButton.disabled = true;
@@ -27111,6 +35105,7 @@ class SendAssetFormModal {
       this.usernameAvailable.style.display === 'inline' && this.usernameAvailable.textContent === 'found';
 
     const amount = this.amountInput.value.trim();
+    const unit = this.balanceSymbol.textContent;
 
     if (amount == '' || parseFloat(amount) == 0) {
       this.balanceWarning.textContent = '';
@@ -27119,22 +35114,35 @@ class SendAssetFormModal {
       return;
     }
 
-    const assetIndex = this.assetSelectDropdown.value;
-
-    // Check if amount is in USD and convert to LIB for validation
-    const isUSD = this.balanceSymbol.textContent === 'USD';
-    let amountForValidation = amount;
-    if (isUSD && amount) {
+    if (unit === 'USD') {
       await getNetworkParams();
-      const stabilityFactor = getStabilityFactor();
-      amountForValidation = parseFloat(amount) / stabilityFactor;
+      if (!this.isCurrentSession(session) || this.amountInput.value.trim() !== amount
+        || this.balanceSymbol.textContent !== unit) return;
     }
 
-    // convert amount to bigint
-    const amountBigInt = bigxnum2big(wei, amountForValidation.toString());
+    const selectedAsset = walletScreen.getLibAsset();
+    const assetIndex = myData.wallet.assets.indexOf(selectedAsset);
+    if (assetIndex < 0) {
+      this.submitButton.disabled = true;
+      return;
+    }
+
+    const amountBigInt = this.getAmountWei();
+    if (amountBigInt === null) {
+      this.balanceWarning.textContent = 'Unable to calculate the LIB amount.';
+      this.balanceWarning.style.display = 'inline';
+      this.submitButton.disabled = true;
+      return;
+    }
 
     // returns false if the amount/balance is invalid.
-    const isAmountAndBalanceValid = await validateBalance(amountBigInt, assetIndex, this.balanceWarning);
+    // Validate into a detached element so an old request cannot change a newer form.
+    const warning = document.createElement('span');
+    const isAmountAndBalanceValid = await validateBalance(amountBigInt, assetIndex, warning);
+    if (!this.isCurrentSession(session) || this.foundAddressObject !== recipient
+      || this.amountInput.value.trim() !== amount || this.balanceSymbol.textContent !== unit) return;
+    this.balanceWarning.textContent = warning.textContent;
+    this.balanceWarning.style.display = warning.style.display;
 
     let isAmountAndTollValid = true;
     if (this.foundAddressObject.address) {
@@ -27143,7 +35151,7 @@ class SendAssetFormModal {
       }
     }
     // Enable button only if both conditions are met.
-    if (isAddressConsideredValid && isAmountAndBalanceValid && isAmountAndTollValid && this.memoValidation.isValid) {
+    if (!this.needTollInfo && isAddressConsideredValid && isAmountAndBalanceValid && isAmountAndTollValid && this.memoValidation.isValid) {
       this.submitButton.disabled = false;
     } else {
       this.submitButton.disabled = true;
@@ -27154,9 +35162,16 @@ class SendAssetFormModal {
     // check if user is required to pay a toll
     if (this.tollInfo.required == 1) {
       if (this.memoInput.value.trim() != '') {
-        let amountInLIB = amount;
-        const tollInLIB = getEffectiveTollLibWei(normalizeTollToLibWei(this.tollInfo.toll, this.tollInfo.tollUnit));
-        if (tollInLIB > amountInLIB) {
+        const toll = typeof this.tollInfo.toll === 'bigint' ? this.tollInfo.toll : 0n;
+        if (toll === 0n) return true;
+        const tollWei = SendAssetFormModal.toLibWei(EthNum.toStr(toll), this.tollInfo.tollUnit || 'LIB');
+        if (tollWei === null) {
+          this.balanceWarning.textContent = 'Unable to calculate the memo toll.';
+          this.balanceWarning.style.display = 'inline';
+          return false;
+        }
+        const tollInLIB = getEffectiveTollLibWei(tollWei);
+        if (tollInLIB > amount) {
           this.balanceWarning.textContent = 'less than toll for memo';
           this.balanceWarning.style.display = 'inline';
           return false;
@@ -27176,6 +35191,7 @@ class SendAssetFormModal {
    * @returns {void}
    */
   async handleToggleBalance(e) {
+    const session = this.session;
     if (e && typeof e.preventDefault === 'function') {
       e.preventDefault();
     }
@@ -27186,10 +35202,12 @@ class SendAssetFormModal {
 
     // get the scalability factor for LIB/USD conversion
     await getNetworkParams();
+    if (!this.isCurrentSession(session)) return;
     const stabilityFactor = getStabilityFactor();
 
     // Get the raw values in LIB format
-    const asset = myData.wallet.assets[this.assetSelectDropdown.value];
+    const asset = walletScreen.getLibAsset();
+    if (!asset) return;
     const txFeeInWei = getTransactionFeeWei();
     const balanceInLIB = big2str(BigInt(asset.balance), 18).slice(0, -12);
     const feeInLIB = big2str(txFeeInWei, 18).slice(0, -16);
@@ -27202,6 +35220,7 @@ class SendAssetFormModal {
     }
 
     this.updateBalanceAndFeeDisplay(balanceInLIB, feeInLIB, !isLib, stabilityFactor);
+    await this.refreshSendButtonDisabledState();
   }
 
   /**
@@ -27242,14 +35261,19 @@ class SendAssetFormModal {
    * @returns {Promise<void>}
    */
   async reopen() {
-    const tempUsername = this.usernameInput?.value;
+    const input = this.usernameInput.value;
+    const recipient = this.foundAddressObject;
+    const expectedAddress = recipient.input === input ? recipient.address || recipient.expectedAddress : undefined;
     const tempAmount = this.amountInput?.value;
+    const tempUnit = this.balanceSymbol.textContent;
     const tempMemo = this.memoInput?.value;
     await this.close();
-    this.username = tempUsername;
-    await this.open();
+    if (!await this.open({ input, expectedAddress })) return;
     this.amountInput.value = tempAmount;
+    this.balanceSymbol.textContent = tempUnit;
     this.memoInput.value = tempMemo || '';
+    await this.updateAvailableBalance();
+    if (this.foundAddressObject.address && !this.needTollInfo) await this.validateForm();
   }
 
   /**
@@ -27265,164 +35289,86 @@ class SendAssetFormModal {
    * @returns {void}
    */
   resetForm(){
+    this.contactAutocomplete.close();
     this.sendForm?.reset();
     this.usernameAvailable.textContent = '';
     this.balanceWarning.textContent = '';
   }
 
-  /**   * Handles QR file selection and decoding
-   * @param {Event} event - The file input change event
-   * @param {Object} targetModal - The modal instance to fill with QR data
-   * @returns {Promise<void>}
-   * */
-  async handleQRFileSelect(event, targetModal) {
-    const file = event.target.files[0];
-    if (!file) {
-      return; // No file selected
+  scanQR() {
+    const session = this.session;
+    qrScanModal.open((data) => {
+      if (this.isCurrentSession(session)) this.fillFromQR(data);
+    });
+  }
+
+  async readQRFile(event) {
+    const input = event.target;
+    const file = input.files[0];
+    if (!file) return;
+    const session = this.session;
+    try {
+      const text = await QRImageDecoder.decode(file);
+      if (this.isCurrentSession(session) && input.files[0] === file) await this.fillFromQR(text);
+    } catch (error) {
+      if (!this.isCurrentSession(session) || input.files[0] !== file) return;
+      showToast('Could not read QR code from image', 0, 'error');
+      this.resetForm();
+    } finally {
+      if (input.files[0] === file) input.value = '';
     }
-
-    const reader = new FileReader();
-
-    reader.onload = function (e) {
-      const img = new Image();
-      img.onload = async function () {
-        const canvas = document.createElement('canvas');
-        const context = canvas.getContext('2d');
-        if (!context) {
-          console.error('Could not get 2d context from canvas');
-          showToast('Error processing image', 0, 'error');
-          event.target.value = ''; // Reset file input
-          return;
-        }
-        canvas.width = img.width;
-        canvas.height = img.height;
-        context.drawImage(img, 0, 0, img.width, img.height);
-        const imageData = context.getImageData(0, 0, img.width, img.height);
-
-        try {
-          // Use qr.js library for decoding
-          const decodedData = qr.decodeQR({
-            data: imageData.data,
-            width: imageData.width,
-            height: imageData.height,
-          });
-
-          if (decodedData) {
-            if (typeof targetModal.fillFromQR === 'function') {
-              targetModal.fillFromQR(decodedData); // Call the provided fill function
-            } else {
-              console.error('No valid fill function provided for QR file select');
-              // Fallback or default behavior if needed, e.g., show generic error
-              showToast('Internal error handling QR data', 0, 'error');
-            }
-          } else {
-            // qr.decodeQR might throw an error instead of returning null/undefined
-            // This else block might not be reached if errors are always thrown
-            console.error('No QR code found in image (qr.js)');
-            showToast('No QR code found in image', 0, 'error');
-            // Clear the form fields in case of failure to find QR code
-            targetModal.resetForm();
-          }
-        } catch (error) {
-          console.error('Error processing QR code image with qr.js:', error);
-          // Assume error means no QR code found or decoding failed
-          showToast('Could not read QR code from image', 0, 'error');
-          // Clear the form fields in case of error
-          targetModal.resetForm();
-
-        } finally {
-          event.target.value = ''; // Reset the file input value regardless of outcome
-        }
-      };
-      img.onerror = function () {
-        console.error('Error loading image');
-        showToast('Error loading image file', 0, 'error');
-        event.target.value = ''; // Reset the file input value
-        // Clear the form fields in case of image loading error
-        targetModal.resetForm();
-      };
-      img.src = e.target.result;
-    };
-
-    reader.onerror = function () {
-      console.error('Error reading file');
-      showToast('Error reading file', 0, 'error');
-      event.target.value = ''; // Reset the file input value
-    };
-
-    reader.readAsDataURL(file);
   }
 
   /**
    * Fills the payment form from QR code data
    * @param {string} data - The QR code data to fill the form with
-   * @returns {void}
-   * */
+   * @returns {Promise<void>}
+   */
   async fillFromQR(data) {
-    // Explicitly check for the required prefix
-    if (!data || !data.startsWith('liberdus://')) {
-      console.error("Invalid payment QR code format. Missing 'liberdus://' prefix.", data);
+    const session = this.session;
+    let request;
+    try {
+      request = PaymentQR.decode(data, { allowProfile: true });
+    } catch (error) {
+      console.error('Error parsing payment QR data:', error);
       showToast('Invalid payment QR code format.', 0, 'error');
-      // Optionally clear fields or leave them as they were
-      this.usernameInput.value = '';
-      this.amountInput.value = '';
-      this.memoInput.value = '';
-      return; // Stop processing if the format is wrong
+      return;
+    }
+    if (!request.matches(`liberdus:${network.netid}`, 'liberdus')) {
+      showToast(request.switchMessage, 0, 'warning');
+      return;
     }
 
-    // Clear existing fields first
-    this.usernameInput.value = '';
+    const { payment } = request;
+    this.usernameInput.value = payment.u;
     this.amountInput.value = '';
     this.memoInput.value = '';
 
-    try {
-      // Remove the prefix and process the base64 data
-      const base64Data = data.substring('liberdus://'.length);
-      const jsonData = bin2utf8(base642bin(base64Data));
-      const paymentData = JSON.parse(jsonData);
-
-      if (paymentData.u) {
-        this.usernameInput.value = paymentData.u;
-      }
-      if (paymentData.d) {
-        try {
-          const symbol = String(paymentData.d).toUpperCase();
-          const current = String(this.balanceSymbol.textContent || 'LIB').toUpperCase();
-          if (symbol === 'USD' && current !== 'USD') {
-            // call the existing toggle handler to reuse conversion logic
-            await this.handleToggleBalance();
-          } else if (symbol === 'LIB' && current !== 'LIB') {
-            await this.handleToggleBalance();
-          }
-        } catch (err) {
-          console.error('Error toggling balance from QR display unit field', err);
+    if (payment.d) {
+      try {
+        const symbol = String(payment.d).toUpperCase();
+        const current = String(this.balanceSymbol.textContent || 'LIB').toUpperCase();
+        if ((symbol === 'USD' || symbol === 'LIB') && symbol !== current) {
+          await this.handleToggleBalance();
         }
+      } catch (error) {
+        console.error('Error toggling balance from QR display unit field', error);
       }
-      if (paymentData.a) {
-        this.amountInput.value = paymentData.a;
-      }
-      if (paymentData.m) {
-        this.memoInput.value = paymentData.m;
-      }
-
-      // Trigger username validation and amount validation
-      this.usernameInput.dispatchEvent(new Event('input'));
-      this.amountInput.dispatchEvent(new Event('input'));
-    } catch (error) {
-      console.error('Error parsing payment QR data:', error, data);
-      showToast('Failed to parse payment QR data.', 0, 'error');
-      // Clear fields on error
-      this.usernameInput.value = '';
-      this.amountInput.value = '';
-      this.memoInput.value = '';
     }
-  }  
+    if (!this.isCurrentSession(session)) return;
+    this.amountInput.value = payment.a || '';
+    this.memoInput.value = payment.m || '';
+
+    this.usernameInput.dispatchEvent(new Event('input'));
+    this.amountInput.dispatchEvent(new Event('input'));
+  }
 }
 
 const sendAssetFormModal = new SendAssetFormModal();
 
 class SendAssetConfirmModal {
   constructor() {
+    this.payment = null;
   }
 
   load() {
@@ -27448,13 +35394,17 @@ class SendAssetConfirmModal {
     this.cancelButton.addEventListener('click', this.close.bind(this));
   }
 
-  open() {
-    this.modal.classList.add('active');
+  open(payment) {
+    if (!openModal(this.modal)) return false;
+    this.payment = payment;
+    return true;
   }
 
   close() {
-    this.modal.classList.remove('active');
+    this.payment = null;
+    this.modal?.classList.remove('active');
   }
+
   isActive() {
     return this.modal?.classList.contains('active') || false;
   }
@@ -27468,7 +35418,19 @@ class SendAssetConfirmModal {
    */
   async handleSendAsset(event) {
     event.preventDefault();
-    const rawInput = sendAssetFormModal.usernameInput.value.trim();
+    const payment = this.payment;
+    if (!payment) {
+      this.close();
+      return;
+    }
+    const selectedAsset = walletScreen.getLibAsset();
+    if (!selectedAsset) {
+      showToast('Liberdus asset is unavailable.', 3000, 'warning');
+      this.close();
+      return;
+    }
+
+    const rawInput = payment.username;
     if (isValidEthereumAddress(rawInput)) {
       showToast('Address not supported; enter username instead.', 0, 'error');
       return;
@@ -27481,16 +35443,22 @@ class SendAssetConfirmModal {
     }
 
     const wallet = myData.wallet;
-    const assetIndex = Number(sendAssetFormModal.assetSelectDropdown.value);
-    const amount = bigxnum2big(wei, sendAssetFormModal.amountInput.value);
-    const memoIn = sendAssetFormModal.memoInput.value || '';
-    const memo = memoIn.trim();
+    const assetIndex = wallet.assets.indexOf(selectedAsset);
+    if (assetIndex < 0) {
+      showToast('Liberdus asset is unavailable.', 0, 'error');
+      return;
+    }
+    const amount = payment.amountWei;
+    const memo = payment.memo;
     const keys = myAccount.keys;
     let toAddress;
 
     // Validate amount including transaction fee
-    if (!(await validateBalance(amount, assetIndex))) {
+    const hasBalance = await validateBalance(amount, assetIndex);
+    if (this.payment !== payment) return;
+    if (!hasBalance) {
       await getNetworkParams();
+      if (this.payment !== payment) return;
       const txFeeInLIB = getTransactionFeeWei();
       const balance = BigInt(wallet.assets[assetIndex].balance);
       const amountStr = big2str(amount, 18).slice(0, -16);
@@ -27515,6 +35483,7 @@ class SendAssetConfirmModal {
           const data = await response.json();
   */
       const data = await queryNetwork(`/address/${usernameHash}`);
+      if (this.payment !== payment) return;
       if (!data || !data.address) {
         showToast('Username not found', 0, 'error');
         return;
@@ -27523,6 +35492,12 @@ class SendAssetConfirmModal {
     } catch (error) {
       console.error('Error looking up username:', error);
       showToast('Error looking up username', 0, 'error');
+      return;
+    }
+
+    if (toAddress !== payment.recipientAddress) {
+      this.close();
+      showToast('Recipient address changed. Check the recipient and enter the username again.', 0, 'error');
       return;
     }
 
@@ -27538,6 +35513,7 @@ class SendAssetConfirmModal {
 
     // Ensure recipient keys exist locally; function handles local check and network fetch.
     await ensureContactKeys(toAddress);
+    if (this.payment !== payment) return;
     const recipientPubKey = myData.contacts[toAddress]?.public;
     const pqRecPubKey = myData.contacts[toAddress]?.pqPublic;
     let pqEncSharedKey = '';
@@ -27632,9 +35608,9 @@ class SendAssetConfirmModal {
       }
 
       // hidden input field retryOfTxId value is not an empty string
-      if (sendAssetFormModal.retryTxIdInput.value) {
+      if (payment.retryTxId) {
         // remove from myData use txid from hidden field retryOfPaymentTxId
-        removeFailedTx(sendAssetFormModal.retryTxIdInput.value, toAddress);
+        removeFailedTx(payment.retryTxId, toAddress);
 
         // clear the field
         failedTransactionModal.txid = '';
@@ -27744,12 +35720,14 @@ class SendAssetConfirmModal {
 const sendAssetConfirmModal = new SendAssetConfirmModal();
 
 class ReceiveModal {
+  static qrScale = 4;
+
   constructor() {
+    this.session = null;
   }
 
   load() {
     this.modal = document.getElementById('receiveModal');
-    this.assetSelect = document.getElementById('receiveAsset');
     this.amountInput = document.getElementById('receiveAmount');
     this.memoInput = document.getElementById('receiveMemo');
     this.displayAddress = document.getElementById('displayAddress');
@@ -27760,9 +35738,6 @@ class ReceiveModal {
     this.receiveBalanceSymbol = document.getElementById('receiveBalanceSymbol');
     this.fullAddress = null; // Store full address for copying
 
-    // Create debounced function
-    this.debouncedUpdateQRCode = debounce(() => this.updateQRCode(), 300);
-
     // Modal close
     document.getElementById('closeReceiveModal').addEventListener('click', () => this.close());
     
@@ -27771,227 +35746,160 @@ class ReceiveModal {
     this.displayAddress.addEventListener('click', () => this.copyAddress());
     
     // QR code updates
-    this.assetSelect.addEventListener('change', () => this.updateQRCode());
     this.amountInput.addEventListener('input', () => this.amountInput.value = normalizeUnsignedFloat(this.amountInput.value));
-    this.amountInput.addEventListener('input', this.debouncedUpdateQRCode);
-    this.memoInput.addEventListener('input', this.debouncedUpdateQRCode);
+    this.amountInput.addEventListener('input', () => this.scheduleQRCode());
+    this.memoInput.addEventListener('input', () => this.scheduleQRCode());
     this.toggleReceiveBalanceButton.addEventListener('click', this.handleToggleBalance.bind(this));
+    window.addEventListener('resize', () => this.sizeQRCode());
   }
 
   open() {
-    this.modal.classList.add('active');
-
-    // Get wallet data
-    const walletData = myData.wallet;
-
-    // Populate assets dropdown
-    // Clear existing options
-    this.assetSelect.innerHTML = '';
-
-    // Check if wallet assets exist
-    if (walletData && walletData.assets && walletData.assets.length > 0) {
-      // Add options for each asset
-      walletData.assets.forEach((asset, index) => {
-        const option = document.createElement('option');
-        option.value = index;
-        option.textContent = `${asset.name} (${asset.symbol})`;
-        this.assetSelect.appendChild(option);
-      });
-    } else {
-      // Add a default option if no assets
-      const option = document.createElement('option');
-      option.value = 0;
-      option.textContent = 'Liberdus (LIB)';
-      this.assetSelect.appendChild(option);
-    }
-
-    // Clear input fields
+    if (this.modal.classList.contains('active') || !myAccount) return false;
+    this.close();
+    this.session = { account: myAccount };
     this.amountInput.value = '';
     this.memoInput.value = '';
-
     this.receiveBalanceSymbol.textContent = 'LIB';
+    this.toggleReceiveBalanceButton.disabled = false;
+    this.updateDisplayAddress();
+    if (!openModal(this.modal)) {
+      this.close();
+      return false;
+    }
+    return true;
+  }
 
-
-    // Initial update for addresses based on the first asset
-    this.updateReceiveAddresses();
+  isCurrentSession(session) {
+    return Boolean(session && this.session === session);
   }
 
   close() {
-    this.modal.classList.remove('active');
+    this.session = null;
+    clearTimeout(this.qrTimer);
+    clearTimeout(this.copyTimer);
+    this.modal?.classList.remove('active');
+    this.copyButton?.classList.remove('success');
+    this.fullAddress = null;
+    if (this.displayAddress) this.displayAddress.textContent = '';
+    if (this.qrcodeContainer) this.qrcodeContainer.innerHTML = '';
   }
 
-  updateReceiveAddresses() {
-    // Update display address
-    this.updateDisplayAddress();
+  scheduleQRCode() {
+    clearTimeout(this.qrTimer);
+    this.qrTimer = setTimeout(() => this.updateQRCode(), 300);
   }
 
   updateDisplayAddress() {
-    // Clear previous QR code
-    this.qrcodeContainer.innerHTML = '';
-
-    const address = myAccount.keys.address;
-    const addressWithPrefix = address.startsWith('0x') ? address : `0x${address}`;
-    
-    // Store full address for copying
-    this.fullAddress = addressWithPrefix;
-    
-    // Display full address
-    this.displayAddress.textContent = addressWithPrefix;
-
-    // Generate QR code with payment data
-    try {
-      this.updateQRCode();
-    } catch (error) {
-      console.error('Error updating QR code:', error);
-
-      // Fallback to basic address QR code if there's an error
-      new QRCode(this.qrcodeContainer, {
-        text: '0x' + address,
-        width: 200,
-        height: 200,
-      });
-      console.warn('Fallback to basic address QR code');
-    }
+    const address = this.session.account.keys.address;
+    this.fullAddress = address.startsWith('0x') ? address : `0x${address}`;
+    this.displayAddress.textContent = this.fullAddress;
+    this.updateQRCode();
   }
 
-  // Create QR payment data object based on form values
   createQRPaymentData() {
-    // Get selected asset
-    const assetIndex = parseInt(this.assetSelect.value, 10) || 0;
-
-    // Default asset info in case we can't find the selected asset
-    let assetId = 'liberdus';
-    let symbol = 'LIB';
-
-    // Try to get the selected asset
-    try {
-      if (myData && myData.wallet && myData.wallet.assets && myData.wallet.assets.length > 0) {
-        const asset = myData.wallet.assets[assetIndex];
-        if (asset) {
-          assetId = asset.id || 'liberdus';
-          symbol = asset.symbol || 'LIB';
-        } else {
-          console.warn(`Asset not found at index ${assetIndex}, using defaults`);
-        }
-      } else {
-        console.warn('Wallet assets not available, using default asset');
-      }
-    } catch (error) {
-      console.error('Error accessing asset data:', error);
-    }
-
-    // Build payment data object
-    const paymentData = {
-      u: myAccount.username, // username
-      i: assetId, // assetId
-      s: symbol, // symbol
-      d: String(this.receiveBalanceSymbol.textContent || 'LIB').toUpperCase() //display unit
+    const payment = {
+      u: this.session.account.username,
+      n: 'liberdus',
+      netid: network.netid,
+      nn: `Liberdus ${network.name}`,
+      i: 'liberdus',
+      s: 'LIB',
+      d: String(this.receiveBalanceSymbol.textContent || 'LIB').toUpperCase(),
     };
-
-    // Add optional fields if they have values
     const amount = this.amountInput.value.trim();
-    if (amount) {
-      paymentData.a = amount;
-    }
-
     const memo = this.memoInput.value.trim();
-    if (memo) {
-      paymentData.m = memo;
-    }
-
-    return paymentData;
+    if (amount) payment.a = amount;
+    if (memo) payment.m = memo;
+    return payment;
   }
 
-  // Update QR code with current payment data
   updateQRCode() {
-    this.qrcodeContainer.innerHTML = '';
-    this.previewElement.style.display = 'none'; // Hide preview/error area initially
-    this.previewElement.innerHTML = ''; // Clear any previous error message
+    if (!this.isCurrentSession(this.session)) return;
+    this.qrcodeContainer.replaceChildren();
+    this.previewElement.style.display = 'none';
+    this.previewElement.textContent = '';
 
+    const payment = this.createQRPaymentData();
     try {
-      // Get payment data
-      const paymentData = this.createQRPaymentData();
-
-      // Convert to JSON and encode as base64
-      const jsonData = JSON.stringify(paymentData);
-      const base64Data = bin2base64(utf82bin(jsonData));
-
-      // Create URI with liberdus:// prefix
-      const qrText = `liberdus://${base64Data}`;
-
-      const gifBytes = qr.encodeQR(qrText, 'gif', { scale: 4 });
-      // Convert the raw bytes to a base64 data URL
-      const base64 = btoa(String.fromCharCode.apply(null, new Uint8Array(gifBytes)));
-      const dataUrl = 'data:image/gif;base64,' + base64;
-      // Create an image element and set its source to the data URL
-      const img = document.createElement('img');
-      img.src = dataUrl;
-      img.width = 200;
-      img.height = 200;
-      // Add the image to the container
-      this.qrcodeContainer.appendChild(img);
-
-      return qrText;
+      return this.renderQRCode(payment);
     } catch (error) {
-      console.error('Error in updateQRCode:', error);
+      console.error('Error generating payment QR code:', error);
+    }
 
-      this.qrcodeContainer.innerHTML = ''; // Clear the container before adding fallback QR
-
-      // Fallback to basic username QR code in liberdus:// format
+    this.previewElement.style.display = 'block';
+    const { a: amount, m: memo, ...recipientAndTarget } = payment;
+    if (amount || memo) {
       try {
-        // Use short key 'u' for username
-        const fallbackData = { u: myAccount.username };
-        const fallbackJsonData = JSON.stringify(fallbackData);
-        const fallbackBase64Data = btoa(fallbackJsonData);
-        const fallbackQrText = `liberdus://${fallbackBase64Data}`;
-
-        const gifBytes = qr.encodeQR(fallbackQrText, 'gif', { scale: 4 });
-        // Convert the raw bytes to a base64 data URL
-        const base64 = btoa(String.fromCharCode.apply(null, new Uint8Array(gifBytes)));
-        const dataUrl = 'data:image/gif;base64,' + base64;
-        // Create an image element and set its source to the data URL
-        const img = document.createElement('img');
-        img.src = dataUrl;
-        img.width = 200;
-        img.height = 200;
-        // Add the image to the container
-        this.qrcodeContainer.appendChild(img);
-
-        console.error('Error generating full QR', error);
-
-        // Show error directly in the preview element
-        if (this.previewElement) {
-          this.previewElement.innerHTML = `<span style="color: red;">Error generating full QR</span><br> Generating QR with only username. <br> Username: ${myAccount.username}`;
-          this.previewElement.style.display = 'block'; // Make the error visible
-        }
-      } catch (fallbackError) {
-        console.error('Error generating fallback QR code:', fallbackError);
-        this.qrcodeContainer.innerHTML = '<p style="color: red; text-align: center;">Failed to generate QR code.</p>';
+        const text = this.renderQRCode(recipientAndTarget);
+        this.previewElement.textContent = 'The QR code omits the amount and memo.';
+        return text;
+      } catch (error) {
+        console.error('Error generating fallback QR code:', error);
       }
     }
+    this.previewElement.textContent = 'Unable to generate the payment QR code. You can still copy your address.';
+  }
+
+  renderQRCode(payment) {
+    const text = PaymentQR.encode(payment);
+    const gifBytes = qr.encodeQR(text, 'gif', { scale: ReceiveModal.qrScale, border: 4 });
+    const img = document.createElement('img');
+    img.width = 200;
+    img.height = 200;
+    img.addEventListener('load', () => this.sizeQRCode(), { once: true });
+    img.src = `data:image/gif;base64,${bin2base64(new Uint8Array(gifBytes))}`;
+    this.qrcodeContainer.appendChild(img);
+    return text;
+  }
+
+  sizeQRCode() {
+    const img = this.qrcodeContainer.firstElementChild;
+    if (!img?.naturalWidth) return;
+
+    // Keep modules on whole pixels and leave room for the QR container's padding.
+    const modules = img.naturalWidth / ReceiveModal.qrScale;
+    const { paddingLeft, paddingRight } = getComputedStyle(this.qrcodeContainer);
+    const availableWidth = this.qrcodeContainer.clientWidth - parseFloat(paddingLeft) - parseFloat(paddingRight);
+    const scale = Math.max(1, Math.floor(availableWidth / modules));
+    img.width = modules * scale;
+    img.height = img.width;
   }
 
   /**
    * Toggle LIB/USD display for the receive amount and update the QR accordingly
    */
   async handleToggleBalance() {
+    const session = this.session;
+    if (!this.isCurrentSession(session)) return;
+    this.toggleReceiveBalanceButton.disabled = true;
     try {
-      this.receiveBalanceSymbol.textContent = this.receiveBalanceSymbol.textContent === 'LIB' ? 'USD' : 'LIB';
+      const asset = walletScreen.getLibAsset();
+      const tokenSymbol = asset?.symbol || 'LIB';
+      const isShowingToken = this.receiveBalanceSymbol.textContent !== 'USD';
+      const tokenPrice = Number(asset?.price);
+      let conversionPrice = Number.isFinite(tokenPrice) && tokenPrice > 0 ? tokenPrice : null;
+      if (conversionPrice === null) {
+        await getNetworkParams();
+        if (!this.isCurrentSession(session)) return;
+        const stabilityFactor = getStabilityFactor();
+        conversionPrice = Number.isFinite(stabilityFactor) && stabilityFactor > 0
+          ? stabilityFactor
+          : null;
+      }
 
-      const isLib = this.receiveBalanceSymbol.textContent === 'LIB';
+      if (conversionPrice === null) {
+        showToast(`${tokenSymbol}/USD price is unavailable`, 2500, 'warning');
+        return;
+      }
 
-      await getNetworkParams();
-      const stabilityFactor = getStabilityFactor();
-
-      if (this.amountInput && this.amountInput.value.trim() !== '') {
+      this.receiveBalanceSymbol.textContent = isShowingToken ? 'USD' : tokenSymbol;
+      if (this.amountInput.value.trim() !== '') {
         const currentValue = parseFloat(this.amountInput.value);
         if (!isNaN(currentValue)) {
-          if (!isLib) {
-            // now showing USD, convert LIB -> USD
-            this.amountInput.value = (currentValue * stabilityFactor).toString();
+          if (this.receiveBalanceSymbol.textContent === 'USD') {
+            this.amountInput.value = (currentValue * conversionPrice).toString();
           } else {
-            // now showing LIB, convert USD -> LIB
-            this.amountInput.value = (currentValue / stabilityFactor).toString();
+            this.amountInput.value = (currentValue / conversionPrice).toString();
           }
         }
       }
@@ -27999,20 +35907,24 @@ class ReceiveModal {
       this.updateQRCode();
     } catch (err) {
       console.error('Error toggling receive balance:', err);
+    } finally {
+      if (this.isCurrentSession(session)) this.toggleReceiveBalanceButton.disabled = false;
     }
   }
 
   async copyAddress() {
-    // Copy the full address, not the displayed truncated version and toast
-    const address = this.fullAddress || this.displayAddress.textContent;
+    const session = this.session;
+    if (!this.isCurrentSession(session)) return;
+    const address = this.fullAddress;
     try {
       await navigator.clipboard.writeText(address);
+      if (!this.isCurrentSession(session)) return;
       showToast('Address copied to clipboard', 2000, 'success');
       this.copyButton.classList.add('success');
-      setTimeout(() => {
-        this.copyButton.classList.remove('success');
-      }, 2000);
+      clearTimeout(this.copyTimer);
+      this.copyTimer = setTimeout(() => this.copyButton.classList.remove('success'), 2000);
     } catch (err) {
+      if (!this.isCurrentSession(session)) return;
       console.error('Failed to copy:', err);
       showToast('Failed to copy address', 0, 'error');
     }
@@ -28021,6 +35933,181 @@ class ReceiveModal {
 
 // initialize the receive modal
 const receiveModal = new ReceiveModal();
+
+multichain.configure({
+  // Which assets this account has held, and whether empty ones are hidden,
+  // travel with the account's saved state.
+  getSettings: () => myData?.multichain,
+  saveSettings: (settings) => {
+    if (!myData) return;
+    myData.multichain = settings;
+    saveState();
+  },
+  getAccount: () => myAccount,
+});
+
+chatPaymentPanel.configure({
+  getAccount: () => myAccount,
+  onSent: (recipientAddress, messageObj, approvedTollWei) =>
+    chatModal.sendIntentsPaymentMessage(recipientAddress, messageObj, approvedTollWei),
+  showToast,
+  lookupUsername: (username) => getUsernameAddress(username, { requireNetworkResult: true }),
+  openQRScanner: (fill, onCancel, background) => qrScanModal.open(fill, onCancel, background),
+  createContactAutocomplete: ({ input, list, onSelect }) => new ContactAutocomplete({
+    input,
+    list,
+    onSelect,
+    getContacts: () => {
+      return Object.values(myData?.contacts || {})
+        .filter((contact) => contact.username && chatModal.canSendIntentsPaymentTo(contact))
+        .map((contact) => ({ ...contact, displayName: getContactDisplayName(contact) }));
+    },
+  }),
+  // Check whether the Liberdus Intents payment message can reach the recipient
+  // and whether the sender can pay the current toll.
+  checkReceiptRecipient: (address, username, isCurrentLookup) =>
+    chatModal.checkIntentsPaymentReceipt(address, username, isCurrentLookup),
+});
+
+// Swaps and withdrawals are saved with the account. Liberdus Intents
+// payment messages are read from the conversations that hold them.
+intentsActivity.configure({
+  getOrders: () => (Array.isArray(myData?.intentsOrders) ? myData.intentsOrders : []),
+  saveOrders: (orders) => {
+    if (!myData) return;
+    myData.intentsOrders = orders;
+    saveState();
+  },
+  listPayments: () => Object.values(myData?.contacts || {}).flatMap((contact) => (contact.messages || [])
+    .filter((message) => message.type === INTENTS_CHAT_MESSAGE_TYPE && message.payment)
+    .map((message) => ({
+      ...message.payment,
+      my: Boolean(message.my),
+      peer: getContactDisplayName(contact),
+      peerAccount: intentsAccountIdForAddress(contact.address),
+      time: message.timestamp,
+      verified: message.paymentVerified,
+    }))),
+});
+
+function evmPaymentRecordId(record) {
+  return `${record.kind}:${stringify(record.payment)}`;
+}
+
+// A synced claim only grants permission to verify, never to send or retry assets.
+function queueEvmPaymentMessage(message) {
+  const payment = parseEvmTransferMessage(message.payment);
+  if (!payment || message.deleted) return;
+  let records;
+  try {
+    records = loadEvmPayments();
+  } catch (error) {
+    // Saved recovery failures must not interrupt delivery of other chat messages.
+    if (queueEvmPaymentMessage.warningAccount !== myAccount) {
+      console.warn('Skipping EVM payment verification queue:', {
+        txid: message.txid,
+        reason: error.message,
+      });
+      queueEvmPaymentMessage.warningAccount = myAccount;
+    }
+    return;
+  }
+  queueEvmPaymentMessage.warningAccount = null;
+  const claim = stringify(payment);
+  const existing = records.find((record) => stringify(record.payment) === claim);
+  if (!existing && ['settled', 'failed'].includes(message.paymentVerified)
+    && Date.now() - (message.paymentCheckedAt || 0) < EVM_RECHECK_MS) return;
+  const record = existing || { kind: 'verification', payment, assetState: 'unknown', createdAt: Date.now() };
+  if (Date.now() - (record.checkedAt || 0) >= EVM_RECHECK_MS) {
+    record.checkAttempts = 0;
+    record.nextCheckAt = 0;
+  }
+  if (record.kind === 'outgoing' && message.my && message.paymentMessageConfirmed) {
+    record.messageState = 'delivered';
+    // Delivery can arrive after the recovery checker paused. Allow final cleanup.
+    record.checkAttempts = 0;
+    record.nextCheckAt = 0;
+  }
+  saveEvmPayment(record);
+}
+queueEvmPaymentMessage.warningAccount = null;
+
+// EVM recovery lives in myData and follows the normal account save lifecycle.
+function loadEvmPayments() {
+  const records = myData.evmPayments ?? [];
+  if (!Array.isArray(records)) {
+    throw new Error('Saved EVM payment records could not be read.');
+  }
+  const validRecords = records.filter((record) => ['outgoing', 'verification'].includes(record?.kind)
+    && parseEvmTransferMessage(record.payment));
+  if (validRecords.length !== records.length) {
+    // Invalid records came from pre-release testing and can be discarded.
+    myData.evmPayments = validRecords;
+    console.warn('Removed invalid saved EVM payment records:', records.length - validRecords.length);
+  }
+  // Async callers work on a snapshot, without changing the current record until saved.
+  return parse(stringify(validRecords));
+}
+
+function saveEvmPayment(record) {
+  const records = myData.evmPayments ??= [];
+  const index = records.findIndex((item) => evmPaymentRecordId(item) === evmPaymentRecordId(record));
+  const saved = parse(stringify(record));
+  if (index < 0) records.push(saved);
+  else records[index] = saved;
+}
+
+// Submission responses own EVM progress, never the latest chat-delivery state.
+function saveEvmSubmission(record) {
+  const latest = loadEvmPayments().find((item) => evmPaymentRecordId(item) === evmPaymentRecordId(record));
+  if (!latest) throw new Error('Payment recovery was removed. Check the transaction hash before sending again.');
+  if (!['confirmed', 'reverted', 'rejected'].includes(latest.assetState)) {
+    latest.broadcastState = record.broadcastState;
+    latest.assetState = record.assetState;
+    latest.broadcastUncertain = record.broadcastUncertain;
+    latest.broadcastError = record.broadcastError;
+  }
+  if (record.notifiedAssetState) latest.notifiedAssetState = record.notifiedAssetState;
+  Object.assign(record, latest);
+  if (['confirmed', 'reverted', 'rejected'].includes(record.assetState)) delete record.rawTransaction;
+  saveEvmPayment(record);
+}
+
+function removeEvmPayment(record) {
+  myData.evmPayments = (myData.evmPayments ?? []).filter((item) => evmPaymentRecordId(item) !== evmPaymentRecordId(record));
+}
+
+evmAssets.configure({
+  getAccount: () => myAccount,
+  lookupUsername: getUsernameAddress,
+  createContactAutocomplete: ({ input, list, onSelect }) => new ContactAutocomplete({
+    input,
+    list,
+    onSelect,
+    getContacts: () => {
+      if (!myAccount) return [];
+      const ownAddress = normalizeAddress(myAccount.keys.address);
+      return Object.values(myData?.contacts || {}).filter((contact) =>
+        contact.address && !isFaucetAddress(contact.address)
+        && /^[a-z0-9]{3,15}$/i.test(contact.username || '') && normalizeAddress(contact.address) !== ownAddress);
+    },
+  }),
+  prepareChatPayment: (resolution, account) => chatModal.prepareExternalPaymentRecipient(resolution, account),
+  preparePaymentMessage: (record, account, isCurrent) => chatModal.prepareEvmPaymentMessage(record, account, isCurrent),
+  sendChatPayment: (record, account) => chatModal.sendEvmPaymentMessage(record, account),
+  getPayments: loadEvmPayments,
+  savePayment: saveEvmPayment,
+  saveSubmission: saveEvmSubmission,
+  checkPayment: recheckEvmPayment,
+  dismissPayment: (record) => {
+    removeEvmPayment(record);
+    saveState();
+  },
+  openQRScanner: (fill) => qrScanModal.open(fill),
+  showToast,
+  hideToast,
+  syncSelect: (select) => PopupSelect.sync(select),
+});
 
 /**
  * Failed Transaction Modal
@@ -28074,7 +36161,7 @@ class FailedTransactionModal {
     this.txid = txid;
     //open.assetID = assetID;
 
-    this.modal.classList.add('active');
+    openModal(this.modal);
   }
 
   /**
@@ -28218,7 +36305,8 @@ class BridgeModal {
       if (network.bridges.length > 0) {
         this.selectedNetwork = network.bridges[0];
       }
-    } 
+    }
+    PopupSelect.sync(this.networkSelect);
   }
   
   updateSelectedNetwork() {
@@ -28241,7 +36329,7 @@ class BridgeModal {
   }
 
   open() {
-    this.modal.classList.add('active');
+    openModal(this.modal);
     
     // Reset defaults
     this.direction = 'in';
@@ -28257,6 +36345,7 @@ class BridgeModal {
     
     // Set initial visibility of network dropdown
     this.handleDirectionChange();
+    PopupSelect.sync(this.directionSelect);
   }
 
   close() {
@@ -28303,7 +36392,10 @@ const bridgeModal = new BridgeModal();
  * @description A modal for migrating accounts from different networks
  */
 class MigrateAccountsModal {
-  constructor() { }
+  constructor() {
+    this.isOpening = false;
+    this.isMigrating = false;
+  }
 
   load() {
     this.modal = document.getElementById('migrateAccountsModal');
@@ -28328,11 +36420,23 @@ class MigrateAccountsModal {
   }
 
   async open() {
-    await this.populateAccounts();
-    this.modal.classList.add('active');
+    if (this.isOpening || this.isMigrating || this.isActive() || createAccountModal.isCreatingAccount) return;
+
+    this.isOpening = true;
+    createAccountModal.refreshControlStates();
+    try {
+      await this.populateAccounts();
+      if (createAccountModal.isCreatingAccount) return;
+      openModal(this.modal);
+    } finally {
+      this.isOpening = false;
+      createAccountModal.refreshControlStates();
+    }
   }
 
   close() {
+    if (this.isMigrating) return;
+
     this.modal.classList.remove('active');
     this.clearForm();
   }
@@ -28505,6 +36609,19 @@ class MigrateAccountsModal {
   async handleSubmit(event) {
     event.preventDefault();
 
+    if (this.isMigrating) return;
+
+    this.isMigrating = true;
+    try {
+      createAccountModal.refreshControlStates();
+      await this.migrateSelectedAccounts();
+    } finally {
+      this.isMigrating = false;
+      createAccountModal.refreshControlStates();
+    }
+  }
+
+  async migrateSelectedAccounts() {
     const selectedAccounts = this.accountList.querySelectorAll('input[type="checkbox"]:checked');
   
     const results = {}
@@ -28578,7 +36695,7 @@ class MigrateAccountsModal {
     let fileContent = loadState(username+'_'+netid, true)
   
     // Perform netid substitution
-    let substitutionResult = restoreAccountModal.performStringSubstitution(fileContent, {
+    let substitutionResult = importModal.performStringSubstitution(fileContent, {
       oldString: netid,
       newString: newNetId
     });
@@ -28771,6 +36888,25 @@ class LockModal {
     this.mode = 'set'; // set, change, or remove
   }
 
+  async createLock(password) {
+    if (!password) return null;
+
+    const salt = bin2hex(generateRandomBytes(16));
+    const verifier = await passwordToKey(password, salt);
+    return salt + verifier;
+  }
+
+  async verifyPassword(password, storedLock) {
+    if (!password || typeof storedLock !== 'string') return false;
+    if (storedLock.length !== 64 && storedLock.length !== 96) return false;
+    if (!/^[0-9a-f]+$/.test(storedLock)) return false;
+
+    // Salted locks prepend a 32-character salt to the 64-character verifier.
+    const salt = storedLock.length === 96 ? storedLock.slice(0, 32) : '';
+    const verifier = await passwordToKey(password, salt);
+    return salt + verifier === storedLock;
+  }
+
   load() {
     this.modal = document.getElementById('lockModal');
     this.openButton = document.getElementById('openLockModal');
@@ -28825,7 +36961,7 @@ class LockModal {
     this.clearInputs();
 
     // show the modal
-    this.modal.classList.add('active');
+    openModal(this.modal);
   }
 
   close() {
@@ -28902,15 +37038,7 @@ class LockModal {
         return;
       }
 
-      // decrypt the old password
-      const key = await passwordToKey(oldPassword);
-      if (!key) {
-        // remove the loading toast
-        if (waitingToastId) hideToast(waitingToastId);
-        showToast('Invalid password. Please try again.', 0, 'error');
-        return;
-      }
-      if (key !== localStorage.lock) {
+      if (!await this.verifyPassword(oldPassword, localStorage.lock)) {
         // remove the loading toast
         if (waitingToastId) hideToast(waitingToastId);
         // clear the old password input
@@ -28940,19 +37068,16 @@ class LockModal {
     }
     
     try {
-      // encryptData will handle the password hashing internally
-      const key = await passwordToKey(newPassword);
-      if (!key) {
+      const storedLock = await this.createLock(newPassword);
+      if (!storedLock) {
         // remove the loading toast
         if (waitingToastId) hideToast(waitingToastId);
         showToast('Invalid password. Please try again.', 0, 'error');
         return;
       }
 
-
-      
-      // Save the key in localStorage with a key of "lock"
-      localStorage.lock = key;
+      // Persist the password verifier separately from the account-encryption key.
+      localStorage.lock = storedLock;
       this.encKey = await passwordToKey(newPassword+"liberdusData")
       await encryptAllAccounts(oldPassword, newPassword)
 
@@ -29058,7 +37183,7 @@ class UnlockModal {
   }
 
   open() {
-    this.modal.classList.add('active');
+    openModal(this.modal);
     setTimeout(() => this.updateButtonState(), 100);
   }
 
@@ -29073,14 +37198,7 @@ class UnlockModal {
     // loading toast
     let waitingToastId = showToast('Checking password...', 0, 'loading');
     const password = this.passwordInput.value;
-    const key = await passwordToKey(password);
-    if (!key) {
-      // remove the loading toast
-      if (waitingToastId) hideToast(waitingToastId);
-      showToast('Invalid password. Please try again.', 0, 'error');
-      return;
-    }
-    if (key === localStorage.lock) {
+    if (await lockModal.verifyPassword(password, localStorage.lock)) {
       // remove the loading toast
       if (waitingToastId) hideToast(waitingToastId);
 //      showToast('Unlock successful', 2000, 'success');
@@ -29147,7 +37265,7 @@ class LaunchModal {
       async (event) => await this.handleSubmit(event)
     ));
     this.urlInput.addEventListener('input', () => this.updateButtonState());
-    this.backupButton.addEventListener('click', () => backupAccountModal.open());
+    this.backupButton.addEventListener('click', () => backupModal.open());
 
     document.addEventListener('click', (event) => {
       const target = event.target;
@@ -29158,13 +37276,13 @@ class LaunchModal {
         if (toastElement && toastElement.id) {
           hideToast(toastElement.id);
         }
-        backupAccountModal.open();
+        backupModal.open();
       }
     }, { capture: true });
   }
 
   open() {
-    this.modal.classList.add('active');
+    openModal(this.modal);
     this.hasShownBackupReminderThisOpen = false;
     this.urlInput.value = window.location.href.split('?')[0];
     this.updateButtonState();
@@ -29415,8 +37533,8 @@ class ReactNativeApp {
                     return; // Skip already-processed notifications
                   }
 
-                  // Handle scheduled call notifications - extract address from data.to
-                  if (notification?.data?.type === 'SCHEDULE_CALL' && notification?.data?.to) {
+                  // Extract the recipient address from notification data when available
+                  if (notification?.data?.to) {
                     const normalizedToAddress = normalizeAddress(notification.data.to);
                     // Save notification address to show bell in sign-in modal for accounts with notifications
                     if (normalizedToAddress !== normalizedCurrentUser) {
@@ -29756,7 +37874,7 @@ class ReactNativeApp {
         let addresses = [];
         if (netidAccounts?.usernames) {
           // Get addresses from all stored accounts and convert to long format
-          addresses = Object.values(netidAccounts.usernames).map(account => longAddress(account.address));
+          addresses = (netidAccounts[SIGN_IN_USERNAME_ORDER_KEY]?.public || []).map(username => longAddress(netidAccounts.usernames[username].address));
         }
 
         if (addresses.length < 1) return;
@@ -29837,7 +37955,7 @@ class ReactNativeApp {
     const netidAccounts = existingAccounts.netids[netid];
     let allStoredAddresses = [];
     if (netidAccounts?.usernames) {
-      allStoredAddresses = Object.values(netidAccounts.usernames).map(account => longAddress(account.address));
+      allStoredAddresses = (netidAccounts[SIGN_IN_USERNAME_ORDER_KEY]?.public || []).map(username => longAddress(netidAccounts.usernames[username].address));
     }
 
     // Create a list of addresses to keep subscribed, excluding the current user.
@@ -29951,10 +38069,8 @@ class ReactNativeApp {
    * @returns {number} -1 if version1 is older, 1 if newer, 0 if equal
    */
   compareVersions(version1, version2) {
-    // Convert version strings to comparable numbers
-    // Format: YYYY.MMDD.HHmm -> YYYYMMDDHHmm
-    const v1 = parseInt(version1.replace(/\D/g, ''));
-    const v2 = parseInt(version2.replace(/\D/g, ''));
+    const v1 = getComparableVersion(version1);
+    const v2 = getComparableVersion(version2);
     
     if (v1 < v2) return -1;  // version1 is older
     if (v1 > v2) return 1;   // version1 is newer
@@ -29982,17 +38098,25 @@ class ReactNativeApp {
 const reactNativeApp = new ReactNativeApp();
 
 /**
+ * Remove a transaction from the pending list by ID.
+ * @param {string} txid
+ * @returns {boolean} Whether a pending transaction was removed
+ */
+function removePendingTransaction(txid) {
+  const index = myData.pending.findIndex((tx) => tx.txid === txid);
+  if (index === -1) return false;
+
+  myData.pending.splice(index, 1);
+  return true;
+}
+
+/**
  * Remove failed transaction from the contacts messages, pending, and wallet history
  * @param {string} txid - The transaction ID to remove
  * @param {string} currentAddress - The address of the current contact
  */
 function removeFailedTx(txid, currentAddress) {
-  // remove pending tx if exists
-  const index = myData.pending.findIndex((tx) => tx.txid === txid);
-  if (index > -1) {
-    myData.pending.splice(index, 1);
-  }
-
+  removePendingTransaction(txid);
   const contact = myData?.contacts?.[currentAddress];
   if (contact && contact.messages) {
     contact.messages = contact.messages.filter((msg) => msg.txid !== txid);
@@ -30037,19 +38161,34 @@ async function refreshActiveBalanceDisplays(didSettlePendingState) {
     await sendAssetFormModal.updateAvailableBalance();
   }
 
-  if (stakeValidatorModal.isActive()) {
-    await stakeValidatorModal.updateStakeBalanceDisplay();
+  if (stakeModal.isActive()) {
+    await stakeModal.updateStakeBalanceDisplay();
   }
 }
+
+let checkPendingTransactionsPromise = null;
 
 /**
  * Check pending transactions that are at least 5 seconds old
  * @returns {Promise<void>}
  */
 async function checkPendingTransactions() {
+  void checkEvmPayments();
+  if (!checkPendingTransactionsPromise) {
+    checkPendingTransactionsPromise = checkPendingTransactionsOnce()
+      .finally(() => {
+        checkPendingTransactionsPromise = null;
+      });
+  }
+
+  return checkPendingTransactionsPromise;
+}
+
+async function checkPendingTransactionsOnce() {
   if (!myData || !myAccount) {
     return;
   }
+  const account = myAccount;
 
   // initialize the pending array if it is not already initialized
   myData.pending ??= [];
@@ -30078,21 +38217,60 @@ async function checkPendingTransactions() {
   for (let i = myData.pending.length - 1; i >= 0; i--) {
     const pendingTxInfo = myData.pending[i];
     const { txid, type, submittedts } = pendingTxInfo;
+    const isPendingDaoTransaction = isDaoTransactionType(type);
+    const isPendingDaoVote = type === DAO_ACTION_TYPES.VOTE;
+    const voteReceiptRetryAt = pendingTxInfo.daoVoteReceiptRetryAt;
+    if (isPendingDaoVote && voteReceiptRetryAt > now) continue;
     const reactionPending = pendingTxInfo.reactionPending;
+    const isPendingMessage = type === 'message' && !reactionPending && !pendingTxInfo.editPending;
     if (reactionPending && reactionPending.status !== 'pending') {
+      continue;
+    }
+    if (isPendingMessage && (!isOnline || document.visibilityState === 'hidden')) {
       continue;
     }
 
     if (submittedts < eightSecondsAgo) {
 
       let endpointPath = `/transaction/${txid}`;
-      if (submittedts < twentySecondsAgo || submittedts < thirtySecondsAgo) {
+      if (submittedts < twentySecondsAgo) {
         endpointPath = `/collector/api/transaction?appReceiptId=${txid}`;
       }
       //console.log(`DEBUG: txid ${txid} endpointPath: ${endpointPath}`);
-      const res = await queryNetwork(endpointPath);
+      let res;
+      if (isPendingMessage) {
+        const result = await chatModal.checkPendingMessageReceipt(pendingTxInfo, endpointPath);
+        if (myAccount !== account) return;
+        if (result.cancelled || !isOnline || document.visibilityState === 'hidden') continue;
+        res = result.response;
+      } else {
+        res = await queryNetwork(endpointPath);
+        if (myAccount !== account) return;
+        if (isPendingDaoVote && submittedts < twentySecondsAgo
+          && typeof res?.transaction?.success !== 'boolean') {
+          res = await queryNetwork(`/transaction/${txid}`);
+          if (myAccount !== account) return;
+        }
+      }
       //console.log(`DEBUG: txid ${txid} res: ${JSON.stringify(res)}`);
-      if (submittedts < thirtySecondsAgo && (res.transaction === null || Object.keys(res.transaction).length === 0)) {
+      const receipt = res?.transaction;
+      const hasReceiptOutcome = typeof receipt?.success === 'boolean';
+      const missingReceipt = isPendingDaoVote ? !hasReceiptOutcome : !receipt || Object.keys(receipt).length === 0;
+      const confirmationTimedOut = isPendingMessage
+        ? !hasReceiptOutcome && getCorrectedTimestamp() - pendingTxInfo.checkedts >= ChatModal.CONFIRMATION_WINDOW_MS
+        : submittedts < thirtySecondsAgo && missingReceipt;
+      if (confirmationTimedOut) {
+        // Continue checking an unresolved vote without keeping the vote form locked.
+        if (isPendingDaoVote && now < pendingTxInfo.reminderExpiresAt) {
+          pendingTxInfo.daoVoteReceiptRetryAt = now + 60_000;
+          if (!voteReceiptRetryAt) {
+            didMutatePendingState = true;
+            await daoModal.refreshAfterDaoSettlement(pendingTxInfo, 'timeout');
+            if (myAccount !== account) return;
+            showToast(getDaoTransactionMessage(type, 'timeout'), 0, 'warning');
+          }
+          continue;
+        }
         console.error(`DEBUG: txid ${txid} timed out, removing completely`);
         if (reactionPending) {
           const outcome = settleAndQueueReactionCleanup(pendingTxInfo, 'failure');
@@ -30101,12 +38279,22 @@ async function checkPendingTransactions() {
           }
           continue;
         }
+        if (!removePendingTransaction(txid)) continue;
+        didMutatePendingState = true;
+
+        if (type === 'withdraw_stake') {
+          myData.wallet.history = myData.wallet.history.filter((tx) => tx.txid !== txid);
+          showToast('Unstake confirmation timed out. Please try again.', 0, 'warning');
+          await validatorModal.refreshIfOpen();
+        }
+
         if (pendingTxInfo.editPending) {
           reconcilePendingMessageEdit(pendingTxInfo);
           showToast('Edit timed out and was reverted', 0, 'error');
         }
         if (type === 'update_toll_required') {
           const { currentFriendStatus, previousFriendStatus, didRemoveStatusHistory } = revertPendingUpdateTollRequired(pendingTxInfo);
+          friendModal.handlePendingStatusSettled(pendingTxInfo.to);
           showToast('Update contact status timed out. Reverting contact to old status.', 0, 'error');
           await contactsScreen.updateContactsList();
           if (didRemoveStatusHistory || currentFriendStatus === 0 || previousFriendStatus === 0) {
@@ -30114,9 +38302,16 @@ async function checkPendingTransactions() {
           }
           chatModal.refreshCurrentView(txid);
         }
-        // remove the pending tx from the pending array
-        myData.pending.splice(i, 1);
-        didMutatePendingState = true;
+        if (type === 'message') {
+          settleEvmPaymentMessage(txid, false);
+          updateTransactionStatus(txid, pendingTxInfo.to, 'failed', type);
+          chatModal.refreshCurrentView(txid);
+          await chatsScreen.updateChatList();
+        }
+        if (isPendingDaoTransaction && !voteReceiptRetryAt) {
+          await daoModal.refreshAfterDaoSettlement(pendingTxInfo, 'timeout');
+          showToast(getDaoTransactionMessage(type, 'timeout'), 0, 'warning');
+        }
         continue;
       }
 
@@ -30124,10 +38319,11 @@ async function checkPendingTransactions() {
         if (reactionPending) {
           settleAndQueueReactionCleanup(pendingTxInfo, 'success');
         } else {
-          // comment out to test the pending txs removal logic
-          myData.pending.splice(i, 1);
+          if (!removePendingTransaction(txid)) continue;
           didMutatePendingState = true;
         }
+
+        if (type === 'message') settleEvmPaymentMessage(txid, true);
 
         if (type === 'register') {
           pendingPromiseService.resolve(txid, {
@@ -30144,13 +38340,14 @@ async function checkPendingTransactions() {
           }
         }
 
-        if (type === 'deposit_stake' || type === 'withdraw_stake') {
-          // show toast notification with the success message
-          showToast(`${type === 'deposit_stake' ? 'Stake' : 'Unstake'} transaction successful`, 5000, 'success');
-          // refresh only if validator modal is open
-          if (validatorStakingModal.isActive()) {
-            validatorStakingModal.close();
-            validatorStakingModal.open();
+        if (type === 'withdraw_stake') {
+          showToast('Unstake transaction confirmed', 5000, 'success');
+          await validatorModal.refreshIfOpen();
+        } else if (type === 'deposit_stake') {
+          showToast('Stake transaction successful', 5000, 'success');
+          if (validatorModal.isActive()) {
+            validatorModal.close();
+            validatorModal.open();
           }
         }
 
@@ -30166,6 +38363,7 @@ async function checkPendingTransactions() {
           // log used by e2e tests do not delete
           console.log(`DEBUG: update_toll_required transaction successfully processed!`);
           syncPendingUpdateTollRequiredSuccess(pendingTxInfo, res.transaction);
+          friendModal.handlePendingStatusSettled(pendingTxInfo.to);
         }
 
         if (type === 'read') {
@@ -30175,11 +38373,35 @@ async function checkPendingTransactions() {
         if (type === 'reclaim_toll') {
           console.log(`DEBUG: reclaim_toll transaction successfully processed!`);
         }
+
+        if (isPendingDaoTransaction) {
+          const didRefreshDaoData = await daoModal.refreshAfterDaoSettlement(pendingTxInfo, 'success', receipt);
+          if (myAccount !== account) return;
+          if (didRefreshDaoData) {
+            showToast(getDaoTransactionMessage(type, 'success'), 3000, 'success');
+          } else if (!myData.pending.some((pendingTx) => pendingTx.txid === txid)) {
+            // Keep the pending guard active and retry reconciliation on the next poll.
+            myData.pending.push(pendingTxInfo);
+          }
+        }
       } else if (res?.transaction?.success === false) {
         console.log(`DEBUG: txid ${txid} failed, removing completely`);
+        if (!reactionPending) {
+          if (!removePendingTransaction(txid)) continue;
+          didMutatePendingState = true;
+        }
+
+        if (type === 'message') settleEvmPaymentMessage(txid, false);
+
+        if (isPendingDaoVote) {
+          await daoModal.refreshAfterDaoSettlement(pendingTxInfo, 'failure');
+          if (myAccount !== account) return;
+        }
+
         // Check for failure reason in the transaction receipt
         const failureReason = res?.transaction?.reason || 'Transaction failed';
         const feeMismatchStatus = await refreshNetworkParamsOnTxFeeMismatch(failureReason);
+        if (isPendingDaoVote && myAccount !== account) return;
         const userFailureReason = getUserFacingTxFailureReason(failureReason, feeMismatchStatus);
         console.log(`DEBUG: failure reason: ${failureReason}`);
 
@@ -30227,6 +38449,7 @@ async function checkPendingTransactions() {
           } else if (type === 'update_toll_required') {
             showToast(`Update contact status failed: ${userFailureReason}. Reverting contact to old status.`, 0, 'error');
             const { currentFriendStatus, previousFriendStatus, didRemoveStatusHistory } = revertPendingUpdateTollRequired(pendingTxInfo);
+            friendModal.handlePendingStatusSettled(pendingTxInfo.to);
             // update contact list since friend status was reverted
             await contactsScreen.updateContactsList();
             // Refresh when removing the optimistic divider or when the revert enters/exits "blocked"
@@ -30241,32 +38464,31 @@ async function checkPendingTransactions() {
             if (failureReason !== 'user is trying to reclaim toll but the toll pool is empty') {
               showToast(`Reclaim toll failed: ${userFailureReason}`, 0, 'error');
             }
-          } else {
+          } else if (!isPendingDaoTransaction) {
             // for messages, transfer etc.
             showToast(userFailureReason, 0, 'error');
           }
 
-          if (!reactionPending && !pendingTxInfo.editPending) {
+          if (!reactionPending && !pendingTxInfo.editPending && !isPendingDaoTransaction) {
             const toAddress = pendingTxInfo.to;
             updateTransactionStatus(txid, toAddress, 'failed', type);
             chatModal.refreshCurrentView(txid);
           }
         }
-        if (!reactionPending) {
-          // Remove from pending array
-          myData.pending.splice(i, 1);
-          didMutatePendingState = true;
+        if (!reactionPending && isPendingDaoTransaction) {
+          if (!isPendingDaoVote) await daoModal.refreshAfterDaoSettlement(pendingTxInfo, 'failure');
+          const failureMessage = getDaoTransactionMessage(type, 'failure');
+          showToast(`${failureMessage}: ${userFailureReason}`, 0, 'error');
         }
 
-        // refresh the validator modal if this is a withdraw_stake/deposit_stake and validator modal is open
         if (type === 'withdraw_stake' || type === 'deposit_stake') {
-          // remove from wallet history
           myData.wallet.history = myData.wallet.history.filter((tx) => tx.txid !== txid);
 
-          if (validatorStakingModal.isActive()) {
-            // refresh the validator modal
-            validatorStakingModal.close();
-            validatorStakingModal.open();
+          if (type === 'withdraw_stake') {
+            await validatorModal.refreshIfOpen();
+          } else if (validatorModal.isActive()) {
+            validatorModal.close();
+            validatorModal.open();
           }
         }
       } else {
@@ -30316,6 +38538,8 @@ function updateTransactionStatus(txid, toAddress, status, type) {
   if (contact) {
     const msgIndex = contact.messages.findIndex((msg) => msg.txid === txid);
     if (msgIndex !== -1) {
+      // A synced EVM announcement remains delivered even if a later receipt lookup times out.
+      if (contact.messages[msgIndex].type === EVM_CHAT_MESSAGE_TYPE && contact.messages[msgIndex].paymentMessageConfirmed) return;
       contact.messages[msgIndex].status = status;
     }
   }
@@ -30374,9 +38598,11 @@ function ignoreShiftTabKey(e) {
 /**
  * Fetches and caches network account data if it's stale or not yet fetched.
  * @param {boolean} forceRefresh - If true, bypass staleness interval and fetch immediately.
+ * @param {() => boolean} isCurrentLookup - Whether the lookup that requested the refresh is still active.
  * @returns {Promise<boolean>} - True when params are usable (fresh/cache/fetched), false otherwise
  */
-async function getNetworkParams(forceRefresh = false) {
+async function getNetworkParams(forceRefresh = false, isCurrentLookup = () => true) {
+  if (!isCurrentLookup()) return false;
   const now = getCorrectedTimestamp();
 
   // Check if data is fresh; (this.networkAccountTimeStamp || 0) handles initial undefined state
@@ -30402,6 +38628,7 @@ async function getNetworkParams(forceRefresh = false) {
   console.log(`getNetworkParams: Data for account ${NETWORK_ACCOUNT_ID} is stale or missing. Attempting to fetch...`);
   try {
     const fetchedData = await queryNetwork(`/account/${NETWORK_ACCOUNT_ID}`);
+    if (!isCurrentLookup()) return false;
 
     if (fetchedData !== undefined && fetchedData !== null) {
       parameters = fetchedData.account;
@@ -30432,6 +38659,7 @@ async function getNetworkParams(forceRefresh = false) {
       return false;
     }
   } catch (error) {
+    if (!isCurrentLookup()) return false;
     isOnline = false;
     updateUIForConnectivity();
     console.error(
@@ -30942,17 +39170,146 @@ const localStorageMonitor = new LocalStorageMonitor();
 const CONTACT_AVATAR_MAX_THUMB_SIZE = 128;
 const CONTACT_AVATAR_JPEG_QUALITY = 0.85;
 
-/**
- * ContactAvatarCache - Handles IndexedDB storage for contact avatar thumbnails
- */
+/** Tracks shared media ownership for best-effort account cleanup. */
+class MediaCacheOwnership {
+  constructor(database, storeNames) {
+    this.database = database;
+    this.storeNames = storeNames;
+    this.deleting = false;
+  }
+
+  async deleteDatabase() {
+    this.deleting = true;
+    const cache = this.database;
+    // Wait for any existing open to finish so we can close its connection.
+    await cache.openPromise?.catch(() => {});
+    cache.db?.close();
+    cache.db = null;
+    cache.openPromise = null;
+
+    await new Promise((resolve, reject) => {
+      const request = indexedDB.deleteDatabase(cache.dbName);
+      request.onsuccess = () => resolve();
+      request.onerror = () => reject(request.error);
+      request.onblocked = () => reject(new Error(`Deletion of ${cache.dbName} is blocked by another connection`));
+    });
+  }
+
+  static upgrade(transaction, storeNames) {
+    for (const name of storeNames) {
+      const store = transaction.objectStore(name);
+      if (!store.indexNames.contains('byOwner')) {
+        store.createIndex('byOwner', 'ownerKeys', { multiEntry: true, unique: false });
+      }
+    }
+  }
+
+  static getOwnerKey(account = myAccount) {
+    return account?.username && account?.netid ? `${account.username}_${account.netid}` : null;
+  }
+
+  /** @param {string|string[]|null} owner */
+  async run(storeNames, owner, action) {
+    const owners = (Array.isArray(owner) ? owner : [owner]).filter(Boolean);
+    const db = await this.database.init();
+    return new Promise((resolve, reject) => {
+      const transaction = db.transaction(storeNames, 'readwrite');
+      let result = false;
+      transaction.oncomplete = () => resolve(result);
+      transaction.onerror = event => reject(event.target.error || transaction.error);
+      transaction.onabort = () => reject(transaction.error || new Error('Media cache transaction aborted'));
+      try {
+        action({ transaction, owners, setResult: value => { result = value; } });
+      } catch (error) {
+        reject(error);
+        transaction.abort();
+      }
+    });
+  }
+
+  static mergeRecord(existing, record, owners) {
+    const next = { ...record };
+    delete next.ownerKeys;
+    // An old row may have consumers that were never attributed. Keep it exempt.
+    const legacy = existing && !Array.isArray(existing.ownerKeys);
+    if (legacy) return next;
+    if (existing || owners.length) {
+      next.ownerKeys = [...new Set([...(existing?.ownerKeys || []), ...owners])];
+    }
+    return next;
+  }
+
+  async read(storeName, id, owner = null, acceptsRecord) {
+    return this.run([storeName], owner, ({ transaction, owners, setResult }) => {
+      const store = transaction.objectStore(storeName);
+      const request = store.get(id);
+      request.onsuccess = () => {
+        let record = request.result;
+        if (record && acceptsRecord && !acceptsRecord(record)) {
+          setResult(null);
+          return;
+        }
+        if (record && owners.length && Array.isArray(record.ownerKeys)) {
+          const previousOwnerCount = record.ownerKeys.length;
+          record = MediaCacheOwnership.mergeRecord(record, record, owners);
+          if (record.ownerKeys.length !== previousOwnerCount) store.put(record);
+        }
+        setResult(record || null);
+      };
+    });
+  }
+
+  async save(storeName, record, owner = null) {
+    return this.writeRecord(storeName, record, { owners: owner, overwrite: true, legacy: false });
+  }
+
+  async writeRecord(storeName, record, { owners, overwrite, legacy }) {
+    return this.run([storeName], owners, ({ transaction, owners, setResult }) => {
+      const store = transaction.objectStore(storeName);
+      const request = store.get(record.id);
+      request.onsuccess = () => {
+        const existing = request.result;
+        const replacement = existing && !overwrite ? existing : record;
+        const next = MediaCacheOwnership.mergeRecord(existing, replacement, owners);
+        if (legacy) delete next.ownerKeys;
+        store.put(next);
+        setResult(!existing || overwrite);
+      };
+    });
+  }
+
+  async removeOwners(accountKeys) {
+    const keys = new Set(accountKeys);
+    if (!keys.size) return;
+    await this.run(this.storeNames, null, ({ transaction }) => {
+      for (const key of keys) {
+        for (const name of this.storeNames) {
+          const request = transaction.objectStore(name).index('byOwner').openCursor(IDBKeyRange.only(key));
+          request.onsuccess = () => {
+            const cursor = request.result;
+            if (!cursor) return;
+            const ownerKeys = cursor.value.ownerKeys.filter(ownerKey => !keys.has(ownerKey));
+            if (ownerKeys.length) cursor.update({ ...cursor.value, ownerKeys });
+            else cursor.delete();
+            cursor.continue();
+          };
+        }
+      }
+    });
+  }
+}
+
+/** Handles IndexedDB storage for contact avatar thumbnails. */
 class ContactAvatarCache {
   constructor() {
     this.dbName = 'liberdus_contact_avatars';
     this.storeName = 'avatars';
     // Bump version to force onupgradeneeded for existing installations
-    this.dbVersion = 2;
+    this.dbVersion = 3;
     this.db = null;
+    this.openPromise = null;
     this.blobUrlCache = new Map();
+    this.ownership = new MediaCacheOwnership(this, [this.storeName]);
   }
 
   /**
@@ -30969,24 +39326,43 @@ class ContactAvatarCache {
 
   /**
    * Initialize IndexedDB database connection
-   * @returns {Promise<void>}
+   * @returns {Promise<IDBDatabase>}
    */
   async init() {
-    return new Promise((resolve, reject) => {
+    if (this.ownership.deleting) throw new Error('Contact avatar cache is being deleted');
+    if (this.db) return this.db;
+    if (this.openPromise) return this.openPromise;
+    this.openPromise = new Promise((resolve, reject) => {
       const request = indexedDB.open(this.dbName, this.dbVersion);
 
       request.onerror = () => {
         console.error('Failed to open contact avatar database:', request.error);
+        this.openPromise = null;
         reject(request.error);
       };
 
       request.onsuccess = () => {
         this.db = request.result;
-        resolve();
+        this.db.onversionchange = (event) => {
+          if (event.newVersion === null) {
+            this.ownership.deleting = true;
+            this.clearBlobUrls();
+          }
+          request.result.close();
+          this.db = null;
+          this.openPromise = null;
+        };
+        resolve(this.db);
       };
+
+      request.onblocked = () => reject(new Error('Contact avatar database upgrade blocked'));
 
       request.onupgradeneeded = (event) => {
         const db = event.target.result;
+        if (event.oldVersion >= 2) {
+          MediaCacheOwnership.upgrade(request.transaction, [this.storeName]);
+          return;
+        }
         // If an old store exists (keyPath=address) remove it and recreate under 'id'.
         if (db.objectStoreNames.contains(this.storeName)) {
           try {
@@ -30998,8 +39374,10 @@ class ContactAvatarCache {
         // Use avatar id as the primary key for one-image-per-id storage
         const store = db.createObjectStore(this.storeName, { keyPath: 'id' });
         store.createIndex('savedAt', 'savedAt', { unique: false });
+        MediaCacheOwnership.upgrade(request.transaction, [this.storeName]);
       };
     });
+    return this.openPromise;
   }
 
   /**
@@ -31053,85 +39431,74 @@ class ContactAvatarCache {
     });
   }
 
+  async removeOwners(accountKeys) {
+    await this.ownership.removeOwners(accountKeys);
+    this.clearBlobUrls();
+  }
+
+  async deleteDatabase() {
+    await this.ownership.deleteDatabase();
+    this.clearBlobUrls();
+  }
+
+  clearBlobUrls() {
+    for (const url of this.blobUrlCache.values()) URL.revokeObjectURL(url);
+    this.blobUrlCache.clear();
+  }
+
   /**
    * Save an avatar blob to the avatars store keyed by avatar id.
    * @param {string} id - Avatar id (server-provided or locally-generated)
    * @param {Blob} avatarBlob - The avatar image blob to store
-   * @returns {Promise<void>}
+   * @param {string|null} owner - Account key captured before asynchronous media work
+   * @returns {Promise<boolean>} Whether the blob was saved
    */
-  async save(id, avatarBlob) {
+  async save(id, avatarBlob, owner = MediaCacheOwnership.getOwnerKey()) {
     if (!id) throw new Error('avatar id required');
-    if (!this.db) await this.init();
-
-    // Revoke any cached object URL for this id
+    await this.ownership.save(this.storeName, {
+      id,
+      blob: avatarBlob,
+      type: avatarBlob?.type || 'image/jpeg',
+      size: avatarBlob?.size || 0,
+      savedAt: Date.now(),
+    }, owner);
     if (this.blobUrlCache.has(id)) {
-      try { URL.revokeObjectURL(this.blobUrlCache.get(id)); } catch (e) {}
+      URL.revokeObjectURL(this.blobUrlCache.get(id));
       this.blobUrlCache.delete(id);
     }
-
-    return new Promise((resolve, reject) => {
-      const tx = this.db.transaction([this.storeName], 'readwrite');
-      const store = tx.objectStore(this.storeName);
-
-      const record = {
-        id,
-        blob: avatarBlob,
-        type: avatarBlob?.type || 'image/jpeg',
-        size: avatarBlob?.size || 0,
-        savedAt: Date.now(),
-      };
-
-      const putReq = store.put(record);
-      putReq.onsuccess = () => resolve();
-      putReq.onerror = () => {
-        console.warn('Failed to save avatar blob:', putReq.error);
-        reject(putReq.error);
-      };
-    });
+    return true;
   }
 
   /**
    * Get avatar blob by avatar id.
    * @param {string} id - Avatar id (server-provided or locally-generated)
+   * @param {string|null} owner - Account key to retain on a cache hit
    * @returns {Promise<Blob|null>} The avatar blob or null if not found
    */
-  async get(id) {
+  async get(id, owner = MediaCacheOwnership.getOwnerKey()) {
     if (!id) return null;
-    if (!this.db) await this.init();
-
-    return new Promise((resolve, reject) => {
-      const tx = this.db.transaction([this.storeName], 'readonly');
-      const store = tx.objectStore(this.storeName);
-      const request = store.get(id);
-
-      request.onsuccess = () => {
-        const result = request.result;
-        if (!result) return resolve(null);
-        return resolve(result.blob || null);
-      };
-
-      request.onerror = () => {
-        console.warn('Failed to get avatar blob:', request.error);
-        reject(request.error);
-      };
-    });
+    const record = await this.ownership.read(this.storeName, id, owner);
+    return record?.blob || null;
   }
 
   /**
    * Get a blob URL for an avatar id (cached).
    * @param {string} id - Avatar id (server-provided or locally-generated)
+   * @param {string|null} owner - Account key to retain on a cache hit
    * @returns {Promise<string|null>} Blob URL or null if not found
    */
-  async getBlobUrl(id) {
+  async getBlobUrl(id, owner) {
     if (!id) return null;
-    if (this.blobUrlCache.has(id)) return this.blobUrlCache.get(id);
-    const blob = await this.get(id);
-    if (blob) {
-      const blobUrl = URL.createObjectURL(blob);
-      this.blobUrlCache.set(id, blobUrl);
-      return blobUrl;
+    const blob = await this.get(id, owner);
+    if (!blob) {
+      if (this.blobUrlCache.has(id)) URL.revokeObjectURL(this.blobUrlCache.get(id));
+      this.blobUrlCache.delete(id);
+      return null;
     }
-    return null;
+    if (this.blobUrlCache.has(id)) return this.blobUrlCache.get(id);
+    const blobUrl = URL.createObjectURL(blob);
+    this.blobUrlCache.set(id, blobUrl);
+    return blobUrl;
   }
 
   /**
@@ -31180,6 +39547,7 @@ class ContactAvatarCache {
                 data: await this.blobToBase64(item.blob),
                 type: item.type || 'image/jpeg',
                 size: item.size || 0,
+                ...(Array.isArray(item.ownerKeys) ? { ownerKeys: [...item.ownerKeys] } : {}),
               };
             } catch (e) {
               console.warn(`Failed to export avatar id ${item.id}:`, e);
@@ -31200,30 +39568,31 @@ class ContactAvatarCache {
    * Import avatars from exported data
    * @param {Object} avatarsData - Object mapping avatar id to { data: base64, type: mimeType }
    * @param {boolean} overwrite - Whether to overwrite existing avatars
+   * @param {string[]} acceptedOwnerKeys - Successfully restored account keys
    * @returns {Promise<number>} Number of avatars imported
    */
-  async importAll(avatarsData, overwrite = false) {
-    if (!this.db) await this.init();
+  async importAll(avatarsData, overwrite = false, acceptedOwnerKeys = []) {
     if (!avatarsData || typeof avatarsData !== 'object') return 0;
-
     let importedCount = 0;
     for (const [id, avatarInfo] of Object.entries(avatarsData)) {
-      if (!avatarInfo) continue;
+      if (!avatarInfo?.data) continue;
       try {
-        if (!overwrite) {
-          const existing = await this.get(id);
-          if (existing) continue;
-        }
-        if (avatarInfo.data) {
-          const blob = this.base64ToBlob(avatarInfo.data, avatarInfo.type || 'image/jpeg');
-          await this.save(id, blob);
+        const ownerKeys = Array.isArray(avatarInfo.ownerKeys) ? avatarInfo.ownerKeys : null;
+        const owners = ownerKeys ? acceptedOwnerKeys.filter(key => ownerKeys.includes(key)) : acceptedOwnerKeys;
+        if (ownerKeys && !owners.length) continue;
+        const blob = this.base64ToBlob(avatarInfo.data, avatarInfo.type || 'image/jpeg');
+        const saved = await this.ownership.writeRecord(this.storeName, {
+          id, blob, type: avatarInfo.type || 'image/jpeg', size: blob.size, savedAt: Date.now(),
+        }, { owners, overwrite, legacy: ownerKeys === null });
+        if (saved) {
+          if (this.blobUrlCache.has(id)) URL.revokeObjectURL(this.blobUrlCache.get(id));
+          this.blobUrlCache.delete(id);
           importedCount++;
         }
       } catch (e) {
         console.warn(`Failed to import avatar id ${id}:`, e);
       }
     }
-
     return importedCount;
   }
 
@@ -31271,9 +39640,32 @@ class ThumbnailCache {
   constructor() {
     this.dbName = 'liberdus_thumbnails';
     this.storeName = 'thumbnails';
-    this.dbVersion = 1;
+    // Keep the existing store and its records when adding full videos.
+    this.fullMediaStoreName = 'fullImages';
+    this.dbVersion = 4;
     this.db = null;
+    this.openPromise = null;
+    this.ownership = new MediaCacheOwnership(this, [this.storeName, this.fullMediaStoreName]);
     this.maxCacheSize = 50 * 1024 * 1024; // 50MB in bytes
+  }
+
+  /**
+   * Resolve a shared attachment-storage ID from a fetch URL or a backup key.
+   * @param {string} urlOrId - HTTP(S) /get/{id} URL or an exported attachment ID
+   * @returns {string} Attachment ID, independent of hostname, scheme, and port
+   */
+  static getAttachmentId(urlOrId) {
+    if (typeof urlOrId !== 'string' || !urlOrId) {
+      throw new Error('Missing attachment URL or ID');
+    }
+    if (/^[^/:?#\s]+$/.test(urlOrId)) return urlOrId;
+
+    const url = new URL(urlOrId);
+    const match = url.pathname.match(/^\/get\/([^/]+)\/?$/);
+    if (!/^https?:$/.test(url.protocol) || !match) {
+      throw new Error('Invalid attachment URL');
+    }
+    return match[1];
   }
 
   /**
@@ -31295,28 +39687,196 @@ class ThumbnailCache {
    * @returns {Promise<void>}
    */
   async init() {
-    return new Promise((resolve, reject) => {
+    if (this.ownership.deleting) throw new Error('Attachment cache is being deleted');
+    if (this.db) return this.db;
+    if (this.openPromise) return this.openPromise;
+
+    this.openPromise = new Promise((resolve, reject) => {
       const request = indexedDB.open(this.dbName, this.dbVersion);
 
       request.onerror = () => {
         console.error('Failed to open thumbnail database:', request.error);
+        this.openPromise = null;
         reject(request.error);
+      };
+
+      request.onblocked = () => {
+        console.warn('Thumbnail database upgrade is blocked by another tab');
+        reject(new Error('Thumbnail database upgrade blocked'));
       };
 
       request.onsuccess = () => {
         this.db = request.result;
-        resolve();
+        this.db.onversionchange = (event) => {
+          if (event.newVersion === null) this.ownership.deleting = true;
+          request.result.close();
+          this.db = null;
+          this.openPromise = null;
+        };
+        resolve(this.db);
       };
 
       request.onupgradeneeded = (event) => {
-        const db = event.target.result;
-        // Create object store if it doesn't exist
-        if (!db.objectStoreNames.contains(this.storeName)) {
-          const store = db.createObjectStore(this.storeName, { keyPath: 'url' });
-          store.createIndex('cachedAt', 'cachedAt', { unique: false });
-        }
+        this.runMigrations(request.transaction, event.oldVersion);
       };
     });
+
+    return this.openPromise;
+  }
+
+  /**
+   * Each entry upgrades the schema to its one-based version and calls done when finished.
+   * Continue synchronously or from an IndexedDB callback to keep the transaction active.
+   * @returns {Array<(transaction: IDBTransaction, done: () => void) => void>}
+   */
+  get migrations() {
+    return [this.migrateToVersion1, this.migrateToVersion2, this.migrateToVersion3, this.migrateToVersion4];
+  }
+
+  /**
+   * Run every required version in order within the same upgrade transaction.
+   * @param {IDBTransaction} transaction
+   * @param {number} oldVersion
+   */
+  runMigrations(transaction, oldVersion) {
+    const migrations = this.migrations;
+    let version = oldVersion;
+
+    const next = () => {
+      if (version >= transaction.db.version) return;
+      try {
+        const migration = migrations[version];
+        if (!migration) throw new Error(`Missing attachment cache migration to version ${version + 1}`);
+        version++;
+        migration.call(this, transaction, next);
+      } catch (error) {
+        console.warn('Failed to upgrade attachment caches:', error);
+        transaction.abort();
+      }
+    };
+    next();
+  }
+
+  /**
+   * Version 1 introduced URL-keyed thumbnails.
+   * @param {IDBTransaction} transaction
+   * @param {() => void} done
+   */
+  migrateToVersion1(transaction, done) {
+    const store = ThumbnailCache.ensureLegacyStore(transaction, this.storeName);
+    // Wait for schema requests before starting the next version.
+    store.count().onsuccess = done;
+  }
+
+  /**
+   * Version 2 added URL-keyed full images.
+   * @param {IDBTransaction} transaction
+   * @param {() => void} done
+   */
+  migrateToVersion2(transaction, done) {
+    const store = ThumbnailCache.ensureLegacyStore(transaction, this.fullMediaStoreName);
+    store.count().onsuccess = done;
+  }
+
+  /**
+   * Version 3 preserves ID-keyed stores and converts URL keys to attachment IDs.
+   * @param {IDBTransaction} transaction
+   * @param {() => void} done
+   */
+  migrateToVersion3(transaction, done) {
+    const db = transaction.db;
+    const storeNames = [this.storeName, this.fullMediaStoreName];
+    let remaining = storeNames.length;
+    const storeFinished = () => {
+      remaining--;
+      if (remaining === 0) done();
+    };
+
+    for (const storeName of storeNames) {
+      const source = ThumbnailCache.ensureLegacyStore(transaction, storeName);
+      if (source.keyPath === 'id') {
+        source.count().onsuccess = storeFinished;
+        continue;
+      }
+
+      const store = db.createObjectStore(`${storeName}_ids`, { keyPath: 'id' });
+      store.createIndex('cachedAt', 'cachedAt', { unique: false });
+      ThumbnailCache.migrateStore(source, store, storeFinished);
+    }
+  }
+
+  migrateToVersion4(transaction, done) {
+    MediaCacheOwnership.upgrade(transaction, [this.storeName, this.fullMediaStoreName]);
+    done();
+  }
+
+  removeOwners(accountKeys) {
+    return this.ownership.removeOwners(accountKeys);
+  }
+
+  deleteDatabase() {
+    return this.ownership.deleteDatabase();
+  }
+
+  /**
+   * Create missing historical stores while preserving and validating existing schemas.
+   * @param {IDBTransaction} transaction
+   * @param {string} storeName
+   * @returns {IDBObjectStore}
+   */
+  static ensureLegacyStore(transaction, storeName) {
+    const db = transaction.db;
+    const store = db.objectStoreNames.contains(storeName)
+      ? transaction.objectStore(storeName)
+      : db.createObjectStore(storeName, { keyPath: 'url' });
+
+    if (store.keyPath !== 'url' && store.keyPath !== 'id') {
+      throw new Error(`Unsupported attachment cache key path: ${storeName}`);
+    }
+    if (!store.indexNames.contains('cachedAt')) {
+      store.createIndex('cachedAt', 'cachedAt', { unique: false });
+    }
+    return store;
+  }
+
+  /**
+   * Copy legacy records without loading all cached blobs into memory.
+   * Keep the newest timestamp when hostname aliases resolve to the same ID.
+   * @param {IDBObjectStore} source
+   * @param {IDBObjectStore} destination
+   * @param {() => void} done
+   */
+  static migrateStore(source, destination, done) {
+    const request = source.openCursor();
+    request.onsuccess = () => {
+      const cursor = request.result;
+      if (!cursor) {
+        // Swap stores only after copying; an aborted upgrade restores the original.
+        const storeName = source.name;
+        source.transaction.db.deleteObjectStore(storeName);
+        destination.name = storeName;
+        done();
+        return;
+      }
+
+      const { url, ...record } = cursor.value;
+      let id;
+      try {
+        id = ThumbnailCache.getAttachmentId(url);
+      } catch (error) {
+        console.warn('Failed to migrate cached attachment:', error);
+        source.transaction.abort();
+        return;
+      }
+
+      const existing = destination.get(id);
+      existing.onsuccess = () => {
+        if (!existing.result || record.cachedAt > existing.result.cachedAt) {
+          destination.put({ ...record, id });
+        }
+        cursor.continue();
+      };
+    };
   }
 
   /**
@@ -31486,9 +40046,8 @@ class ThumbnailCache {
 
     const sizeToRemove = currentSize - targetSize;
 
-    return new Promise((resolve, reject) => {
-      const tx = this.db.transaction([this.storeName], 'readwrite');
-      const store = tx.objectStore(this.storeName);
+    return this.ownership.run([this.storeName], null, ({ transaction, setResult }) => {
+      const store = transaction.objectStore(this.storeName);
       const index = store.index('cachedAt');
       const request = index.openCursor(null, 'next'); // Oldest first
 
@@ -31506,100 +40065,49 @@ class ThumbnailCache {
           removedSize += itemSize;
           cursor.continue();
         } else {
-          resolve(deletedCount);
+          setResult(deletedCount);
         }
-      };
-
-      request.onerror = () => {
-        console.warn('Failed to cleanup thumbnails by size:', request.error);
-        reject(request.error);
       };
     });
   }
 
   /**
    * Save a thumbnail to IndexedDB
-   * @param {string} attachmentUrl - The attachment URL (used as key)
+   * @param {string} attachmentUrl - The attachment URL or exported attachment ID
    * @param {Blob} thumbnailBlob - The thumbnail blob to store
    * @param {string} originalType - Original MIME type
-   * @returns {Promise<void>}
+   * @param {string|null} owner - Account key captured before asynchronous media work
+   * @returns {Promise<boolean>} Whether the blob was saved
    */
-  async save(attachmentUrl, thumbnailBlob, originalType) {
-    if (!this.db) {
-      await this.init();
-    }
-
-    // Check if adding this thumbnail would exceed size limit
+  async save(attachmentUrl, thumbnailBlob, originalType, owner = MediaCacheOwnership.getOwnerKey()) {
+    const id = ThumbnailCache.getAttachmentId(attachmentUrl);
     const currentSize = await this.getCacheSize();
-    const newThumbnailSize = thumbnailBlob.size;
-    
-    // If adding this thumbnail would exceed limit, cleanup first
-    if (currentSize + newThumbnailSize > this.maxCacheSize) {
-      await this.cleanupBySize();
-    }
-
-    return new Promise((resolve, reject) => {
-      const tx = this.db.transaction([this.storeName], 'readwrite');
-      const store = tx.objectStore(this.storeName);
-
-      const data = {
-        url: attachmentUrl,
-        thumbnail: thumbnailBlob,
-        originalType: originalType,
-        cachedAt: Date.now()
-      };
-
-      const request = store.put(data);
-
-      request.onsuccess = () => {
-        resolve();
-      };
-
-      request.onerror = () => {
-        console.warn('Failed to save thumbnail:', request.error);
-        reject(request.error);
-      };
-    });
+    if (currentSize + thumbnailBlob.size > this.maxCacheSize) await this.cleanupBySize();
+    return this.ownership.save(this.storeName, {
+      id, thumbnail: thumbnailBlob, originalType, cachedAt: Date.now(),
+    }, owner);
   }
 
   /**
    * Retrieve a cached thumbnail from IndexedDB
-   * @param {string} attachmentUrl - The attachment URL
+   * @param {string} attachmentUrl - The attachment URL or exported attachment ID
+   * @param {string|null} owner - Account key to retain on a cache hit
    * @returns {Promise<Blob|null>} The thumbnail blob or null if not found
    */
-  async get(attachmentUrl) {
-    if (!this.db) {
-      await this.init();
-    }
-
-    return new Promise((resolve, reject) => {
-      const tx = this.db.transaction([this.storeName], 'readonly');
-      const store = tx.objectStore(this.storeName);
-      const request = store.get(attachmentUrl);
-
-      request.onsuccess = () => {
-        const result = request.result;
-        if (result && result.thumbnail) {
-          resolve(result.thumbnail);
-        } else {
-          resolve(null);
-        }
-      };
-
-      request.onerror = () => {
-        console.warn('Failed to get thumbnail:', request.error);
-        reject(request.error);
-      };
-    });
+  async get(attachmentUrl, owner = MediaCacheOwnership.getOwnerKey()) {
+    const id = ThumbnailCache.getAttachmentId(attachmentUrl);
+    const record = await this.ownership.read(this.storeName, id, owner);
+    return record?.thumbnail || null;
   }
 
   /**
    * Delete a cached thumbnail from IndexedDB
-   * @param {string} attachmentUrl - The attachment URL (key)
+   * @param {string} attachmentUrl - The attachment URL or exported attachment ID
    * @returns {Promise<void>}
    */
   async delete(attachmentUrl) {
     if (!attachmentUrl) return;
+    const id = ThumbnailCache.getAttachmentId(attachmentUrl);
     if (!this.db) {
       await this.init();
     }
@@ -31607,7 +40115,7 @@ class ThumbnailCache {
     return new Promise((resolve, reject) => {
       const tx = this.db.transaction([this.storeName], 'readwrite');
       const store = tx.objectStore(this.storeName);
-      const request = store.delete(attachmentUrl);
+      const request = store.delete(id);
 
       request.onsuccess = () => resolve();
 
@@ -31620,7 +40128,7 @@ class ThumbnailCache {
 
   /**
    * Export all thumbnails as an object with base64-encoded data
-   * @returns {Promise<Object>} Object mapping url to { data: base64, type: mimeType, originalType: string }
+   * @returns {Promise<Object>} Object mapping attachment ID to { data: base64, type: mimeType, originalType: string }
    */
   async exportAll() {
     if (!this.db) {
@@ -31634,20 +40142,21 @@ class ThumbnailCache {
 
       request.onsuccess = async () => {
         const results = request.result;
-        const thumbnails = {};
+        const thumbnails = Object.create(null);
 
         for (const item of results) {
-          if (item.url && item.thumbnail) {
+          if (item.id && item.thumbnail) {
             try {
               // Convert blob to base64
               const base64 = await this.blobToBase64(item.thumbnail);
-              thumbnails[item.url] = {
+              thumbnails[item.id] = {
                 data: base64,
                 type: item.thumbnail.type || 'image/jpeg',
-                originalType: item.originalType || 'image/jpeg'
+                originalType: item.originalType || 'image/jpeg',
+                ...(Array.isArray(item.ownerKeys) ? { ownerKeys: [...item.ownerKeys] } : {}),
               };
             } catch (e) {
-              console.warn(`Failed to export thumbnail for ${item.url}:`, e);
+              console.warn(`Failed to export thumbnail for ${item.id}:`, e);
             }
           }
         }
@@ -31664,40 +40173,36 @@ class ThumbnailCache {
 
   /**
    * Import thumbnails from exported data
-   * @param {Object} thumbnailsData - Object mapping url to { data: base64, type: mimeType, originalType: string }
+   * @param {Object} thumbnailsData - Object mapping attachment IDs or legacy URLs to { data: base64, type: mimeType, originalType: string }
    * @param {boolean} overwrite - Whether to overwrite existing thumbnails
+   * @param {string[]} acceptedOwnerKeys - Successfully restored account keys
    * @returns {Promise<number>} Number of thumbnails imported
    */
-  async importAll(thumbnailsData, overwrite = false) {
-    if (!this.db) {
-      await this.init();
-    }
-
-    if (!thumbnailsData || typeof thumbnailsData !== 'object') {
-      return 0;
-    }
-
+  async importAll(thumbnailsData, overwrite = false, acceptedOwnerKeys = []) {
+    if (!thumbnailsData || typeof thumbnailsData !== 'object') return 0;
     let importedCount = 0;
-
-    for (const [url, thumbInfo] of Object.entries(thumbnailsData)) {
-      if (!thumbInfo || !thumbInfo.data) continue;
-
+    for (const [urlOrId, thumbInfo] of Object.entries(thumbnailsData)) {
+      if (!thumbInfo?.data) continue;
       try {
-        // Check if thumbnail already exists
-        if (!overwrite) {
-          const existing = await this.get(url);
-          if (existing) continue;
+        const ownerKeys = Array.isArray(thumbInfo.ownerKeys) ? thumbInfo.ownerKeys : null;
+        const owners = ownerKeys ? acceptedOwnerKeys.filter(key => ownerKeys.includes(key)) : acceptedOwnerKeys;
+        if (ownerKeys && !owners.length) continue;
+        const id = ThumbnailCache.getAttachmentId(urlOrId);
+        const thumbnail = this.base64ToBlob(thumbInfo.data, thumbInfo.type || 'image/jpeg');
+        const existing = !overwrite && await this.ownership.read(this.storeName, id, owners);
+        if (!existing) {
+          const currentSize = await this.getCacheSize();
+          if (currentSize + thumbnail.size > this.maxCacheSize) await this.cleanupBySize();
         }
-
-        // Convert base64 back to blob
-        const blob = this.base64ToBlob(thumbInfo.data, thumbInfo.type || 'image/jpeg');
-        await this.save(url, blob, thumbInfo.originalType || thumbInfo.type || 'image/jpeg');
-        importedCount++;
+        const saved = await this.ownership.writeRecord(this.storeName, {
+          id, thumbnail,
+          originalType: thumbInfo.originalType || thumbInfo.type || 'image/jpeg', cachedAt: Date.now(),
+        }, { owners, overwrite, legacy: ownerKeys === null });
+        if (saved) importedCount++;
       } catch (e) {
-        console.warn(`Failed to import thumbnail for ${url}:`, e);
+        console.warn(`Failed to import thumbnail for ${urlOrId}:`, e);
       }
     }
-
     return importedCount;
   }
 
@@ -31745,6 +40250,7 @@ const thumbnailCache = new ThumbnailCache();
  * @returns {Promise<string>} HTML string for avatar image/svg
  */
 async function getContactAvatarHtml(contactOrAddress, size = 50) {
+  const owner = MediaCacheOwnership.getOwnerKey();
   const address = typeof contactOrAddress === 'string'
     ? normalizeAddress(contactOrAddress)
     : normalizeAddress(contactOrAddress?.address);
@@ -31763,7 +40269,7 @@ async function getContactAvatarHtml(contactOrAddress, size = 50) {
     try {
       const aid = myData?.account?.avatarId;
       if (aid) {
-        const url = await contactAvatarCache.getBlobUrl(aid);
+        const url = await contactAvatarCache.getBlobUrl(aid, owner);
         if (url) return makeImg(url);
       }
     } catch (e) {
@@ -31792,13 +40298,13 @@ async function getContactAvatarHtml(contactOrAddress, size = 50) {
           id = myData?.account?.avatarId;
         }
         if (id) {
-          const url = await contactAvatarCache.getBlobUrl(id);
+          const url = await contactAvatarCache.getBlobUrl(id, owner);
           if (url) return makeImg(url);
         }
       } else if (usePref === 'contact') {
         const id = contact?.avatarId || null;
         if (id) {
-          const url = await contactAvatarCache.getBlobUrl(id);
+          const url = await contactAvatarCache.getBlobUrl(id, owner);
           if (url) return makeImg(url);
         }
       } else {
@@ -31807,12 +40313,12 @@ async function getContactAvatarHtml(contactOrAddress, size = 50) {
         // unrelated contacts with no images to show the user's own avatar.
         let id = contact?.avatarId;
         if (id) {
-          let url = await contactAvatarCache.getBlobUrl(id);
+          let url = await contactAvatarCache.getBlobUrl(id, owner);
           if (url) return makeImg(url);
         }
         id = contact?.mineAvatarId;
         if (id) {
-          let url = await contactAvatarCache.getBlobUrl(id);
+          let url = await contactAvatarCache.getBlobUrl(id, owner);
           if (url) return makeImg(url);
         }
       }
@@ -31949,9 +40455,6 @@ function handleBrowserBackButton(event) {
   const topModal = findTopModal();
   
   if (topModal) {
-    const modalId = topModal.id;
-    const modalInstance = window[modalId];
-    
     const closed = closeTopModal(topModal)
     if (closed){
       return true;
@@ -31967,126 +40470,654 @@ function findTopModal() {
   return topModal;
 }
 
-function closeTopModal(topModal){
-  const modalId = topModal.id;
-  switch (modalId) {
-    case 'chatModal':
-      chatModal.close();
-      break;
-    case 'menuModal':
-      menuModal.close();
-      break;
-    case 'daoModal':
-      daoModal.close();
-      break;
-    case 'addProposalModal':
-      addProposalModal.close();
-      break;
-    case 'proposalInfoModal':
-      proposalInfoModal.close();
-      break;
-    case 'settingsModal':
-      settingsModal.close();
-      break;
-    case 'chatSettingsModal':
-      chatSettingsModal.handleClose();
-      break;
-    case 'sendAssetFormModal':
-      sendAssetFormModal.close();
-      break;
-    case 'historyModal':
-      historyModal.close();
-      break;
-    case 'scanQRModal':
-      scanQRModal.close();
-      break;
-    case 'newChatModal':
-      newChatModal.close();
-      break;
-    case 'createAccountModal':
-      createAccountModal.close();
-      break;
-    case 'backupAccountModal':
-      backupAccountModal.close();
-      break;
-    case 'restoreAccountModal':
-      restoreAccountModal.close();
-      break;
-    case 'tollModal':
-      tollModal.close();
-      break;
-    case 'inviteModal':
-      inviteModal.close();
-      break;
-    case 'aboutModal':
-      aboutModal.close();
-      break;
-    case 'helpModal':
-      helpModal.close();
-      break;
-    case 'farmModal':
-      farmModal.close();
-      break;
-    case 'logsModal':
-      logsModal.close();
-      break;
-    case 'myProfileModal':
-      myProfileModal.close();
-      break;
-    case 'validatorStakingModal':
-      validatorStakingModal.close();
-      break;
-    case 'stakeValidatorModal':
-      stakeValidatorModal.close();
-      break;
-    case 'contactInfoModal':
-      contactInfoModal.close();
-      break;
-    case 'friendModal':
-      friendModal.close();
-      break;
-    case 'editContactModal':
-      editContactModal.close();
-      break;
-    case 'searchMessagesModal':
-      searchMessagesModal.close();
-      break;
-    case 'searchContactsModal':
-      searchContactsModal.close();
-      break;
-    case 'receiveModal':
-      receiveModal.close();
-      break;
-    case 'sendAssetConfirmModal':
-      sendAssetConfirmModal.close();
-      break;
-    case 'failedTransactionModal':
-      failedTransactionModal.close();
-      break;
-    case 'bridgeModal':
-      bridgeModal.close();
-      break;
-    case 'migrateAccountsModal':
-      migrateAccountsModal.close();
-      break;
-    case 'lockModal':
-      lockModal.close();
-      break;
-    case 'unlockModal':
-      unlockModal.close();
-      break;
-    case 'launchModal':
-      launchModal.close();
-      break;
-    case 'updateWarningModal':
-      updateWarningModal.close();
-      break;
-    case 'removeAccountModal':
-      removeAccountModal.close();
-      break;
-    default:
-      console.warn('Unknown modal:', modalId);
-      return false;
-  }
-  return true; // means we closed a modal
+function createModalCloseHandlers(modals) {
+  return Object.entries(modals).map(([modalId, modal]) => [modalId, () => modal.close()]);
 }
+
+const modalCloseHandlers = new Map([
+  ...createModalCloseHandlers({
+    chatModal, fullImageModal, menuModal, daoModal, addProposalModal,
+    confirmProposalModal, proposalInfoModal, settingsModal, manageContactsModal,
+    welcomeMenuModal, sendAssetFormModal, historyModal, newChatModal,
+    createAccountModal, tollModal, inviteModal, aboutModal,
+    sourceModal, helpModal, farmModal, logsModal,
+    signInModal, myInfoModal, contactInfoModal, friendModal,
+    editContactModal, avatarEditModal, receiveModal,
+    failedTransactionModal, bridgeModal, migrateAccountsModal, lockModal,
+    unlockModal, launchModal, updateWarningModal, removeAccountModal,
+    removeAccountsModal, secretModal, callsModal, groupCallParticipantsModal,
+    payChoiceModal, callScheduleChoiceModal, dateTimePickerModal, durationPickerModal, callInviteModal, shareAttachmentModal,
+    chatSettingsModal, qrScanModal, backupModal, importModal,
+    accountModal, validatorModal, stakeModal, messageSearchModal, contactSearchModal,
+    importContactsModal, shareContactsModal,
+  }),
+  // Structural exceptions require an id or a controller-specific close method.
+  ['assetsModal', () => evmAssets.close('assetsModal')],
+  ['assetDetailsModal', () => evmAssets.close('assetDetailsModal')],
+  ['evmSendModal', () => evmAssets.close('evmSendModal')],
+  ['evmReceiveModal', () => evmAssets.close('evmReceiveModal')],
+  ['evmSendConfirmModal', () => evmAssets.close('evmSendConfirmModal')],
+  ['multichainModal', () => multichain.close('multichainModal')],
+  ['multichainAssetModal', () => multichain.close('multichainAssetModal')],
+  ['multichainReceiveModal', () => multichain.close('multichainReceiveModal')],
+  ['multichainRequestModal', () => multichain.close('multichainRequestModal')],
+  ['multichainWithdrawModal', () => multichain.close('multichainWithdrawModal')],
+  ['multichainSwapModal', () => multichain.close('multichainSwapModal')],
+  ['multichainTokenPickerModal', () => multichain.close('multichainTokenPickerModal')],
+  ['nearIntentsSendModal', () => chatPaymentPanel.close()],
+  ['multichainConfirmModal', () => multichain.close('multichainConfirmModal')],
+  ['sendAssetConfirmModal', () => sendAssetConfirmModal.close()],
+  ['googleDrivePickerModal', () => importModal.closeGoogleDrivePicker()],
+]);
+
+function closeTopModal({ id: modalId }) {
+  const closeModal = modalCloseHandlers.get(modalId);
+  if (!closeModal) {
+    console.warn('Unknown modal:', modalId);
+    return false;
+  }
+
+  closeModal();
+  return true;
+}
+
+class PopupSelect {
+  static MAX_MENU_WIDTH = 360;
+  static MIN_MENU_WIDTH = 280;
+  static TRIGGER_GAP = 6;
+  static VIEWPORT_MARGIN = 8;
+  static SCROLL_INDICATOR_INSET = 8;
+  static SCROLL_INDICATOR_RIGHT_INSET = 3;
+  static SCROLL_INDICATOR_WIDTH = 4;
+  static MIN_SCROLL_THUMB_HEIGHT = 24;
+  static generatedId = 0;
+  static activeSelect = null;
+  static activeIndex = -1;
+  static menu = null;
+  static scrollIndicator = null;
+  static scrollThumb = null;
+
+  static load() {
+    if (PopupSelect.menu) return;
+
+    PopupSelect.menu = document.getElementById('popupSelectListbox');
+    PopupSelect.scrollIndicator = document.getElementById('popupSelectScrollIndicator');
+    PopupSelect.scrollThumb = PopupSelect.scrollIndicator?.firstElementChild;
+    if (!PopupSelect.menu || !PopupSelect.scrollIndicator || !PopupSelect.scrollThumb) throw new Error('PopupSelect markup is missing');
+    document.addEventListener('pointerdown', PopupSelect.handleDocumentPointerDown, true);
+    document.addEventListener('click', PopupSelect.handleDocumentClick);
+    document.addEventListener('keydown', PopupSelect.handleDocumentKeyDown);
+    document.addEventListener('change', ({ target }) => PopupSelect.sync(target), true);
+    document.addEventListener('scroll', PopupSelect.handleDocumentScroll, { capture: true, passive: true });
+    window.addEventListener('resize', PopupSelect.hide);
+    window.visualViewport?.addEventListener('scroll', PopupSelect.hide, { passive: true });
+    window.visualViewport?.addEventListener('resize', PopupSelect.hide);
+    PopupSelect.menu.addEventListener('scroll', PopupSelect.updateScrollIndicator, { passive: true });
+    PopupSelect.enhanceAll(document);
+  }
+
+  static handleDocumentPointerDown(event) {
+    const trigger = PopupSelect.getTrigger(PopupSelect.activeSelect);
+    if (
+      !trigger ||
+      trigger.contains(event.target) ||
+      PopupSelect.menu.contains(event.target)
+    ) return;
+
+    PopupSelect.hide();
+  }
+
+  static handleDocumentClick(event) {
+    const option = event.target.closest?.('.popup-select__option');
+    if (option && PopupSelect.menu.contains(option)) {
+      if (!PopupSelect.activeSelect || option.getAttribute('aria-disabled') === 'true') return;
+      PopupSelect.setActiveIndex(Number(option.dataset.optionIndex));
+      PopupSelect.selectActiveOption();
+      return;
+    }
+
+    const trigger = event.target.closest?.('.popup-select__trigger');
+    const select = PopupSelect.getSelect(trigger);
+    if (!select) return;
+
+    if (PopupSelect.activeSelect === select) PopupSelect.close();
+    else PopupSelect.open(select);
+  }
+
+  static handleDocumentKeyDown(event) {
+    const trigger = event.target.closest?.('.popup-select__trigger');
+    const select = PopupSelect.getSelect(trigger);
+    if (select && ['Enter', ' ', 'ArrowDown', 'ArrowUp'].includes(event.key)) {
+      event.preventDefault();
+      PopupSelect.open(select);
+      return;
+    }
+
+    if (PopupSelect.activeSelect && PopupSelect.menu.contains(event.target)) {
+      PopupSelect.handleMenuKeyDown(event);
+      return;
+    }
+
+    if (event.key !== 'Escape' || !PopupSelect.activeSelect) return;
+    event.preventDefault();
+    PopupSelect.close();
+  }
+
+  static handleDocumentScroll(event) {
+    if (!PopupSelect.activeSelect || event.target === PopupSelect.menu) return;
+    PopupSelect.hide();
+  }
+
+  static getTrigger(select) {
+    const trigger = select?.nextElementSibling;
+    return trigger?.classList.contains('popup-select__trigger') ? trigger : null;
+  }
+
+  static getSelect(trigger) {
+    const select = trigger?.previousElementSibling;
+    return select?.tagName === 'SELECT' ? select : null;
+  }
+
+  static getVisibleControl(control) {
+    return PopupSelect.getTrigger(control) || control;
+  }
+
+  static hide() {
+    const trigger = PopupSelect.getTrigger(PopupSelect.activeSelect);
+    if (!PopupSelect.activeSelect) return;
+
+    PopupSelect.activeSelect = null;
+    PopupSelect.activeIndex = -1;
+    trigger?.setAttribute('aria-expanded', 'false');
+    PopupSelect.menu.hidden = true;
+    PopupSelect.scrollIndicator.hidden = true;
+  }
+
+  static close() {
+    if (!PopupSelect.activeSelect) return;
+    const trigger = PopupSelect.getTrigger(PopupSelect.activeSelect);
+
+    PopupSelect.hide();
+    trigger?.focus({ preventScroll: true });
+  }
+
+  static enhanceAll(root) {
+    root?.querySelectorAll('select').forEach((select) => PopupSelect.enhance(select));
+  }
+
+  static syncAll(root) {
+    root?.querySelectorAll('select').forEach((select) => PopupSelect.sync(select));
+  }
+
+  static enhance(select) {
+    if (select?.tagName !== 'SELECT') throw new TypeError('PopupSelect requires a select element');
+    if (!PopupSelect.menu) throw new Error('PopupSelect.load() must be called before creating controls');
+    if (PopupSelect.getTrigger(select)) return;
+
+    const label = select.labels?.[0] || null;
+    if (!select.id) select.id = `popupSelect${++PopupSelect.generatedId}`;
+    if (label && !label.id) label.id = `${select.id}PopupLabel`;
+    const trigger = PopupSelect.createTrigger(select, label);
+
+    select.classList.add('sr-only');
+    select.setAttribute('aria-hidden', 'true');
+    select.tabIndex = -1;
+    select.insertAdjacentElement('afterend', trigger);
+    if (label) label.htmlFor = trigger.id;
+
+    PopupSelect.sync(select);
+  }
+
+  static createTrigger(select, label) {
+    const trigger = document.createElement('button');
+    trigger.id = `${select.id}PopupTrigger`;
+    trigger.className = select.className;
+    trigger.classList.add('form-control', 'popup-select__trigger');
+    trigger.type = 'button';
+    trigger.setAttribute('role', 'combobox');
+    trigger.setAttribute('aria-haspopup', 'listbox');
+    trigger.setAttribute('aria-expanded', 'false');
+    trigger.setAttribute('aria-controls', PopupSelect.menu.id);
+    if (select.required) trigger.setAttribute('aria-required', 'true');
+
+    const accessibleName = select.getAttribute('aria-label');
+    const describedBy = select.getAttribute('aria-describedby');
+    if (accessibleName) trigger.setAttribute('aria-label', accessibleName);
+    else if (label) trigger.setAttribute('aria-labelledby', `${label.id} ${trigger.id}Value`);
+    if (describedBy) trigger.setAttribute('aria-describedby', describedBy);
+
+    trigger.innerHTML = `
+      <span id="${trigger.id}Value" class="popup-select__value"></span>
+      <span class="popup-select__chevron" aria-hidden="true"></span>
+    `;
+
+    return trigger;
+  }
+
+  static renderMenu() {
+    const select = PopupSelect.activeSelect;
+    if (!select) return;
+
+    const trigger = PopupSelect.getTrigger(select);
+    const accessibleName = select.getAttribute('aria-label');
+    const labelledBy = trigger?.labels?.[0]?.id;
+    PopupSelect.menu.removeAttribute('aria-label');
+    PopupSelect.menu.removeAttribute('aria-labelledby');
+    PopupSelect.menu.removeAttribute('aria-activedescendant');
+    if (accessibleName) PopupSelect.menu.setAttribute('aria-label', accessibleName);
+    else if (labelledBy) PopupSelect.menu.setAttribute('aria-labelledby', labelledBy);
+
+    PopupSelect.menu.replaceChildren();
+    PopupSelect.menu.scrollTop = 0;
+    [...select.options].forEach((option, index) => {
+      const item = document.createElement('div');
+      item.id = `${PopupSelect.menu.id}Option${index}`;
+      item.className = 'popup-select__option';
+      item.dataset.optionIndex = String(index);
+      item.setAttribute('role', 'option');
+      item.setAttribute('aria-selected', String(index === select.selectedIndex));
+      if (option.disabled) item.setAttribute('aria-disabled', 'true');
+
+      const icon = PopupSelect.buildOptionIcon(option);
+      if (icon) item.append(icon);
+
+      const label = document.createElement('span');
+      label.className = 'popup-select__option-label';
+      label.textContent = option.textContent;
+      item.append(label);
+      PopupSelect.menu.append(item);
+    });
+  }
+
+  /**
+   * An option may carry `data-icon-label`, optionally with `data-icon-url` and
+   * `data-icon-color`. The label is drawn and the image laid over it, so an
+   * image that never loads leaves something readable rather than a gap.
+   */
+  static buildOptionIcon(option) {
+    const label = option.dataset.iconLabel;
+    if (!label) return null;
+
+    const mark = document.createElement('span');
+    mark.className = 'popup-select__option-icon';
+    if (option.dataset.iconColor) mark.style.setProperty('--mark-bg', option.dataset.iconColor);
+    mark.textContent = label;
+
+    if (option.dataset.iconUrl) {
+      const image = document.createElement('img');
+      image.src = option.dataset.iconUrl;
+      image.alt = '';
+      image.loading = 'lazy';
+      mark.append(image);
+    }
+    return mark;
+  }
+
+  static sync(select) {
+    const trigger = PopupSelect.getTrigger(select);
+    if (!trigger) return;
+
+    const selected = select.options[select.selectedIndex];
+    const selectedText = selected?.textContent || '';
+    const value = trigger.querySelector('.popup-select__value');
+    value.replaceChildren();
+    const triggerIcon = selected ? PopupSelect.buildOptionIcon(selected) : null;
+    if (triggerIcon) value.append(triggerIcon);
+    value.append(document.createTextNode(selectedText));
+    const accessibleName = select.getAttribute('aria-label');
+    if (accessibleName) trigger.setAttribute('aria-label', `${accessibleName}: ${selectedText}`);
+    trigger.disabled = select.disabled;
+    if (PopupSelect.activeSelect !== select) return;
+
+    PopupSelect.renderMenu();
+    PopupSelect.activeIndex = select.selectedIndex >= 0 && !select.options[select.selectedIndex].disabled
+      ? select.selectedIndex
+      : PopupSelect.findEnabledIndex(0, 1);
+    if (!PopupSelect.menu.hidden) PopupSelect.setActiveIndex(PopupSelect.activeIndex);
+  }
+
+  static open(select) {
+    const trigger = PopupSelect.getTrigger(select);
+    if (!trigger || PopupSelect.activeSelect === select || select.disabled || select.options.length === 0) return;
+
+    PopupSelect.hide();
+    PopupSelect.activeSelect = select;
+    PopupSelect.sync(select);
+    trigger.setAttribute('aria-expanded', 'true');
+    PopupSelect.menu.hidden = false;
+
+    PopupSelect.positionMenu();
+    PopupSelect.menu.focus({ preventScroll: true });
+    PopupSelect.setActiveIndex(PopupSelect.activeIndex);
+  }
+
+  static focus(control) {
+    PopupSelect.getVisibleControl(control)?.focus({ preventScroll: true });
+  }
+
+  static findEnabledIndex(index, direction) {
+    const options = PopupSelect.activeSelect.options;
+    while (index >= 0 && index < options.length) {
+      if (!options[index].disabled) return index;
+      index += direction;
+    }
+    return -1;
+  }
+
+  static setActiveIndex(index) {
+    if (!PopupSelect.activeSelect || index < 0 || PopupSelect.activeSelect.options[index]?.disabled) return;
+
+    PopupSelect.activeIndex = index;
+    PopupSelect.menu.querySelectorAll('.popup-select__option').forEach((item, itemIndex) => {
+      item.classList.toggle('is-active', itemIndex === index);
+    });
+
+    const activeOption = PopupSelect.menu.querySelector(`[data-option-index="${index}"]`);
+    if (!activeOption) return;
+    PopupSelect.menu.setAttribute('aria-activedescendant', activeOption.id);
+    const optionBottom = activeOption.offsetTop + activeOption.offsetHeight;
+    if (activeOption.offsetTop < PopupSelect.menu.scrollTop) {
+      PopupSelect.menu.scrollTop = activeOption.offsetTop;
+    } else if (optionBottom > PopupSelect.menu.scrollTop + PopupSelect.menu.clientHeight) {
+      PopupSelect.menu.scrollTop = optionBottom - PopupSelect.menu.clientHeight;
+    }
+    PopupSelect.updateScrollIndicator();
+  }
+
+  static selectActiveOption() {
+    const select = PopupSelect.activeSelect;
+    const option = select?.options[PopupSelect.activeIndex];
+    if (!option || option.disabled) return;
+
+    const changed = select.selectedIndex !== PopupSelect.activeIndex;
+    select.selectedIndex = PopupSelect.activeIndex;
+    PopupSelect.close();
+    if (changed) {
+      select.dispatchEvent(new Event('input', { bubbles: true }));
+      select.dispatchEvent(new Event('change', { bubbles: true }));
+    }
+  }
+
+  static positionMenu() {
+    const trigger = PopupSelect.getTrigger(PopupSelect.activeSelect);
+    if (!trigger) return;
+
+    const triggerRect = trigger.getBoundingClientRect();
+    const visualViewport = window.visualViewport;
+    const viewport = {
+      left: visualViewport?.offsetLeft ?? 0,
+      top: visualViewport?.offsetTop ?? 0,
+      right: (visualViewport?.offsetLeft ?? 0) + (visualViewport?.width ?? window.innerWidth),
+      bottom: (visualViewport?.offsetTop ?? 0) + (visualViewport?.height ?? window.innerHeight),
+    };
+    const availableWidth = Math.max(0, viewport.right - viewport.left - PopupSelect.VIEWPORT_MARGIN * 2);
+    const menuWidth = Math.min(
+      Math.max(Math.ceil(triggerRect.width), PopupSelect.MIN_MENU_WIDTH),
+      PopupSelect.MAX_MENU_WIDTH,
+      availableWidth,
+    );
+
+    PopupSelect.menu.style.width = `${menuWidth}px`;
+    PopupSelect.menu.style.maxHeight = '';
+    const desiredHeight = PopupSelect.menu.getBoundingClientRect().height;
+    const spaceBelow = Math.max(
+      0,
+      viewport.bottom - PopupSelect.VIEWPORT_MARGIN - triggerRect.bottom - PopupSelect.TRIGGER_GAP,
+    );
+    const spaceAbove = Math.max(
+      0,
+      triggerRect.top - viewport.top - PopupSelect.VIEWPORT_MARGIN - PopupSelect.TRIGGER_GAP,
+    );
+    const opensAbove = spaceBelow < desiredHeight && spaceAbove > spaceBelow;
+    const availableHeight = opensAbove ? spaceAbove : spaceBelow;
+
+    PopupSelect.menu.style.maxHeight = `${Math.floor(Math.min(desiredHeight, availableHeight))}px`;
+    const menuRect = PopupSelect.menu.getBoundingClientRect();
+    const minLeft = viewport.left + PopupSelect.VIEWPORT_MARGIN;
+    const maxLeft = viewport.right - PopupSelect.VIEWPORT_MARGIN - menuRect.width;
+    const left = Math.max(minLeft, Math.min(maxLeft, triggerRect.left));
+    const top = opensAbove
+      ? triggerRect.top - PopupSelect.TRIGGER_GAP - menuRect.height
+      : triggerRect.bottom + PopupSelect.TRIGGER_GAP;
+
+    PopupSelect.menu.dataset.placement = opensAbove ? 'above' : 'below';
+    PopupSelect.menu.style.left = `${Math.round(left)}px`;
+    PopupSelect.menu.style.top = `${Math.round(top)}px`;
+    PopupSelect.updateScrollIndicator();
+  }
+
+  static updateScrollIndicator() {
+    const scrollRange = PopupSelect.menu.scrollHeight - PopupSelect.menu.clientHeight;
+    if (!PopupSelect.activeSelect || scrollRange <= 1) {
+      PopupSelect.scrollIndicator.hidden = true;
+      return;
+    }
+
+    const menuRect = PopupSelect.menu.getBoundingClientRect();
+    const trackHeight = Math.max(0, menuRect.height - PopupSelect.SCROLL_INDICATOR_INSET * 2);
+    const thumbHeight = Math.min(
+      trackHeight,
+      Math.max(
+        PopupSelect.MIN_SCROLL_THUMB_HEIGHT,
+        trackHeight * (PopupSelect.menu.clientHeight / PopupSelect.menu.scrollHeight),
+      ),
+    );
+    const thumbTravel = Math.max(0, trackHeight - thumbHeight);
+    const scrollProgress = Math.min(1, Math.max(0, PopupSelect.menu.scrollTop / scrollRange));
+    const thumbTop = thumbTravel * scrollProgress;
+
+    PopupSelect.scrollIndicator.hidden = false;
+    PopupSelect.scrollIndicator.style.height = `${Math.round(trackHeight)}px`;
+    PopupSelect.scrollIndicator.style.left = `${Math.round(
+      menuRect.right - PopupSelect.SCROLL_INDICATOR_RIGHT_INSET - PopupSelect.SCROLL_INDICATOR_WIDTH,
+    )}px`;
+    PopupSelect.scrollIndicator.style.top = `${Math.round(menuRect.top + PopupSelect.SCROLL_INDICATOR_INSET)}px`;
+    PopupSelect.scrollThumb.style.height = `${Math.round(thumbHeight)}px`;
+    PopupSelect.scrollThumb.style.top = `${Math.round(thumbTop)}px`;
+  }
+
+  static handleMenuKeyDown(event) {
+    switch (event.key) {
+      case 'ArrowDown':
+        event.preventDefault();
+        PopupSelect.setActiveIndex(PopupSelect.findEnabledIndex(PopupSelect.activeIndex + 1, 1));
+        break;
+      case 'ArrowUp':
+        event.preventDefault();
+        PopupSelect.setActiveIndex(PopupSelect.findEnabledIndex(PopupSelect.activeIndex - 1, -1));
+        break;
+      case 'Home':
+        event.preventDefault();
+        PopupSelect.setActiveIndex(PopupSelect.findEnabledIndex(0, 1));
+        break;
+      case 'End':
+        event.preventDefault();
+        PopupSelect.setActiveIndex(PopupSelect.findEnabledIndex(PopupSelect.activeSelect.options.length - 1, -1));
+        break;
+      case 'Enter':
+      case ' ':
+        event.preventDefault();
+        PopupSelect.selectActiveOption();
+        break;
+      case 'Escape':
+        event.preventDefault();
+        event.stopPropagation();
+        PopupSelect.close();
+        break;
+      case 'Tab':
+        PopupSelect.close();
+        break;
+    }
+  }
+}
+
+const FULL_MEDIA_CACHE_MAX_SIZE = 1024 * 1024 * 1024;
+
+class FullMediaCache {
+  constructor(database, maxCacheSize = FULL_MEDIA_CACHE_MAX_SIZE) {
+    this.database = database;
+    this.storeName = database.fullMediaStoreName;
+    this.maxCacheSize = maxCacheSize;
+  }
+
+  static supportsMimeType(value) {
+    const mimeType = normalizeMimeType(value);
+    return mimeType.startsWith('image/') || mimeType.startsWith('video/');
+  }
+
+  static matchesRecord(record, mimeType, keyFingerprint) {
+    if (!(record?.blob instanceof Blob)) return false;
+    const storedType = normalizeMimeType(record.mimeType || record.blob.type);
+    if (mimeType.startsWith('video/')) {
+      return storedType.startsWith('video/') && !!keyFingerprint && record.keyFingerprint === keyFingerprint;
+    }
+    return mimeType.startsWith('image/') && storedType.startsWith('image/') && !record.keyFingerprint;
+  }
+
+  async get(attachmentUrl, owner, acceptsRecord) {
+    const record = await this.getRecord(attachmentUrl, owner, acceptsRecord);
+    return record?.blob || null;
+  }
+
+  async getRecord(attachmentUrl, owner = MediaCacheOwnership.getOwnerKey(), acceptsRecord) {
+    const id = ThumbnailCache.getAttachmentId(attachmentUrl);
+    return this.database.ownership.read(this.storeName, id, owner, acceptsRecord);
+  }
+
+  async getAvailableStorage() {
+    try {
+      const estimate = await navigator.storage?.estimate?.();
+      if (Number.isFinite(estimate?.quota) && Number.isFinite(estimate?.usage)) {
+        return Math.max(0, estimate.quota - estimate.usage);
+      }
+    } catch {
+      // Storage estimates are optional. IndexedDB still enforces its quota.
+    }
+    return Infinity;
+  }
+
+  async put({ attachment, blob, keyFingerprint, shouldCache, owner }) {
+    const id = ThumbnailCache.getAttachmentId(attachment?.url);
+    const mimeType = normalizeMimeType(attachment.type || blob?.type);
+    if (!FullMediaCache.supportsMimeType(mimeType)) throw new Error('Full-media cache accepts only images and videos');
+    if (!(blob instanceof Blob)) throw new Error('Full-media cache requires a Blob');
+    if (blob.size > this.maxCacheSize || !shouldCache()) return false;
+
+    const record = { id, mimeType, size: blob.size, blob, ...(keyFingerprint ? { keyFingerprint } : {}) };
+    const available = await this.getAvailableStorage();
+    try {
+      return await this.write(record, available, shouldCache, owner);
+    } catch (error) {
+      if (error?.name !== 'QuotaExceededError' || !shouldCache()) throw error;
+      // A failed write rolls back its evictions. Commit space reclamation before retrying.
+      await this.evictForQuota(id, blob.size, shouldCache);
+      return this.write(record, Infinity, shouldCache, owner);
+    }
+  }
+
+  write(record, available, shouldCache, owner) {
+    return this.database.ownership.run([this.storeName], owner, ({ transaction, owners, setResult }) => {
+      if (!shouldCache()) return;
+      const store = transaction.objectStore(this.storeName);
+      const lookup = store.get(record.id);
+      lookup.onsuccess = () => {
+        if (!shouldCache()) return;
+        const existing = lookup.result;
+        if (FullMediaCache.matchesRecord(existing, record.mimeType, record.keyFingerprint)) {
+          // Another request filled the cache while this one was downloading.
+          if (Array.isArray(existing.ownerKeys) && owners.some(key => !existing.ownerKeys.includes(key))) {
+            store.put(MediaCacheOwnership.mergeRecord(existing, existing, owners));
+          }
+          setResult(true);
+          return;
+        }
+
+        // Preserve a usable image or authenticated video when another attachment reuses its ID.
+        if (FullMediaCache.matchesRecord(existing, 'image/')) return;
+        if (existing?.keyFingerprint && existing.blob instanceof Blob) return;
+
+        const evictionCandidates = [];
+        let evictableBytes = 0;
+        const request = store.index('cachedAt').openCursor();
+        request.onsuccess = () => {
+          if (!shouldCache()) return;
+          const cursor = request.result;
+          if (cursor) {
+            if (cursor.primaryKey !== record.id) {
+              const size = Number(cursor.value.size || 0);
+              evictableBytes += size;
+              evictionCandidates.push({ id: cursor.primaryKey, size });
+            }
+            cursor.continue();
+            return;
+          }
+
+          const extraBytes = record.size - Number(existing?.size || 0);
+          let bytesToFree = Math.max(0, evictableBytes + record.size - this.maxCacheSize, extraBytes - available);
+          if (bytesToFree > evictableBytes) return;
+          for (const candidate of evictionCandidates) {
+            if (bytesToFree <= 0) break;
+            store.delete(candidate.id);
+            bytesToFree -= candidate.size;
+          }
+          store.put(MediaCacheOwnership.mergeRecord(null, { ...record, cachedAt: Date.now() }, owners));
+          setResult(true);
+        };
+      };
+    });
+  }
+
+  evictForQuota(incomingId, bytesToFree, shouldCache) {
+    return this.database.ownership.run([this.storeName], null, ({ transaction }) => {
+      if (!shouldCache()) return;
+      const request = transaction.objectStore(this.storeName).index('cachedAt').openCursor();
+      request.onsuccess = () => {
+        const cursor = request.result;
+        if (!cursor || bytesToFree <= 0 || !shouldCache()) return;
+        if (cursor.primaryKey !== incomingId) {
+          bytesToFree -= Number(cursor.value?.size || 0);
+          cursor.delete();
+        }
+        cursor.continue();
+      };
+    });
+  }
+
+  async delete(attachmentUrl, mimeType, keyFingerprint) {
+    const id = ThumbnailCache.getAttachmentId(attachmentUrl);
+    const type = normalizeMimeType(mimeType);
+    return this.database.ownership.run([this.storeName], null, ({ transaction }) => {
+      const store = transaction.objectStore(this.storeName);
+      const lookup = store.get(id);
+      lookup.onsuccess = () => {
+        if (FullMediaCache.matchesRecord(lookup.result, type, keyFingerprint)) store.delete(id);
+      };
+    });
+  }
+
+  async getOrCache({ attachment, keyFingerprint, downloadAndDecrypt, shouldCache }) {
+    const owner = MediaCacheOwnership.getOwnerKey();
+    const canCache = () => !this.database.ownership.deleting && (!shouldCache || shouldCache());
+    const mimeType = normalizeMimeType(attachment.type);
+    if (!canCache() || (mimeType.startsWith('video/') && !keyFingerprint)) return downloadAndDecrypt();
+    try {
+      const cachedBlob = await this.get(attachment.url, owner, record =>
+        canCache() && FullMediaCache.matchesRecord(record, mimeType, keyFingerprint));
+      if (cachedBlob && canCache()) return cachedBlob;
+    } catch (error) {
+      console.warn('Failed to read full media from cache:', error);
+    }
+
+    const blob = await downloadAndDecrypt();
+
+    try {
+      await this.put({ attachment, blob, keyFingerprint, shouldCache: canCache, owner });
+    } catch (error) {
+      console.warn('Failed to cache full media:', error);
+    }
+
+    return blob;
+  }
+}
+
+const fullMediaCache = new FullMediaCache(thumbnailCache);

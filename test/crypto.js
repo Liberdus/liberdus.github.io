@@ -110,10 +110,11 @@ export function decryptData(encryptedData, password, nostretch) {
     return decryptChacha(key, encryptedData);
 }
 
-export async function passwordToKey(password) {
+// An omitted salt preserves legacy lock verifiers and account-encryption keys.
+export async function passwordToKey(password, salt = '') {
     if (!password) return null;
 
-    let key = utf82bin(password);
+    let key = utf82bin(password + salt);
     const iterations = 100000;
     const batchSize = 1000;
 
@@ -253,6 +254,14 @@ export function getPublicKey(privateKey) {
 
 export async function signMessage(message, privateKey) {
     return await secp.signAsync(message, privateKey);
+}
+
+export function verifyMessage(signature, message, publicKey) {
+    try {
+        return secp.verify(signature, message, publicKey);
+    } catch {
+        return false;
+    }
 }
 
 export function generatePQKeys(pqSeed) {

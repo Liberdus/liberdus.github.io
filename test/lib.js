@@ -1,4 +1,100 @@
 /**
+ * Encodes an untrusted value for an HTML text context.
+ * Quotes are encoded as well so callers cannot accidentally reuse a text-only
+ * encoding helper in an attribute context.
+ * @param {unknown} value
+ * @returns {string}
+ */
+export function escapeHtml(value) {
+  if (value === null || value === undefined) return '';
+  return String(value)
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#39;");
+}
+
+/**
+ * Encodes an untrusted value for a quoted HTML attribute.
+ * @param {unknown} value
+ * @returns {string}
+ */
+export function escapeHtmlAttribute(value) {
+  return escapeHtml(value);
+}
+
+/**
+ * Returns a canonical HTTPS URL, optionally restricted to an origin allowlist.
+ * Credentials and overlong values are rejected.
+ * @param {unknown} value
+ * @param {string[]|null} allowedOrigins
+ * @returns {string}
+ */
+export function normalizeHttpsUrl(value, allowedOrigins = null) {
+  if (typeof value !== 'string') return '';
+  const candidate = value.trim();
+  if (!candidate || candidate.length > 2048) return '';
+
+  try {
+    const url = new URL(candidate);
+    if (url.protocol !== 'https:' || url.username || url.password) return '';
+    if (Array.isArray(allowedOrigins) && !allowedOrigins.includes(url.origin)) return '';
+    return url.toString();
+  } catch {
+    return '';
+  }
+}
+
+/**
+ * Normalizes an attachment/media resource URL. External resources must use
+ * HTTPS; HTTP is permitted only for a same-origin local development page.
+ * @param {unknown} value
+ * @param {string} baseUrl
+ * @returns {string}
+ */
+export function normalizeResourceUrl(value, baseUrl) {
+  if (value === '#') return '#';
+  if (typeof value !== 'string') return '';
+  const candidate = value.trim();
+  if (!candidate || candidate.length > 4096) return '';
+
+  try {
+    const base = new URL(baseUrl);
+    const url = new URL(candidate, base);
+    const sameOriginHttp = url.protocol === 'http:' && url.origin === base.origin;
+    if ((url.protocol !== 'https:' && !sameOriginHttp) || url.username || url.password) return '';
+    return url.toString();
+  } catch {
+    return '';
+  }
+}
+
+/**
+ * Accepts a simple MIME type without parameters or control characters.
+ * @param {unknown} value
+ * @returns {string}
+ */
+export function normalizeMimeType(value) {
+  if (typeof value !== 'string') return 'application/octet-stream';
+  const mimeType = value.trim().toLowerCase();
+  return /^[a-z0-9][a-z0-9!#$&^_.+-]*\/[a-z0-9][a-z0-9!#$&^_.+-]*$/.test(mimeType)
+    ? mimeType
+    : 'application/octet-stream';
+}
+
+/**
+ * Accepts a 32-byte hexadecimal transaction identifier.
+ * @param {unknown} value
+ * @returns {string}
+ */
+export function normalizeTransactionId(value) {
+  if (typeof value !== 'string') return '';
+  const txid = value.trim().toLowerCase();
+  return /^[0-9a-f]{64}$/.test(txid) ? txid : '';
+}
+
+/**
  * Normalizes a username string. Keeps only letters and numbers; lowercase all letters; limit to 15 characters.
  * @param {string} u - The string to normalize.
  * @returns {string} - The normalized string.
@@ -264,14 +360,52 @@ export function linkifyUrls(text) {
     });
 }
 
-export function escapeHtml(str) {
-    const div = document.createElement('div');
-    div.textContent = str;
-    return div.innerHTML;
-}
-
 export const BUTTON_COOLDOWN_MS = 2000;
 export const FAUCET_COOLDOWN_MS = 5000;
+
+const MODAL_TRANSITION_FALLBACK_MS = 1000;
+let openingModal = null;
+let modalTransitionTimeout = null;
+let modalTransitionListenersInstalled = false;
+
+function finishModalTransition(modal) {
+    if (modal !== openingModal) return;
+
+    if (modalTransitionTimeout !== null) {
+        clearTimeout(modalTransitionTimeout);
+        modalTransitionTimeout = null;
+    }
+
+    openingModal = null;
+    if (modal.classList.contains('active')) modal.classList.add('is-transition-complete');
+}
+
+function handleModalTransitionComplete(event) {
+    if (event.target !== openingModal || event.propertyName !== 'opacity') return;
+    finishModalTransition(event.target);
+}
+
+export function installModalTransitionListeners() {
+    if (modalTransitionListenersInstalled) return;
+    modalTransitionListenersInstalled = true;
+    document.addEventListener('transitionend', handleModalTransitionComplete);
+    document.addEventListener('transitioncancel', handleModalTransitionComplete);
+}
+
+/**
+ * Activates one modal at a time and ignores overlapping requests.
+ * @param {HTMLElement|null|undefined} modal - Modal element to activate
+ * @returns {boolean} Whether the modal was activated
+ */
+export function openModal(modal) {
+    if (!modal || openingModal || modal.classList.contains('active')) return false;
+
+    openingModal = modal;
+    modal.classList.remove('is-transition-complete');
+    modal.classList.add('active');
+    modalTransitionTimeout = setTimeout(() => finishModalTransition(modal), MODAL_TRANSITION_FALLBACK_MS);
+    return true;
+}
 
 /**
  * Wraps an async handler so the given buttons are disabled for a minimum cooldown (ms).
@@ -482,6 +616,35 @@ export function normalizeAddress(address) {
     return address;
 }
 
+/**
+ * Return a normalized username only when the network maps it to the expected address.
+ * Invalid claims and lookup failures are treated as unverified.
+ * @param {string} username
+ * @param {string} expectedAddress
+ * @param {(username: string) => Promise<string|null>} resolveUsernameAddress
+ * @returns {Promise<string|null>}
+ */
+export async function getVerifiedUsername(username, expectedAddress, resolveUsernameAddress) {
+    if (typeof username !== 'string' || typeof resolveUsernameAddress !== 'function') {
+      return null;
+    }
+
+    const normalizedUsername = normalizeUsername(username);
+    if (!normalizedUsername) {
+      return null;
+    }
+
+    try {
+      const resolvedAddress = await resolveUsernameAddress(normalizedUsername);
+      if (!resolvedAddress || normalizeAddress(resolvedAddress) !== normalizeAddress(expectedAddress)) {
+        return null;
+      }
+      return normalizedUsername;
+    } catch {
+      return null;
+    }
+}
+
 export function longAddress(address){
     // First normalize the address to ensure consistent format
     const normalized = normalizeAddress(address);
@@ -679,6 +842,78 @@ export function bin2hex(bin){
     return Array.from(bin).map(b => b.toString(16).padStart(2, '0')).join('');
 }
 
+// Base58 with the Bitcoin alphabet. NEAR writes keys and signatures as
+// "<curve>:<base58>", so near-assets.js needs it to hand a signature to the
+// intents verifier contract. Byte-wise carry rather than BigInt, so the
+// leading zeros a key or signature may start with survive the round trip.
+const BASE58_ALPHABET = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
+
+export function bin2base58(bytes) {
+    if (!(bytes instanceof Uint8Array)) {
+        throw new TypeError('Input must be a Uint8Array');
+    }
+    if (bytes.length === 0) return '';
+
+    // Each leading zero byte encodes as one '1' and carries no magnitude.
+    let zeros = 0;
+    while (zeros < bytes.length && bytes[zeros] === 0) zeros++;
+
+    // log(256)/log(58) = 1.365..., so 1.38 bytes of digits per byte is enough.
+    const size = Math.ceil((bytes.length - zeros) * 138 / 100) + 1;
+    const digits = new Uint8Array(size);
+    let length = 0;
+
+    for (let i = zeros; i < bytes.length; i++) {
+        let carry = bytes[i];
+        let used = 0;
+        for (let k = size - 1; (carry !== 0 || used < length) && k >= 0; k--, used++) {
+            carry += 256 * digits[k];
+            digits[k] = carry % 58;
+            carry = (carry / 58) | 0;
+        }
+        length = used;
+    }
+
+    let encoded = '1'.repeat(zeros);
+    for (let i = size - length; i < size; i++) {
+        encoded += BASE58_ALPHABET[digits[i]];
+    }
+    return encoded;
+}
+
+export function base582bin(str) {
+    if (typeof str !== 'string') {
+        throw new TypeError('Input must be a string');
+    }
+    if (str.length === 0) return new Uint8Array();
+
+    let zeros = 0;
+    while (zeros < str.length && str[zeros] === '1') zeros++;
+
+    // log(58)/log(256) = 0.733...
+    const size = Math.ceil((str.length - zeros) * 733 / 1000) + 1;
+    const bytes = new Uint8Array(size);
+    let length = 0;
+
+    for (let i = zeros; i < str.length; i++) {
+        let carry = BASE58_ALPHABET.indexOf(str[i]);
+        if (carry < 0) {
+            throw new TypeError(`Invalid base58 character "${str[i]}"`);
+        }
+        let used = 0;
+        for (let k = size - 1; (carry !== 0 || used < length) && k >= 0; k--, used++) {
+            carry += 58 * bytes[k];
+            bytes[k] = carry % 256;
+            carry = (carry / 256) | 0;
+        }
+        length = used;
+    }
+
+    const decoded = new Uint8Array(zeros + length);
+    decoded.set(bytes.subarray(size - length), zeros);
+    return decoded;
+}
+
 /**
  * Normalizes a string to a float and limits the number of decimals to 18 and the number of digits before the decimal point to 9.
  * @param {string} value - The float as a string to normalize.
@@ -731,6 +966,47 @@ function getColorFromHash(hash, index) {
     return `hsl(${hue}, ${saturation}%, ${lightness}%)`;
 }
 
+/** USD values are separate from token balances: missing prices never mean zero. */
+export class WalletUsdValuation {
+    /** @param {{held: boolean, usdValue: number|string|null|undefined}[]} holdings */
+    constructor(holdings) {
+        let total = 0;
+        let priced = 0;
+        let missing = 0;
+        for (const { held, usdValue } of holdings) {
+            if (!held) continue;
+            const value = typeof usdValue === 'number'
+                || (typeof usdValue === 'string' && usdValue.trim() !== '') ? Number(usdValue) : NaN;
+            if (Number.isFinite(value) && value >= 0) {
+                total += value;
+                priced++;
+            } else {
+                missing++;
+            }
+        }
+        this.state = !Number.isFinite(total) || (missing > 0 && priced === 0)
+            ? 'none' : missing > 0 ? 'partial' : 'complete';
+        this.total = this.state === 'none' ? null : total;
+        Object.freeze(this);
+    }
+
+    static fromValue(value) {
+        return new WalletUsdValuation([{ held: true, usdValue: value }]);
+    }
+
+    get valueText() {
+        return this.total === null ? '$ -' : this.total.toLocaleString('en-US', {
+            style: 'currency', currency: 'USD', minimumFractionDigits: 2, maximumFractionDigits: 2,
+        });
+    }
+
+    get caption() {
+        if (this.state === 'none') return 'prices unavailable';
+        if (this.state === 'partial') return 'some prices unavailable';
+        return '';
+    }
+}
+
 export class EthNum {
   /**
    * Converts a base 10 string representation of an Ethereum-like number
@@ -751,6 +1027,23 @@ export class EthNum {
     const padding = 18 - decimalPart.length;
     const paddedDecimal = decimalPart + '0'.repeat(padding);
     return BigInt(integerPart + paddedDecimal);
+  }
+
+  /**
+   * Converts a USD amount to LIB Wei, truncating any fraction below one Wei.
+   * @param {string} usdAmount Unsigned decimal USD amount, with up to 18 decimal places.
+   * @param {string} usdPerLib Positive decimal USD price per LIB, with up to 18 decimal places.
+   * @returns {bigint} The LIB amount in Wei.
+   * @throws {Error} If either input is invalid or the price is not positive.
+   */
+  static usdToWei(usdAmount, usdPerLib) {
+    const decimal = /^(?:\d+(?:\.\d*)?|\.\d+)$/;
+    if (typeof usdAmount !== 'string' || !decimal.test(usdAmount)
+      || typeof usdPerLib !== 'string' || !decimal.test(usdPerLib)) {
+      throw new Error('USD amount and LIB price must be unsigned decimal strings');
+    }
+    if (EthNum.toWei(usdPerLib) <= 0n) throw new Error('LIB price must be positive');
+    return EthNum.toWei(EthNum.div(usdAmount, usdPerLib));
   }
 
   /**
@@ -822,5 +1115,419 @@ export class EthNum {
     const wei2 = EthNum.toWei(str2);
     const quotientWei = (wei1 * BigInt(1e18)) / wei2;
     return EthNum.toStr(quotientWei);
+  }
+}
+
+// -----------------------------------------------------------------------------
+// Attachment security: MIME normalization and safe preview detection
+// -----------------------------------------------------------------------------
+
+const MIME_ALIASES = Object.freeze({
+  'audio/mp3': 'audio/mpeg',
+  'audio/x-flac': 'audio/flac',
+  'audio/x-wav': 'audio/wav',
+  'image/jpg': 'image/jpeg',
+  'video/x-m4v': 'video/mp4',
+});
+
+const SAFE_PREVIEW_MIME_TYPES = new Set([
+  'audio/aac',
+  'audio/flac',
+  'audio/mp4',
+  'audio/mpeg',
+  'audio/ogg',
+  'audio/wav',
+  'audio/webm',
+  'image/avif',
+  'image/bmp',
+  'image/gif',
+  'image/jpeg',
+  'image/png',
+  'image/webp',
+  'video/mp4',
+  'video/mpeg',
+  'video/ogg',
+  'video/quicktime',
+  'video/webm',
+]);
+
+const ISO_BASE_MEDIA_MIME_TYPES = new Set([
+  'audio/mp4', 'image/avif', 'video/mp4', 'video/quicktime',
+]);
+
+class AttachmentPreviewHeader {
+  // Returns the leading block's length, 0 for media data, or -1 for an invalid block.
+  static getLeadingBlockSize(bytes, mimeType, remainingSize) {
+    if (mimeType === 'audio/aac' && asciiAt(bytes, 0, 'ID3')) {
+      if (bytes.length < 10 || bytes[3] < 2 || bytes[3] > 4 || bytes[4] === 0xff) return -1;
+      const sizeBytes = bytes.subarray(6, 10);
+      if (sizeBytes.some(value => value & 0x80)) return -1;
+      const tagSize = sizeBytes.reduce((size, value) => size * 128 + value, 0);
+      const footerSize = bytes[3] === 4 && (bytes[5] & 0x10) ? 10 : 0;
+      const blockSize = 10 + tagSize + footerSize;
+      return blockSize <= remainingSize ? blockSize : -1;
+    }
+
+    if (!ISO_BASE_MEDIA_MIME_TYPES.has(mimeType)
+      || !(asciiAt(bytes, 4, 'free') || asciiAt(bytes, 4, 'skip'))) return 0;
+
+    const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+    let blockSize = view.getUint32(0);
+    const headerSize = blockSize === 1 ? 16 : 8;
+    if (blockSize === 1) {
+      if (bytes.length < headerSize) return -1;
+      blockSize = view.getUint32(8) * 2 ** 32 + view.getUint32(12);
+    }
+    if (!Number.isSafeInteger(blockSize) || blockSize < headerSize || blockSize > remainingSize) return -1;
+    return blockSize;
+  }
+
+  static stripLeadingBlocks(bytes, mimeType) {
+    for (let blocks = 0; blocks < 32; blocks++) {
+      const blockSize = this.getLeadingBlockSize(bytes, mimeType, bytes.length);
+      if (blockSize === 0) return bytes;
+      if (blockSize < 0) break;
+      bytes = bytes.subarray(blockSize);
+    }
+    return new Uint8Array(0);
+  }
+
+  static async read(blob, mimeType) {
+    let offset = 0;
+    // Read headers only; skip padding and metadata without loading their contents.
+    for (let blocks = 0; blocks < 32; blocks++) {
+      const bytes = new Uint8Array(await blob.slice(offset, offset + 64).arrayBuffer());
+      const blockSize = this.getLeadingBlockSize(bytes, mimeType, blob.size - offset);
+      if (blockSize === 0) return bytes;
+      if (blockSize < 0) break;
+      offset += blockSize;
+    }
+    return new Uint8Array(0);
+  }
+}
+
+function startsWithBytes(bytes, signature) {
+  if (bytes.length < signature.length) return false;
+  return signature.every((value, index) => bytes[index] === value);
+}
+
+function asciiAt(bytes, offset, value) {
+  if (bytes.length < offset + value.length) return false;
+  return Array.from(value).every((character, index) => bytes[offset + index] === character.charCodeAt(0));
+}
+
+function hasIsoBaseMediaSignature(bytes) {
+  return asciiAt(bytes, 4, 'ftyp');
+}
+
+function hasAvifBrand(bytes) {
+  if (!hasIsoBaseMediaSignature(bytes)) return false;
+  const brands = String.fromCharCode(...bytes.slice(8, 64));
+  return brands.includes('avif') || brands.includes('avis');
+}
+
+/**
+ * Returns a normalized MIME type without parameters.
+ * @param {unknown} value
+ * @returns {string}
+ */
+export function normalizeAttachmentMimeType(value) {
+  if (typeof value !== 'string' || value.length > 256) return '';
+  const mimeType = value.split(';', 1)[0].trim().toLowerCase();
+  if (!/^[a-z0-9][a-z0-9!#$&^_.+-]*\/[a-z0-9][a-z0-9!#$&^_.+-]*$/.test(mimeType)) return '';
+  return MIME_ALIASES[mimeType] || mimeType;
+}
+
+/**
+ * Returns the canonical preview MIME type only when both the declared type and
+ * the decrypted file signature match an explicitly allowed passive media type.
+ * Active documents, unknown formats, and MIME/content mismatches return empty.
+ * @param {Uint8Array} bytes
+ * @param {unknown} declaredMimeType
+ * @returns {string}
+ */
+export function detectSafeAttachmentPreviewMime(bytes, declaredMimeType) {
+  if (!(bytes instanceof Uint8Array)) return '';
+  const mimeType = normalizeAttachmentMimeType(declaredMimeType);
+  if (!SAFE_PREVIEW_MIME_TYPES.has(mimeType)) return '';
+  bytes = AttachmentPreviewHeader.stripLeadingBlocks(bytes, mimeType);
+
+  let matchesSignature = false;
+  switch (mimeType) {
+    case 'image/jpeg':
+      matchesSignature = startsWithBytes(bytes, [0xff, 0xd8, 0xff]);
+      break;
+    case 'image/png':
+      matchesSignature = startsWithBytes(bytes, [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+      break;
+    case 'image/gif':
+      matchesSignature = asciiAt(bytes, 0, 'GIF87a') || asciiAt(bytes, 0, 'GIF89a');
+      break;
+    case 'image/webp':
+      matchesSignature = asciiAt(bytes, 0, 'RIFF') && asciiAt(bytes, 8, 'WEBP');
+      break;
+    case 'image/bmp':
+      matchesSignature = asciiAt(bytes, 0, 'BM');
+      break;
+    case 'image/avif':
+      matchesSignature = hasAvifBrand(bytes);
+      break;
+    case 'audio/mpeg':
+      matchesSignature = asciiAt(bytes, 0, 'ID3') || (
+        bytes.length >= 2 && bytes[0] === 0xff && (bytes[1] & 0xe0) === 0xe0
+      );
+      break;
+    case 'audio/wav':
+      matchesSignature = asciiAt(bytes, 0, 'RIFF') && asciiAt(bytes, 8, 'WAVE');
+      break;
+    case 'audio/flac':
+      matchesSignature = asciiAt(bytes, 0, 'fLaC');
+      break;
+    case 'audio/aac':
+      matchesSignature = bytes.length >= 2 && bytes[0] === 0xff && (bytes[1] & 0xf6) === 0xf0;
+      break;
+    case 'audio/ogg':
+    case 'video/ogg':
+      matchesSignature = asciiAt(bytes, 0, 'OggS');
+      break;
+    case 'audio/webm':
+    case 'video/webm':
+      matchesSignature = startsWithBytes(bytes, [0x1a, 0x45, 0xdf, 0xa3]);
+      break;
+    case 'audio/mp4':
+    case 'video/mp4':
+    case 'video/quicktime':
+      matchesSignature = hasIsoBaseMediaSignature(bytes);
+      break;
+    case 'video/mpeg':
+      matchesSignature = startsWithBytes(bytes, [0x00, 0x00, 0x01, 0xba])
+        || startsWithBytes(bytes, [0x00, 0x00, 0x01, 0xb3]);
+      break;
+  }
+
+  return matchesSignature ? mimeType : '';
+}
+
+/**
+ * Reads only the header needed for preview classification.
+ * @param {Blob} blob
+ * @returns {Promise<string>}
+ */
+export async function getSafeAttachmentPreviewMime(blob) {
+  if (!blob || typeof blob.slice !== 'function') return '';
+  try {
+    const mimeType = normalizeAttachmentMimeType(blob.type);
+    if (!SAFE_PREVIEW_MIME_TYPES.has(mimeType)) return '';
+    const header = await AttachmentPreviewHeader.read(blob, mimeType);
+    return detectSafeAttachmentPreviewMime(header, mimeType);
+  } catch {
+    return '';
+  }
+}
+
+const SUPPORTED_CHAT_TRANSACTION_TYPES = new Set([
+  'message',
+  'transfer',
+  'update_toll_required',
+]);
+
+export function getUnsignedTransactionId(transaction, { stringify, hashBytes }) {
+  const unsignedTransaction = { ...transaction };
+  delete unsignedTransaction.sign;
+  return hashBytes(utf82bin(stringify(unsignedTransaction)));
+}
+
+export function getExpectedChatId(firstAddress, secondAddress, hashBytes) {
+  return hashBytes([longAddress(firstAddress), longAddress(secondAddress)].sort().join(''));
+}
+
+export function isPublicKeyForAddress(publicKey, address, generateAddress) {
+  if (typeof publicKey !== 'string' || !/^(?:0x)?[0-9a-f]{130}$/i.test(publicKey)) return false;
+  try {
+    const normalizedPublicKey = publicKey.replace(/^0x/i, '');
+    return bin2hex(generateAddress(hex2bin(normalizedPublicKey))) === normalizeAddress(address);
+  } catch {
+    return false;
+  }
+}
+
+function getCompactSignature(signature) {
+  if (typeof signature !== 'string' || !/^0x[0-9a-f]{130}$/i.test(signature)) return null;
+  const recovery = Number.parseInt(signature.slice(-2), 16);
+  if (recovery !== 27 && recovery !== 28) return null;
+  return hex2bin(signature.slice(2, 130));
+}
+
+function hasRequiredPrivateMessageEnvelope(transaction, currentAddress) {
+  const payload = transaction.xmessage;
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return false;
+  if (payload.encrypted !== true || payload.encryptionMethod !== 'xchacha20poly1305') return false;
+  if (typeof payload.message !== 'string' || !payload.message) return false;
+
+  const transactionFrom = normalizeAddress(transaction.from);
+  const keyField = transactionFrom === normalizeAddress(currentAddress)
+    ? payload.selfKey
+    : payload.pqEncSharedKey;
+  return typeof keyField === 'string' && keyField.length > 0;
+}
+
+export function validateChatTransaction(transaction, context, crypto) {
+  if (!transaction || typeof transaction !== 'object' || Array.isArray(transaction)) {
+    return { ok: false, reason: 'invalid_transaction' };
+  }
+  if (!SUPPORTED_CHAT_TRANSACTION_TYPES.has(transaction.type)) {
+    return { ok: false, reason: 'unsupported_type' };
+  }
+
+  let transactionFrom;
+  let transactionTo;
+  let currentAddress;
+  let contactAddress;
+  try {
+    transactionFrom = normalizeAddress(transaction.from);
+    transactionTo = normalizeAddress(transaction.to);
+    currentAddress = normalizeAddress(context.currentAddress);
+    contactAddress = normalizeAddress(context.contactAddress);
+  } catch {
+    return { ok: false, reason: 'invalid_participant' };
+  }
+
+  const hasExpectedParticipants = (
+    transactionFrom === currentAddress && transactionTo === contactAddress
+  ) || (
+    transactionFrom === contactAddress && transactionTo === currentAddress
+  );
+  if (!hasExpectedParticipants) return { ok: false, reason: 'participant_mismatch' };
+  if (transaction.chatId !== context.expectedChatId) return { ok: false, reason: 'chat_mismatch' };
+  if (transaction.networkId !== context.networkId) return { ok: false, reason: 'network_mismatch' };
+  if (!Number.isFinite(Number(transaction.timestamp)) || Number(transaction.timestamp) <= 0) {
+    return { ok: false, reason: 'invalid_timestamp' };
+  }
+  if (transaction.type === 'message' && !hasRequiredPrivateMessageEnvelope(transaction, currentAddress)) {
+    return { ok: false, reason: 'unencrypted_message' };
+  }
+
+  const signatureOwner = transaction.sign?.owner;
+  try {
+    if (normalizeAddress(signatureOwner) !== transactionFrom) {
+      return { ok: false, reason: 'signature_owner_mismatch' };
+    }
+  } catch {
+    return { ok: false, reason: 'missing_signature' };
+  }
+  const compactSignature = getCompactSignature(transaction.sign?.sig);
+  if (!compactSignature) return { ok: false, reason: 'invalid_signature_format' };
+
+  if (context.publicKey == null) return { ok: false, reason: 'public_key_unavailable' };
+  if (!isPublicKeyForAddress(context.publicKey, transactionFrom, crypto.generateAddress)) {
+    return { ok: false, reason: 'public_key_mismatch' };
+  }
+
+  const txid = getUnsignedTransactionId(transaction, crypto);
+  const signedHash = hex2bin(crypto.ethHashMessage(txid));
+  const publicKey = hex2bin(context.publicKey.replace(/^0x/i, ''));
+  if (!crypto.verifyMessage(compactSignature, signedHash, publicKey)) {
+    return { ok: false, reason: 'invalid_signature' };
+  }
+
+  return { ok: true, txid };
+}
+
+/** A Liberdus payment QR and its target, independent of the selected Send form. */
+export class PaymentQR {
+  static prefix = 'liberdus://';
+
+  constructor(payment, target = null) {
+    this.payment = payment;
+    this.target = target;
+  }
+
+  static encode(payment) {
+    this.fromPayment(payment);
+    return this.prefix + bin2base64(utf82bin(JSON.stringify(payment)));
+  }
+
+  static decode(text, { allowProfile = false } = {}) {
+    const invalid = 'Invalid payment QR code format.';
+    if (typeof text !== 'string' || !text.startsWith(this.prefix)) throw new Error(invalid);
+    let payment;
+    try {
+      payment = JSON.parse(bin2utf8(base642bin(text.slice(this.prefix.length))));
+    } catch {
+      throw new Error(invalid);
+    }
+    return this.fromPayment(payment, allowProfile);
+  }
+
+  static fromPayment(payment, allowProfile = false) {
+    const invalid = 'Invalid payment QR code format.';
+    if (!payment || typeof payment.u !== 'string' || !payment.u.trim()) throw new Error(invalid);
+    if (allowProfile && Object.keys(payment).length === 1) return new PaymentQR(payment);
+
+    const {
+      t: type, n: networkSlug, netid, c: chainId,
+      i: assetId, s: symbol, an: assetName, nn: networkName,
+    } = payment;
+    if (typeof assetId !== 'string' || !assetId.trim() || typeof symbol !== 'string' || !symbol.trim()) {
+      throw new Error(invalid);
+    }
+
+    if (type === 'intents' && networkSlug === undefined && chainId === undefined) {
+      const label = typeof assetName === 'string' && assetName.trim() ? assetName : symbol;
+      return new PaymentQR(payment, {
+        networkId: 'intents', assetId, networkName: 'NEAR Intents', assetName: label, walletAction: 'NEAR Assets',
+      });
+    }
+    if (type !== undefined || typeof networkSlug !== 'string' || !networkSlug.trim()
+      || typeof networkName !== 'string' || !networkName.trim()) throw new Error(invalid);
+
+    if (networkSlug === 'liberdus') {
+      if (typeof netid !== 'string' || !netid.trim() || assetId !== 'liberdus' || chainId !== undefined) {
+        throw new Error(invalid);
+      }
+      return new PaymentQR(payment, {
+        networkId: `liberdus:${netid}`, assetId, networkName, assetName: symbol, walletAction: 'Send',
+      });
+    }
+    if (!Number.isSafeInteger(chainId) || chainId <= 0 || (assetId !== 'native' && !isValidEthereumAddress(assetId))) {
+      throw new Error(invalid);
+    }
+    return new PaymentQR(payment, {
+      networkId: `evm:${chainId}`, assetId: assetId.toLowerCase(), networkName, assetName: symbol, walletAction: 'EVM Assets',
+    });
+  }
+
+  matches(networkId, assetId) {
+    return !this.target || (this.target.networkId === networkId && this.target.assetId === assetId);
+  }
+
+  get switchMessage() {
+    const { assetName, networkName, walletAction } = this.target;
+    return `From Wallet, open ${walletAction}, then switch to ${assetName} on ${networkName}.`;
+  }
+}
+
+/** Decode an uploaded image without owning any caller's form state. */
+export class QRImageDecoder {
+  /** @param {File} file @returns {Promise<string>} */
+  static async decode(file) {
+    const url = URL.createObjectURL(file);
+    try {
+      const image = new Image();
+      image.src = url;
+      await image.decode();
+      const canvas = document.createElement('canvas');
+      canvas.width = image.naturalWidth;
+      canvas.height = image.naturalHeight;
+      const context = canvas.getContext('2d');
+      if (!context) throw new Error('Could not create image canvas');
+      context.drawImage(image, 0, 0);
+      const pixels = context.getImageData(0, 0, canvas.width, canvas.height);
+      const text = qr.decodeQR({ data: pixels.data, width: pixels.width, height: pixels.height });
+      if (!text) throw new Error('No QR code found in image');
+      return text;
+    } finally {
+      URL.revokeObjectURL(url);
+    }
   }
 }

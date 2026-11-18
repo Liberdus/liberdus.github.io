@@ -1,5 +1,7 @@
 #!/bin/bash
 
+set -euo pipefail
+
 # =============================================================================
 # UPDATE TEST CLIENT SCRIPT
 # =============================================================================
@@ -21,11 +23,8 @@
 #    (or: cd liberdus.github.io && ./update-test-client.sh)
 #
 # WHAT IT DOES:
-# - Copies all files from web-client-v2/* to liberdus.github.io/test/
-# - Excludes files listed in .gitignore
-# - Removes unwanted folders (.vscode, .cursorrles, data_structures_flow)
-# - Updates network configuration (copies network.js_test from source repo to network.js)
-# - Does NOT copy network.js_test file itself as a separate file
+# - Copies the app's runtime files and their licenses to liberdus.github.io/test/
+# - Installs the source's network.js_test as network.js
 # - Increments version in test/app.js (last character: a->b, z->a, etc.)
 # - Updates version.html with current timestamp
 #
@@ -53,25 +52,66 @@ if [ ! -d "$SOURCE_DIR" ]; then
     exit 1
 fi
 
-# Check if source directory is empty
-if [ -z "$(ls -A "$SOURCE_DIR")" ]; then
-    echo "Error: Source directory is empty: $SOURCE_DIR"
-    exit 1
-fi
-
 # Check if target directory exists
 if [ ! -d "$TARGET_DIR" ]; then
     echo "Error: Target directory not found: $TARGET_DIR"
     exit 1
 fi
 
+# List the files served by the app. The site maintains its own explorer and network redirects.
+runtime_files=(
+    LICENSE
+    index.html
+    index.html.txt
+    styles.css
+    app.js
+    lib.js
+    crypto.js
+    dao.js
+    evm-assets.js
+    near-assets.js
+    encryption.worker.js
+    notice.html
+    offline.html
+    bridge/index.html
+    meet/index.html
+    data/emoji-picker-data.js
+    external/blake2b.js
+    external/keccak256.js
+    external/noble-ciphers.js
+    external/noble-post-quantum.js
+    external/noble-secp256k1.js
+    external/qr.js
+    external/stringify-shardus.js
+    fonts/LICENSE.txt
+    fonts/inter-latin.woff2
+    fonts/inter-latin-ext.woff2
+    media/chatSound.mp3
+    media/paymentSound.mp3
+    media/ethereum_logo.png
+    media/near_logo.png
+    media/liberdus_logo_50.png
+    media/liberdus_logo_250.png
+    media/liberdus_logo_512.png
+)
+
+for file in "${runtime_files[@]}" network.js_test; do
+    if [ ! -f "$SOURCE_DIR/$file" ]; then
+        echo "Error: Required source file not found: $SOURCE_DIR/$file" >&2
+        exit 1
+    fi
+done
+
 # Extract the current version from test/app.js (BEFORE copying)
-current_version=$(grep -oP "(?<=^const version = ')[^']+" "$TARGET_DIR/app.js")
+if ! current_version=$(grep -oP "(?<=^const version = ')[^']+" "$TARGET_DIR/app.js"); then
+    echo "Error: Could not read the app version from $TARGET_DIR/app.js" >&2
+    exit 1
+fi
 
 # Increment the last character of the version
 last_char=${current_version: -1}
 if [[ $last_char =~ [a-yA-Y] ]]; then
-    next_char=$(echo $last_char | tr "A-Ya-y" "B-Zb-z")
+    next_char=$(echo "$last_char" | tr "A-Ya-y" "B-Zb-z")
 elif [[ $last_char == "z" ]]; then
     next_char="a"
 else
@@ -79,41 +119,15 @@ else
 fi
 new_version_char_increment="${current_version:0:-1}$next_char"
 
-echo "Copying web-client-v2 contents to test..."
+echo "Copying web-client-v2 runtime files to test..."
 echo "Source: $SOURCE_DIR"
 echo "Target: $TARGET_DIR"
 
-# Use rsync to copy files while excluding gitignore patterns and network.js_test
-rsync -av \
-  --exclude='node_modules' \
-  --exclude='.idea' \
-  --exclude='.next' \
-  --exclude='.DS_Store' \
-  --exclude='out' \
-  --exclude='network.js_test' \
-  --exclude='network.js_dev' \
-  --exclude='.vscode' \
-  --exclude='.cursorrles' \
-  --exclude='data_structures_flow' \
-  --exclude='explorer/index.html' \
-  --exclude='network/index.html' \
-  "$SOURCE_DIR/" "$TARGET_DIR/"
-
-echo "Removing unwanted folders and files..."
-rm -rf "$TARGET_DIR/data_structures_flow"
-rm -rf "$TARGET_DIR/.vscode"
-rm -rf "$TARGET_DIR/.cursorrles"
-rm -f "$TARGET_DIR/package.json"
-rm -f "$TARGET_DIR/package-lock.json"
+printf '%s\n' "${runtime_files[@]}" |
+    rsync -av --delay-updates --files-from=- "$SOURCE_DIR/" "$TARGET_DIR/"
 
 echo "Updating network configuration..."
-# Copy network.js_test from source repo to network.js in target
-if [ ! -f "$SOURCE_DIR/network.js_test" ]; then
-    echo "Warning: network.js_test not found in source directory"
-else
-    cp "$SOURCE_DIR/network.js_test" "$TARGET_DIR/network.js"
-    echo "Copied network.js_test from source to network.js"
-fi
+cp "$SOURCE_DIR/network.js_test" "$TARGET_DIR/network.js"
 
 # Update the version in the newly copied test/app.js with the incremented version
 sed -i "s/^const version = .*/const version = '$new_version_char_increment'/" "$TARGET_DIR/app.js"

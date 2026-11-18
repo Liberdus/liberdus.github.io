@@ -7,7 +7,7 @@ const network = {
   ],
   "gateways": [
     {
-      "web": "https://gate-test.liberdus.com",
+      "web": "https://gate.liberdus.com",
     },
   ],
   "bridges": [
@@ -24,15 +24,17 @@ const network = {
       "username": "bridgebsc",
     },
   ],
-  "faucetUrl": "https://faucet.liberdus.com/faucet",
+  "faucetUrl": "https://fac.liberdus.com/faucet",
   "faucetAddress": [
     "38dbd8eb569658b2a13cef9d159e54e302da8f17", // faucet for public accounts
     "7319d66f24a4ba1f323bd487cc22ae4b5c92b5ce", // faucet for private accounts
   ],
   "farmUrl": "https://liberdus.com/farm",
   "validatorUrl": "https://liberdus.com/validator",
+  "explorerUrl": "https://exp.liberdus.com/",
   "attachmentServerUrl": "https://att.liberdus.com:2083",
   "bridgeUrl": "./bridge",
+  "meetUrl": "https://meet.liberdus.com",
   // App version requirements for native apps (format: YYYY.MMDD.HHmm)
   "app_version": {
     "ios": "2025.1211.1145",
