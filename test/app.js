@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MMDD.HHmm like 2025.0125.1005
-const version = 'u'
+const version = 'v'
 const BOOT_SPLASH_HANDOFF_MS = 1000;
 const BOOT_SPLASH_FRAME_TIMEOUT_MS = 100;
 const BOOT_SPLASH_IMAGE_TIMEOUT_MS = 2000;
@@ -2375,6 +2375,13 @@ class WalletScreen {
     }
   }
 
+  showAssetBetaWarning(tipName, assetLabel) {
+    if (!myData?.account || checkFirstTimeTip(tipName)) return;
+
+    showToast(`${assetLabel} is experimental (beta). Use only small amounts.`, 0, 'warning');
+    setFirstTimeTipShown(tipName);
+  }
+
   close() {
     this.screen.classList.remove('active');
     this.stopBalanceUpdatedTimer();
@@ -3465,6 +3472,7 @@ class DaoModal {
         if (headlineEl) headlineEl.textContent = 'No claimable proposals found';
         if (sublineEl) sublineEl.textContent = 'Claimable proposals appear here when available';
       } else if (DAO_PROJECT_FILTER_KEYS.has(this.selectedFilterKey)) {
+        const label = getDaoStateLabel(this.selectedFilterKey);
         if (headlineEl) headlineEl.textContent = `No ${label.toLowerCase()} projects found`;
         if (sublineEl) sublineEl.textContent = 'Projects appear here after proposal acceptance';
       } else {
@@ -35998,6 +36006,7 @@ multichain.configure({
     saveState();
   },
   getAccount: () => myAccount,
+  showBetaWarning: () => walletScreen.showAssetBetaWarning('nearBetaWarning', 'NEAR Assets'),
 });
 
 chatPaymentPanel.configure({
@@ -36133,6 +36142,7 @@ function removeEvmPayment(record) {
 
 evmAssets.configure({
   getAccount: () => myAccount,
+  showBetaWarning: () => walletScreen.showAssetBetaWarning('evmBetaWarning', 'EVM Assets'),
   lookupUsername: getUsernameAddress,
   createContactAutocomplete: ({ input, list, onSelect }) => new ContactAutocomplete({
     input,
