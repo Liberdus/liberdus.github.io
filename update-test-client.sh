@@ -26,7 +26,7 @@ set -euo pipefail
 # - Copies the app's runtime files and their licenses to liberdus.github.io/test/
 # - Installs the source's network.js_test as network.js
 # - Increments version in test/app.js (last character: a->b, z->a, etc.)
-# - Updates version.html with current timestamp
+# - Updates version.html with current timestamp (YYYY.MMDD.HHmm, e.g. 2026.1027.1328)
 #
 # =============================================================================
 
@@ -132,8 +132,8 @@ cp "$SOURCE_DIR/network.js_test" "$TARGET_DIR/network.js"
 # Update the version in the newly copied test/app.js with the incremented version
 sed -i "s/^const version = .*/const version = '$new_version_char_increment'/" "$TARGET_DIR/app.js"
 
-# Get the current date and time for version.html
-current_date=$(date +"%Y.%m.%d.%H.%M")
+# Get the current date and time for version.html (YYYY.MMDD.HHmm)
+current_date=$(date +"%Y.%m%d.%H%M")
 
 # Update the version in test/version.html
 echo "$current_date" > "$TARGET_DIR/version.html"
