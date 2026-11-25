@@ -19,8 +19,13 @@ set -euo pipefail
 # 3. The script must have execute permissions: chmod +x update-test-client.sh
 #
 # USAGE:
-# 1. Run the script from anywhere: ./update-test-client.sh
-#    (or: cd liberdus.github.io && ./update-test-client.sh)
+#   ./update-test-client.sh
+#   ./update-test-client.sh <branch>
+#
+# With no argument, copies the sibling web-client-v2 checkout as it sits.
+# With a branch, copies the existing worktree already checked out on that
+# branch. It does not fetch, checkout, or otherwise change any worktree.
+# The branch must already be checked out somewhere (the main repo counts).
 #
 # WHAT IT DOES:
 # - Copies the app's runtime files and their licenses to liberdus.github.io/test/
@@ -37,19 +42,71 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_DIR="$SCRIPT_DIR"
 
 # Source directory is in the sibling web-client-v2 directory
-SOURCE_DIR="$(dirname "$REPO_DIR")/web-client-v2"
+SOURCE_REPO="$(dirname "$REPO_DIR")/web-client-v2"
+SOURCE_DIR="$SOURCE_REPO"
 
 # Target directory is the test folder in this repo
 TARGET_DIR="$REPO_DIR/test"
+
+if [[ $# -gt 1 ]]; then
+    echo "Usage: $(basename "$0") [branch]" >&2
+    exit 1
+fi
+REQUESTED_BRANCH="${1:-}"
+
+# Find the worktree already checked out on REQUESTED_BRANCH.
+# Prints the worktree path. Does not create or switch checkouts.
+find_branch_worktree() {
+    local repo="$1"
+    local branch="$2"
+    local target_ref="refs/heads/${branch}"
+    local current="" line found=""
+
+    if ! git -C "$repo" rev-parse --git-dir >/dev/null 2>&1; then
+        echo "Error: $repo is not a git repository" >&2
+        return 1
+    fi
+
+    while IFS= read -r line || [[ -n "$line" ]]; do
+        case "$line" in
+            worktree\ *)
+                current="${line#worktree }"
+                ;;
+            "branch ${target_ref}")
+                found="$current"
+                ;;
+            "")
+                current=""
+                ;;
+        esac
+    done < <(git -C "$repo" worktree list --porcelain)
+
+    if [[ -z "$found" ]]; then
+        echo "Error: No worktree is checked out on ${branch}." >&2
+        echo "Check that branch out in a worktree, then re-run this script." >&2
+        return 1
+    fi
+
+    if [[ ! -d "$found" ]]; then
+        echo "Error: Worktree for ${branch} is missing: ${found}" >&2
+        return 1
+    fi
+
+    printf '%s\n' "$found"
+}
 
 # Change to the repo directory
 cd "$REPO_DIR" || exit 1
 
 # Check if source directory exists
-if [ ! -d "$SOURCE_DIR" ]; then
-    echo "Error: Source directory not found: $SOURCE_DIR"
+if [ ! -d "$SOURCE_REPO" ]; then
+    echo "Error: Source directory not found: $SOURCE_REPO"
     echo "Please ensure web-client-v2 is in the same parent directory as liberdus.github.io"
     exit 1
+fi
+
+if [[ -n "$REQUESTED_BRANCH" ]]; then
+    SOURCE_DIR="$(find_branch_worktree "$SOURCE_REPO" "$REQUESTED_BRANCH")"
 fi
 
 # Check if target directory exists
@@ -121,6 +178,12 @@ new_version_char_increment="${current_version:0:-1}$next_char"
 
 echo "Copying web-client-v2 runtime files to test..."
 echo "Source: $SOURCE_DIR"
+if git -C "$SOURCE_DIR" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    echo "Source branch: $(git -C "$SOURCE_DIR" rev-parse --abbrev-ref HEAD) @ $(git -C "$SOURCE_DIR" rev-parse --short HEAD)"
+    if [[ -n "$(git -C "$SOURCE_DIR" status --porcelain)" ]]; then
+        echo "Warning: source worktree has uncommitted changes; those files will be copied."
+    fi
+fi
 echo "Target: $TARGET_DIR"
 
 printf '%s\n' "${runtime_files[@]}" |
