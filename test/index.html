@@ -1322,10 +1322,10 @@
                   <button type="button" id="clearGoogleDriveFile" class="btn btn--text">Clear</button>
                 </div>
               </div>
-              <div class="form-group">
+              <div class="form-group" id="restoreFilePasswordGroup" hidden>
                 <label for="importPassword">
                   File Password
-                  <span id="importPasswordRequired" style="color: var(--danger-color); display: none;">required</span>
+                  <span style="color: var(--danger-color);">required</span>
                 </label>
                 <input
                   type="password"
@@ -1352,7 +1352,7 @@
                 />
               </div>
               <div class="form-actions">
-                <button type="submit" id="restoreSubmitButton" class="btn btn--primary btn--pill btn--full" disabled>Load Account</button>
+                <button type="submit" id="restoreSubmitButton" class="btn btn--primary btn--pill btn--full" disabled>Restore</button>
               </div>
               <div class="form-group">
                 <label>
@@ -1385,6 +1385,17 @@
         </div>
         <a class="last-item" href="#"> </a>
       </div>
+
+      <dialog id="restoreReviewDialog" aria-labelledby="restoreReviewTitle">
+        <h2 id="restoreReviewTitle">Review Google Drive restore</h2>
+        <p id="restoreReviewSummary"></p>
+        <p>These records will be skipped.</p>
+        <ul id="restoreSkippedRecords"></ul>
+        <form method="dialog" class="form-actions">
+          <button value="cancel" class="btn btn--secondary btn--pill" autofocus>Cancel</button>
+          <button value="restore" class="btn btn--primary btn--pill" id="confirmPartialRestore"></button>
+        </form>
+      </dialog>
 
       <!-- Google Drive File Picker Modal -->
       <div class="modal fixed-header" id="googleDrivePickerModal">
