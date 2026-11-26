@@ -7,7 +7,7 @@ const network = {
   ],
   "gateways": [
     {
-      "web": "https://gate.liberdus.com",
+      "web": "https://gate-test.liberdus.com",
     },
   ],
   "bridges": [

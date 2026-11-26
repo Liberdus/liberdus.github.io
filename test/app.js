@@ -1,6 +1,6 @@
 // Check if there is a newer version and load that using a new random url to avoid cache hits
 //   Versions should be YYYY.MMDD.HHmm like 2025.0125.1005
-const version = 'x'
+const version = 'y'
 const BOOT_SPLASH_HANDOFF_MS = 1000;
 const BOOT_SPLASH_FRAME_TIMEOUT_MS = 100;
 const BOOT_SPLASH_IMAGE_TIMEOUT_MS = 2000;
@@ -19252,7 +19252,7 @@ class RestoreAccountModal {
       const identity = this.parseBackupAccountKey(key);
       if (!identity) continue;
       // All-account exports also include the per-network client version.
-      if (identity.username === 'version' && typeof value === 'string' && /^[0-9.]+$/.test(value)) continue;
+      if (identity.username === 'version' && typeof value === 'string' && /^[0-9.]+$/.test(value.trim())) continue;
       const entry = { key, ...identity };
       if (backupData.lock) {
         if (!RestoreAccountModal.isBackupCiphertext(value)) throw RestoreAccountModal.invalidBackup();
